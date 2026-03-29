@@ -137,6 +137,8 @@ int main(int argc, char **argv)
 	    std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
 	env = std::make_shared<mujoco_ros::MujocoEnv>(executor, admin_hash);
 	executor->add_node(env);
+	should_exit = false;
+	std::thread executor_thread = std::thread(std::bind(&async_spin, std::ref(executor)));
 #endif
 
 	env->StartPhysicsLoop();
@@ -150,16 +152,8 @@ int main(int argc, char **argv)
 #if MJR_ROS_VERSION == ROS_1
 		viewer->RenderLoop();
 #else // MJR_ROS_VERSION == ROS_2
-      // TODO: This is a workaround for running a blocking viewer and a blocking executor in ROS 2.
-      // Running the render loop in a separate thread does not work. The otherway around does, but
-      // I'm not sure this is ideal.
-		std::thread executor_thread = std::thread(std::bind(&async_spin, std::ref(executor)));
 		viewer->RenderLoop();
 		MJR_INFO("Viewer terminated");
-		MJR_DEBUG("Joining executor thread");
-		should_exit = true;
-		executor_thread.join();
-		MJR_DEBUG("Joined executor thread");
 #endif
 	}
 #else
@@ -167,12 +161,14 @@ int main(int argc, char **argv)
 #endif
 	MJR_INFO_COND(env->settings_.headless, "Running headless");
 
-#if MJR_ROS_VERSION == ROS_2 && RENDER_BACKEND != GLFW_BACKEND
-	executor->spin();
-#endif
-
 	env->WaitForPhysicsJoin();
 	env->WaitForEventsJoin();
+#if MJR_ROS_VERSION == ROS_2
+	MJR_DEBUG("Joining executor thread");
+	should_exit = true;
+	executor_thread.join();
+	MJR_DEBUG("Joined executor thread");
+#endif
 	env.reset();
 
 	MJR_INFO("MuJoCo ROS Simulation Server node is terminating");

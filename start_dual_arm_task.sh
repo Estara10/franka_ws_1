@@ -137,6 +137,11 @@ fi
 echo ""
 echo "✅ 最终设定的运行配置: ===[ 大模式: ${TASK_MAIN_MODE} | 核心策略: ${CONTROL_MODE} ]==="
 echo ""
+
+# 旋转阶段开关（默认启用）。可通过环境变量覆盖：ENABLE_ROTATE=false ./start_dual_arm_task.sh
+ENABLE_ROTATE="${ENABLE_ROTATE:-true}"
+echo "旋转阶段开关: ${ENABLE_ROTATE}"
+
 echo "日志目录: $LOG_DIR"
 echo "诊断日志: $DIAG_LOG"
 echo ""
@@ -250,10 +255,10 @@ echo "进程 PID: $MOVEIT_PID"
 echo $MOVEIT_PID > "$PID_FILE"
 
 # 等待 MoveIt2 和 MuJoCo 完全启动
-echo "等待 MoveIt2 和 MuJoCo 完全启动 (45秒)..."
-for i in {1..45}; do
+echo "等待 MoveIt2 和 MuJoCo 完全启动 (10秒)..."
+for i in {1..10}; do
     sleep 1
-    printf "\r  进度: %d/45 秒" $i
+    printf "\r  进度: %d/10 秒" $i
 done
 echo ""
 
@@ -279,21 +284,40 @@ echo "" >> "$DIAG_LOG"
 echo "=== 运行时验证 ===" >> "$DIAG_LOG"
 
 # 等待 move_group 节点完全启动（最多等待10秒）
+MOVE_GROUP_READY=0
 for attempt in {1..10}; do
-    if ros2 node list 2>/dev/null | grep -q "/move_group"; then
+    if timeout 2s ros2 node list 2>/dev/null | grep -q "/move_group"; then
+        MOVE_GROUP_READY=1
         break
     fi
     sleep 1
 done
 
-SRDF_PARAM=$(ros2 param get /move_group robot_description_semantic 2>/dev/null | head -1)
-if echo "$SRDF_PARAM" | grep -q "String value"; then
-    RUNTIME_RULES=$(ros2 param get /move_group robot_description_semantic 2>/dev/null | grep -c "disable_collisions" || echo "0")
-    echo "  ✓ robot_description_semantic 已加载 ($RUNTIME_RULES 条规则)"
-    echo "robot_description_semantic: 已加载 ($RUNTIME_RULES 条规则)" >> "$DIAG_LOG"
+if [ "$MOVE_GROUP_READY" -eq 0 ]; then
+    echo "  ⚠ move_group 节点未在10秒内就绪，跳过参数验证（不阻塞启动）"
+    echo "robot_description_semantic: 跳过验证（move_group未就绪）" >> "$DIAG_LOG"
 else
-    echo "  ⚠ 无法验证 robot_description_semantic 参数（可能 move_group 尚未完全启动）"
-    echo "robot_description_semantic: 验证失败" >> "$DIAG_LOG"
+    SRDF_OK=0
+    SRDF_PARAM=""
+
+    # 参数服务可能刚启动，做短超时重试，避免卡住脚本
+    for attempt in {1..5}; do
+        SRDF_PARAM=$(timeout 2s ros2 param get /move_group robot_description_semantic 2>/dev/null | head -1 || true)
+        if echo "$SRDF_PARAM" | grep -q "String value"; then
+            SRDF_OK=1
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$SRDF_OK" -eq 1 ]; then
+        RUNTIME_RULES=$(timeout 2s ros2 param get /move_group robot_description_semantic 2>/dev/null | grep -c "disable_collisions" || echo "0")
+        echo "  ✓ robot_description_semantic 已加载 ($RUNTIME_RULES 条规则)"
+        echo "robot_description_semantic: 已加载 ($RUNTIME_RULES 条规则)" >> "$DIAG_LOG"
+    else
+        echo "  ⚠ 无法验证 robot_description_semantic 参数（参数服务未就绪或响应超时）"
+        echo "robot_description_semantic: 验证失败（服务超时）" >> "$DIAG_LOG"
+    fi
 fi
 
 echo ""
@@ -308,7 +332,12 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     TASK_LOG="${LOG_DIR}/dual_arm_task_${TIMESTAMP}.log"
     echo "日志: $TASK_LOG"
 
-    ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py control_mode:=${CONTROL_MODE} > "$TASK_LOG" 2>&1 &
+    ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
+        control_mode:=${CONTROL_MODE} \
+        approach_height:=0.28 \
+        grasp_height:=0.13 \
+        lift_height:=0.40 \
+        enable_rotate:=${ENABLE_ROTATE} > "$TASK_LOG" 2>&1 &
     TASK_PID=$!
     echo "进程 PID: $TASK_PID"
     echo $TASK_PID >> "$PID_FILE"

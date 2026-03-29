@@ -2,6 +2,19 @@ cmake_minimum_required(VERSION 3.13)
 
 project(mujoco_ros_control)
 
+if (DEFINED ENV{ROS_VERSION})
+  set(ROS_VERSION $ENV{ROS_VERSION})
+else()
+  message(FATAL_ERROR "ROS_VERSION is not defined")
+endif()
+
+if (NOT ROS_VERSION EQUAL "1")
+  find_package(ament_cmake REQUIRED)
+  message(STATUS "${PROJECT_NAME} is ROS 1 only and will not build on ROS ${ROS_VERSION}.")
+  ament_package()
+  return()
+endif()
+
 set( CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined" )
 
 set(CMAKE_CXX_STANDARD 17)

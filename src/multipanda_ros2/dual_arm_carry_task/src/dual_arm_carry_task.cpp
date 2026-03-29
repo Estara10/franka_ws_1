@@ -68,9 +68,10 @@ public:
         this->declare_parameter<std::string>("left_arm_group", "mj_left_arm");
         this->declare_parameter<std::string>("right_arm_group", "mj_right_arm");
         this->declare_parameter<std::string>("dual_arm_group", "dual_panda");
-        this->declare_parameter<double>("approach_height", 0.20);
-        this->declare_parameter<double>("grasp_height", 0.08);
+        this->declare_parameter<double>("approach_height", 0.28);
+        this->declare_parameter<double>("grasp_height", 0.13);
         this->declare_parameter<double>("lift_height", 0.40);  // 增加到40cm，便于后续运动规划
+        this->declare_parameter<bool>("enable_rotate", true);   // true=执行ROTATE，false=直接放置不旋转
         this->declare_parameter<double>("gripper_close_position", 0.010);  // 物体宽0.04m，每指目标0.01m vs 实际0.02m → PD误差0.01m产生强力夹持，且不会超过关节下限
         
         left_arm_group_ = this->get_parameter("left_arm_group").as_string();
@@ -80,6 +81,7 @@ public:
         approach_height_ = this->get_parameter("approach_height").as_double();
         grasp_height_ = this->get_parameter("grasp_height").as_double();
         lift_height_ = this->get_parameter("lift_height").as_double();
+        enable_rotate_ = this->get_parameter("enable_rotate").as_bool();
         gripper_close_pos_ = this->get_parameter("gripper_close_position").as_double();
         
         // 创建MuJoCo weld约束控制发布器
@@ -91,6 +93,7 @@ public:
         RCLCPP_INFO(this->get_logger(), "  左臂组: %s", left_arm_group_.c_str());
         RCLCPP_INFO(this->get_logger(), "  右臂组: %s", right_arm_group_.c_str());
         RCLCPP_INFO(this->get_logger(), "  双臂组: %s", dual_arm_group_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  旋转阶段: %s", enable_rotate_ ? "启用" : "禁用（直接放置）");
     }
     
     void initialize()
@@ -272,6 +275,8 @@ private:
             }
         }
         
+        
+
         // 检查自碰撞
         collision_detection::CollisionRequest collision_request;
         collision_request.contacts = true;
@@ -800,18 +805,19 @@ private:
         // 物体位置 (从objects.xml: pos="0.5 0.0 0.02", 物体底部接触地面)
         double obj_x = 0.50;
         double obj_y = 0.0;
-        double obj_height = 0.04;  // 物体总高度 4cm (Z方向)
         
         // 杆件参数 (长轴在Y方向，横向放置)
         double rod_half_length = 0.20;  // Y方向半长 20cm
         
-        // Franka机械臂参数
-        double gripper_length = 0.10;    // 夹爪指尖到法兰的长度约 10cm
-        double safety_margin = 0.08;     // 安全余量 8cm（减小以避免自碰撞）
-        
-        // ========== Z轴高度计算 ==========
-        double grasp_z = obj_height / 2.0;  // 抓取中心在物体中间 Z=0.02m
-        double approach_z = grasp_z + gripper_length + safety_margin;  // 接近高度 Z≈0.20m（降低高度）
+        // ========== Z轴高度参数（来自 launch 参数） ==========
+        double grasp_z = grasp_height_;
+        double approach_z = approach_height_;
+
+        if (approach_z <= grasp_z) {
+            RCLCPP_WARN(this->get_logger(),
+                        "  ! 参数关系异常: approach_height(%.3f) <= grasp_height(%.3f)，可能导致接近/下降轨迹不合理",
+                        approach_z, grasp_z);
+        }
         
         // ========== Y方向偏移 ==========
         double approach_offset_y = 0.10;  // 在杆件两端外侧10cm处接近
@@ -922,8 +928,8 @@ private:
         
         // ========== 物体与机械臂参数 ==========
         double obj_y = 0.0;
-        double approach_z = 0.28;              // 当前APPROACH高度
-        double grasp_z = 0.13;                 // 抓取高度（留出手指空间，提高以避开link0碰撞）
+        double approach_z = approach_height_;  // 当前APPROACH高度（由参数控制）
+        double grasp_z = grasp_height_;        // 抓取高度（由参数控制）
         
         try {
             // ========== Step A: 打开夹爪（高空） ==========
@@ -1397,265 +1403,438 @@ private:
 
         try {
             // 提升速度执行，weld约束保证铝棒稳固
-            dual_arm_->setMaxVelocityScalingFactor(0.5);
-            dual_arm_->setMaxAccelerationScalingFactor(0.5);
-            RCLCPP_INFO(this->get_logger(), "  [参数] 速度/加速度缩放: 50%%（weld约束保护）");
+            dual_arm_->setMaxVelocityScalingFactor(0.4);
+            dual_arm_->setMaxAccelerationScalingFactor(0.4);
+            RCLCPP_INFO(this->get_logger(), "  [参数] 速度/加速度缩放: 40%%（降低运输阶段动态冲击）");
 
-            // 关键：强制同步物理真实位置（防止LIFT后的残余偏移）
-            dual_arm_->setStartStateToCurrentState();
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));  // 等待状态更新
-            
-            // 1. 获取当前末端位姿
-            auto left_current = left_arm_->getCurrentPose();
-            auto right_current = right_arm_->getCurrentPose();
+            // 发生IK/规划失败时，优先尝试在“同一末端目标”下调整冗余关节（肘/腕）来绕开碰撞与奇异构型。
+            auto attempt_joint_redundancy_avoidance = [&](const geometry_msgs::msg::Pose& left_target,
+                                                          const geometry_msgs::msg::Pose& right_target,
+                                                          const std::string& stage_name) -> bool {
+                auto robot_model = dual_arm_->getRobotModel();
+                auto left_jmg = robot_model->getJointModelGroup(left_arm_group_);
+                auto right_jmg = robot_model->getJointModelGroup(right_arm_group_);
 
-            RCLCPP_INFO(this->get_logger(), "  当前位置: Left(%.3f, %.3f, %.3f), Right(%.3f, %.3f, %.3f)",
-                left_current.pose.position.x, left_current.pose.position.y, left_current.pose.position.z,
-                right_current.pose.position.x, right_current.pose.position.y, right_current.pose.position.z);
+                // [j4_delta, j6_delta, j7_delta]，左右臂采取相反符号，尽量把肘/腕从碰撞区“拧开”。
+                const std::vector<std::vector<double>> bias_sets = {
+                    {0.00, 0.00, 0.45},
+                    {0.20, 0.00, 0.35},
+                    {-0.20, 0.00, -0.35},
+                    {0.25, 0.15, 0.30},
+                    {-0.25, -0.15, -0.30},
+                    {0.00, 0.25, 0.55},
+                    {0.00, -0.25, -0.55}
+                };
 
-            // 2. 目标：保持X/Z不变，Y同时增加0.1m
-            // 注意：偏移量不宜过大！ROTATE后两臂会汇聚到杆件中心Y附近，
-            // 偏移越大→右臂(base Y=-0.26)越难够到→构型扭曲→碰撞/掉落
-            // 0.10m是安全范围，旋转后右臂Y偏移仅0.36m（远小于之前的0.66m）
-            geometry_msgs::msg::Pose left_target = left_current.pose;
-            geometry_msgs::msg::Pose right_target = right_current.pose;
-            left_target.position.y += 0.10;
-            right_target.position.y += 0.10;
+                for (size_t i = 0; i < bias_sets.size(); ++i) {
+                    dual_arm_->setStartStateToCurrentState();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-            RCLCPP_INFO(this->get_logger(), "  目标位置: Left(%.3f, %.3f, %.3f), Right(%.3f, %.3f, %.3f)",
-                left_target.position.x, left_target.position.y, left_target.position.z,
-                right_target.position.x, right_target.position.y, right_target.position.z);
+                    auto candidate_state = std::make_shared<moveit::core::RobotState>(robot_model);
+                    *candidate_state = *dual_arm_->getCurrentState();
+                    candidate_state->update();
 
-            // ========================================================
-            // 核心策略：客户端IK + setJointValueTarget
-            // 与 LIFT 阶段使用完全相同的成功模式
-            // ========================================================
-            RCLCPP_INFO(this->get_logger(), "  [策略] 客户端IK求解 + 关节空间OMPL规划...");
+                    std::vector<double> left_seed_vals, right_seed_vals;
+                    candidate_state->copyJointGroupPositions(left_jmg, left_seed_vals);
+                    candidate_state->copyJointGroupPositions(right_jmg, right_seed_vals);
 
-            auto robot_model = dual_arm_->getRobotModel();
-            auto robot_state = std::make_shared<moveit::core::RobotState>(robot_model);
-            *robot_state = *dual_arm_->getCurrentState();
-            robot_state->update();  // 确保 transforms 有效
-
-            auto left_jmg = robot_model->getJointModelGroup(left_arm_group_);
-            auto right_jmg = robot_model->getJointModelGroup(right_arm_group_);
-
-            // 客户端IK求解（在本进程中完成，不走move_group服务端）
-            bool left_ik_ok = robot_state->setFromIK(left_jmg, left_target, 0.1);
-            if (!left_ik_ok) {
-                RCLCPP_WARN(this->get_logger(), "  ! 左臂IK首次求解失败，增加超时重试...");
-                left_ik_ok = robot_state->setFromIK(left_jmg, left_target, 5.0);
-            }
-
-            bool right_ik_ok = robot_state->setFromIK(right_jmg, right_target, 0.1);
-            if (!right_ik_ok) {
-                RCLCPP_WARN(this->get_logger(), "  ! 右臂IK首次求解失败，增加超时重试...");
-                right_ik_ok = robot_state->setFromIK(right_jmg, right_target, 5.0);
-            }
-
-            if (!left_ik_ok || !right_ik_ok) {
-                RCLCPP_ERROR(this->get_logger(), "  ✗ IK求解失败: 左臂=%s, 右臂=%s",
-                    left_ik_ok ? "成功" : "失败", right_ik_ok ? "成功" : "失败");
-                
-                // 如果0.4m一步到位IK失败，尝试分段规划
-                RCLCPP_WARN(this->get_logger(), "  ! 尝试分段规划（每段0.05m）...");
-                
-                bool segment_success = true;
-                for (int seg = 0; seg < 2 && segment_success; ++seg) {
-                    auto seg_left_current = left_arm_->getCurrentPose();
-                    auto seg_right_current = right_arm_->getCurrentPose();
-                    
-                    geometry_msgs::msg::Pose seg_left_target = seg_left_current.pose;
-                    geometry_msgs::msg::Pose seg_right_target = seg_right_current.pose;
-                    seg_left_target.position.y += 0.05;
-                    seg_right_target.position.y += 0.05;
-                    
-                    auto seg_state = std::make_shared<moveit::core::RobotState>(robot_model);
-                    *seg_state = *dual_arm_->getCurrentState();
-                    seg_state->update();
-                    
-                    bool seg_left_ik = seg_state->setFromIK(left_jmg, seg_left_target, 5.0);
-                    bool seg_right_ik = seg_state->setFromIK(right_jmg, seg_right_target, 5.0);
-                    
-                    if (!seg_left_ik || !seg_right_ik) {
-                        RCLCPP_ERROR(this->get_logger(), "  ✗ 分段 %d/2 IK求解失败", seg + 1);
-                        segment_success = false;
-                        break;
+                    if (left_seed_vals.size() > 3 && right_seed_vals.size() > 3) {
+                        left_seed_vals[3] += bias_sets[i][0];
+                        right_seed_vals[3] -= bias_sets[i][0];
                     }
-                    
-                    dual_arm_->setJointValueTarget(*seg_state);
-                    moveit::planning_interface::MoveGroupInterface::Plan seg_plan;
-                    auto seg_plan_result = dual_arm_->plan(seg_plan);
-                    
-                    if (seg_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_ERROR(this->get_logger(), "  ✗ 分段 %d/2 规划失败", seg + 1);
-                        segment_success = false;
-                        break;
+                    if (left_seed_vals.size() > 5 && right_seed_vals.size() > 5) {
+                        left_seed_vals[5] += bias_sets[i][1];
+                        right_seed_vals[5] -= bias_sets[i][1];
                     }
-                    
-                    auto seg_exec_result = dual_arm_->execute(seg_plan);
-                    if (seg_exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_ERROR(this->get_logger(), "  ✗ 分段 %d/2 执行失败", seg + 1);
-                        segment_success = false;
-                        break;
+                    if (left_seed_vals.size() > 6 && right_seed_vals.size() > 6) {
+                        left_seed_vals[6] += bias_sets[i][2];
+                        right_seed_vals[6] -= bias_sets[i][2];
                     }
-                    
-                    RCLCPP_INFO(this->get_logger(), "  ✓ 分段 %d/2 完成 (Y += 0.05m)", seg + 1);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+                    candidate_state->setJointGroupPositions(left_jmg, left_seed_vals);
+                    candidate_state->setJointGroupPositions(right_jmg, right_seed_vals);
+                    candidate_state->enforceBounds();
+
+                    bool left_ik = candidate_state->setFromIK(left_jmg, left_target, 0.3);
+                    if (!left_ik) {
+                        left_ik = candidate_state->setFromIK(left_jmg, left_target, 1.0);
+                    }
+                    bool right_ik = candidate_state->setFromIK(right_jmg, right_target, 0.3);
+                    if (!right_ik) {
+                        right_ik = candidate_state->setFromIK(right_jmg, right_target, 1.0);
+                    }
+
+                    if (!left_ik || !right_ik) {
+                        RCLCPP_WARN(this->get_logger(),
+                            "  [%s] 关节避碰候选%zu IK失败 (左=%s, 右=%s)",
+                            stage_name.c_str(), i + 1, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                        continue;
+                    }
+
+                    candidate_state->update();
+                    dual_arm_->setJointValueTarget(*candidate_state);
+
+                    moveit::planning_interface::MoveGroupInterface::Plan candidate_plan;
+                    auto candidate_plan_result = dual_arm_->plan(candidate_plan);
+                    if (candidate_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
+                        RCLCPP_WARN(this->get_logger(),
+                            "  [%s] 关节避碰候选%zu 规划失败", stage_name.c_str(), i + 1);
+                        continue;
+                    }
+
+                    auto candidate_exec_result = dual_arm_->execute(candidate_plan);
+                    if (candidate_exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
+                        RCLCPP_WARN(this->get_logger(),
+                            "  [%s] 关节避碰候选%zu 执行失败", stage_name.c_str(), i + 1);
+                        continue;
+                    }
+
+                    RCLCPP_INFO(this->get_logger(),
+                        "  [%s] 关节避碰候选%zu 成功（通过肘/腕重构绕开冲突）",
+                        stage_name.c_str(), i + 1);
+                    return true;
                 }
-                
-                if (!segment_success) {
-                    RCLCPP_ERROR(this->get_logger(), "  ✗ TRANSPORT 分段规划也失败");
-                    current_state_ = TaskState::ERROR;
-                    return;
-                }
-                
-                RCLCPP_INFO(this->get_logger(), "  ✓ TRANSPORT 分段执行完成");
-                
-            } else {
-                // IK求解成功，使用 setJointValueTarget 一步到位
-                RCLCPP_INFO(this->get_logger(), "  ✓ 双臂IK求解成功");
-                
-                // 打印IK解的关节角验证
-                std::vector<double> left_joints, right_joints;
-                robot_state->copyJointGroupPositions(left_jmg, left_joints);
-                robot_state->copyJointGroupPositions(right_jmg, right_joints);
-                RCLCPP_INFO(this->get_logger(), "  左臂IK解: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                    left_joints[0], left_joints[1], left_joints[2], left_joints[3],
-                    left_joints[4], left_joints[5], left_joints[6]);
-                RCLCPP_INFO(this->get_logger(), "  右臂IK解: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                    right_joints[0], right_joints[1], right_joints[2], right_joints[3],
-                    right_joints[4], right_joints[5], right_joints[6]);
-                
-                // [修复] 执行前再次同步当前状态 + 重新规划
-                // 原因：plan()期间MuJoCo物理状态可能漂移，导致轨迹起点偏差超过allowed_start_tolerance
-                // 策略：同步→规划→立即执行，最小化状态漂移窗口
-                RCLCPP_INFO(this->get_logger(), "  [修复] 执行前重新同步状态并规划...");
+
+                return false;
+            };
+
+            auto perform_transport_shift = [&](double dx, double dy, const std::string& stage_name) -> bool {
+                // 关键：强制同步物理真实位置（防止前一步执行后的残余偏移）
                 dual_arm_->setStartStateToCurrentState();
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));  // 短暂等待状态刷新
-                
-                // 使用 setJointValueTarget → 创建 JointConstraint → 不触发 IKConstraintSampler
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+                auto left_current = left_arm_->getCurrentPose();
+                auto right_current = right_arm_->getCurrentPose();
+
+                geometry_msgs::msg::Pose left_target = left_current.pose;
+                geometry_msgs::msg::Pose right_target = right_current.pose;
+                left_target.position.x += dx;
+                left_target.position.y += dy;
+                right_target.position.x += dx;
+                right_target.position.y += dy;
+
+                RCLCPP_INFO(this->get_logger(), "  [%s] 当前: Left(%.3f, %.3f, %.3f), Right(%.3f, %.3f, %.3f)",
+                    stage_name.c_str(),
+                    left_current.pose.position.x, left_current.pose.position.y, left_current.pose.position.z,
+                    right_current.pose.position.x, right_current.pose.position.y, right_current.pose.position.z);
+                RCLCPP_INFO(this->get_logger(), "  [%s] 目标: Left(%.3f, %.3f, %.3f), Right(%.3f, %.3f, %.3f)",
+                    stage_name.c_str(),
+                    left_target.position.x, left_target.position.y, left_target.position.z,
+                    right_target.position.x, right_target.position.y, right_target.position.z);
+
+                auto robot_model = dual_arm_->getRobotModel();
+                auto left_jmg = robot_model->getJointModelGroup(left_arm_group_);
+                auto right_jmg = robot_model->getJointModelGroup(right_arm_group_);
+
+                auto robot_state = std::make_shared<moveit::core::RobotState>(robot_model);
+                *robot_state = *dual_arm_->getCurrentState();
+                robot_state->update();
+
+                bool left_ik_ok = robot_state->setFromIK(left_jmg, left_target, 0.1);
+                if (!left_ik_ok) {
+                    left_ik_ok = robot_state->setFromIK(left_jmg, left_target, 5.0);
+                }
+
+                bool right_ik_ok = robot_state->setFromIK(right_jmg, right_target, 0.1);
+                if (!right_ik_ok) {
+                    right_ik_ok = robot_state->setFromIK(right_jmg, right_target, 5.0);
+                }
+
+                // IK失败时采用分段小步回退
+                if (!left_ik_ok || !right_ik_ok) {
+                    RCLCPP_WARN(this->get_logger(), "  [%s] IK失败，先尝试关节避碰重构", stage_name.c_str());
+                    if (attempt_joint_redundancy_avoidance(left_target, right_target, stage_name)) {
+                        return true;
+                    }
+
+                    RCLCPP_WARN(this->get_logger(), "  [%s] IK失败，切换分段小步执行", stage_name.c_str());
+
+                    double max_delta = std::max(std::abs(dx), std::abs(dy));
+                    int segment_count = std::max(2, static_cast<int>(std::ceil(max_delta / 0.05)));
+                    double seg_dx = dx / segment_count;
+                    double seg_dy = dy / segment_count;
+
+                    for (int seg = 0; seg < segment_count; ++seg) {
+                        dual_arm_->setStartStateToCurrentState();
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+                        auto seg_left_current = left_arm_->getCurrentPose();
+                        auto seg_right_current = right_arm_->getCurrentPose();
+
+                        geometry_msgs::msg::Pose seg_left_target = seg_left_current.pose;
+                        geometry_msgs::msg::Pose seg_right_target = seg_right_current.pose;
+                        seg_left_target.position.x += seg_dx;
+                        seg_left_target.position.y += seg_dy;
+                        seg_right_target.position.x += seg_dx;
+                        seg_right_target.position.y += seg_dy;
+
+                        auto seg_state = std::make_shared<moveit::core::RobotState>(robot_model);
+                        *seg_state = *dual_arm_->getCurrentState();
+                        seg_state->update();
+
+                        bool seg_left_ik = seg_state->setFromIK(left_jmg, seg_left_target, 5.0);
+                        bool seg_right_ik = seg_state->setFromIK(right_jmg, seg_right_target, 5.0);
+
+                        if (!seg_left_ik || !seg_right_ik) {
+                            RCLCPP_ERROR(this->get_logger(), "  [%s] 分段 %d/%d IK失败", stage_name.c_str(), seg + 1, segment_count);
+                            return false;
+                        }
+
+                        dual_arm_->setJointValueTarget(*seg_state);
+                        moveit::planning_interface::MoveGroupInterface::Plan seg_plan;
+                        auto seg_plan_result = dual_arm_->plan(seg_plan);
+                        if (seg_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
+                            RCLCPP_ERROR(this->get_logger(), "  [%s] 分段 %d/%d 规划失败", stage_name.c_str(), seg + 1, segment_count);
+                            return false;
+                        }
+
+                        auto seg_exec_result = dual_arm_->execute(seg_plan);
+                        if (seg_exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
+                            RCLCPP_ERROR(this->get_logger(), "  [%s] 分段 %d/%d 执行失败", stage_name.c_str(), seg + 1, segment_count);
+                            return false;
+                        }
+
+                        RCLCPP_INFO(this->get_logger(), "  [%s] 分段 %d/%d 完成", stage_name.c_str(), seg + 1, segment_count);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                    }
+
+                    return true;
+                }
+
+                // IK成功，一步规划执行
+                dual_arm_->setStartStateToCurrentState();
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 dual_arm_->setJointValueTarget(*robot_state);
-                
+
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 auto plan_result = dual_arm_->plan(plan);
-                
-                if (plan_result == moveit::core::MoveItErrorCode::SUCCESS) {
-                    // [关键] plan完成后立即execute，不插入额外延迟
-                    RCLCPP_INFO(this->get_logger(), "  ✓ OMPL规划成功，立即执行...");
-                    auto exec_result = dual_arm_->execute(plan);
-                    
-                    if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_INFO(this->get_logger(), "  ✓ TRANSPORT 执行完成");
-                    } else {
-                        RCLCPP_ERROR(this->get_logger(), "  ✗ TRANSPORT 执行失败 (偏差可能仍超限)");
-                        RCLCPP_WARN(this->get_logger(), "  ! 尝试第二次重新同步+规划+执行...");
-                        
-                        // 第二次尝试：完全重新同步
-                        dual_arm_->setStartStateToCurrentState();
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                        dual_arm_->setJointValueTarget(*robot_state);
-                        
-                        moveit::planning_interface::MoveGroupInterface::Plan retry_plan;
-                        auto retry_plan_result = dual_arm_->plan(retry_plan);
-                        if (retry_plan_result == moveit::core::MoveItErrorCode::SUCCESS) {
-                            auto retry_exec_result = dual_arm_->execute(retry_plan);
-                            if (retry_exec_result == moveit::core::MoveItErrorCode::SUCCESS) {
-                                RCLCPP_INFO(this->get_logger(), "  ✓ TRANSPORT 重试执行成功");
-                            } else {
-                                RCLCPP_ERROR(this->get_logger(), "  ✗ TRANSPORT 重试也失败");
-                                current_state_ = TaskState::ERROR;
-                                return;
-                            }
-                        } else {
-                            RCLCPP_ERROR(this->get_logger(), "  ✗ TRANSPORT 重试规划失败");
-                            current_state_ = TaskState::ERROR;
-                            return;
-                        }
-                    }
-                } else {
-                    RCLCPP_ERROR(this->get_logger(), "  ✗ OMPL规划失败，尝试增加规划时间...");
-                    
-                    // 增加规划时间重试
+
+                if (plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
+                    // 增加规划时间重试一次
                     dual_arm_->setPlanningTime(10.0);
-                    auto retry_result = dual_arm_->plan(plan);
-                    dual_arm_->setPlanningTime(5.0);  // 恢复默认
-                    
-                    if (retry_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_WARN(this->get_logger(), "  ! 一步到位规划失败，切换分段模式（4段，每段0.025m）...");
-
-                        bool segment_success = true;
-                        for (int seg = 0; seg < 4 && segment_success; ++seg) {
-                            dual_arm_->setStartStateToCurrentState();
-                            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-                            auto seg_left_current = left_arm_->getCurrentPose();
-                            auto seg_right_current = right_arm_->getCurrentPose();
-
-                            geometry_msgs::msg::Pose seg_left_target = seg_left_current.pose;
-                            geometry_msgs::msg::Pose seg_right_target = seg_right_current.pose;
-                            seg_left_target.position.y += 0.025;
-                            seg_right_target.position.y += 0.025;
-
-                            auto seg_state = std::make_shared<moveit::core::RobotState>(robot_model);
-                            *seg_state = *dual_arm_->getCurrentState();
-                            seg_state->update();
-
-                            bool seg_left_ik = seg_state->setFromIK(left_jmg, seg_left_target, 5.0);
-                            bool seg_right_ik = seg_state->setFromIK(right_jmg, seg_right_target, 5.0);
-
-                            if (!seg_left_ik || !seg_right_ik) {
-                                RCLCPP_ERROR(this->get_logger(), "  ✗ 分段 %d/4 IK求解失败", seg + 1);
-                                segment_success = false;
-                                break;
-                            }
-
-                            dual_arm_->setJointValueTarget(*seg_state);
-                            moveit::planning_interface::MoveGroupInterface::Plan seg_plan;
-                            auto seg_plan_result = dual_arm_->plan(seg_plan);
-
-                            if (seg_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                                RCLCPP_ERROR(this->get_logger(), "  ✗ 分段 %d/4 规划失败", seg + 1);
-                                segment_success = false;
-                                break;
-                            }
-
-                            auto seg_exec_result = dual_arm_->execute(seg_plan);
-                            if (seg_exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                                RCLCPP_ERROR(this->get_logger(), "  ✗ 分段 %d/4 执行失败", seg + 1);
-                                segment_success = false;
-                                break;
-                            }
-
-                            RCLCPP_INFO(this->get_logger(), "  ✓ 分段 %d/4 完成 (Y += 0.025m)", seg + 1);
-                            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                    auto retry_plan_result = dual_arm_->plan(plan);
+                    dual_arm_->setPlanningTime(5.0);
+                    if (retry_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
+                        RCLCPP_WARN(this->get_logger(), "  [%s] 一步规划失败，尝试关节避碰重构", stage_name.c_str());
+                        if (attempt_joint_redundancy_avoidance(left_target, right_target, stage_name)) {
+                            return true;
                         }
+                        RCLCPP_ERROR(this->get_logger(), "  [%s] 一步规划失败", stage_name.c_str());
+                        return false;
+                    }
+                }
 
-                        if (!segment_success) {
-                            RCLCPP_ERROR(this->get_logger(), "  ✗ TRANSPORT 分段规划也失败");
+                auto exec_result = dual_arm_->execute(plan);
+                if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) {
+                    RCLCPP_INFO(this->get_logger(), "  [%s] 一步执行成功", stage_name.c_str());
+                    return true;
+                }
+
+                // 执行失败再重试一次
+                RCLCPP_WARN(this->get_logger(), "  [%s] 执行失败，尝试重试一次", stage_name.c_str());
+                dual_arm_->setStartStateToCurrentState();
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                dual_arm_->setJointValueTarget(*robot_state);
+
+                moveit::planning_interface::MoveGroupInterface::Plan retry_plan;
+                auto retry_plan_result = dual_arm_->plan(retry_plan);
+                if (retry_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
+                    RCLCPP_ERROR(this->get_logger(), "  [%s] 重试规划失败", stage_name.c_str());
+                    return false;
+                }
+
+                auto retry_exec_result = dual_arm_->execute(retry_plan);
+                if (retry_exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
+                    RCLCPP_WARN(this->get_logger(), "  [%s] 重试执行失败，尝试关节避碰重构", stage_name.c_str());
+                    if (attempt_joint_redundancy_avoidance(left_target, right_target, stage_name)) {
+                        return true;
+                    }
+                    RCLCPP_ERROR(this->get_logger(), "  [%s] 重试执行失败", stage_name.c_str());
+                    return false;
+                }
+
+                RCLCPP_INFO(this->get_logger(), "  [%s] 重试执行成功", stage_name.c_str());
+                return true;
+            };
+
+            // 预检当前运输后姿态是否还能完成ROTATE阶段，避免进入“可搬运但不可旋转”的死角构型。
+            auto rotate_preview_feasible = [&]() -> bool {
+                dual_arm_->setStartStateToCurrentState();
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+                auto left_current = left_arm_->getCurrentPose();
+                auto right_current = right_arm_->getCurrentPose();
+
+                double center_x = (left_current.pose.position.x + right_current.pose.position.x) / 2.0;
+                double center_y = (left_current.pose.position.y + right_current.pose.position.y) / 2.0;
+                double center_z = (left_current.pose.position.z + right_current.pose.position.z) / 2.0;
+
+                double left_dx0 = left_current.pose.position.x - center_x;
+                double left_dy0 = left_current.pose.position.y - center_y;
+                double radius = std::sqrt(left_dx0 * left_dx0 + left_dy0 * left_dy0);
+
+                if (radius < 1e-4) {
+                    RCLCPP_WARN(this->get_logger(), "  [ROTATE预检] 半径过小(%.6f)，无法构造旋转轨迹", radius);
+                    return false;
+                }
+
+                double left_init_angle = std::atan2(left_dy0, left_dx0);
+                double right_dx0 = right_current.pose.position.x - center_x;
+                double right_dy0 = right_current.pose.position.y - center_y;
+                double right_init_angle = std::atan2(right_dy0, right_dx0);
+
+                geometry_msgs::msg::Pose left_start_pose = left_current.pose;
+                geometry_msgs::msg::Pose right_start_pose = right_current.pose;
+
+                auto robot_model = dual_arm_->getRobotModel();
+                auto left_jmg = robot_model->getJointModelGroup(left_arm_group_);
+                auto right_jmg = robot_model->getJointModelGroup(right_arm_group_);
+
+                auto seed_state = std::make_shared<moveit::core::RobotState>(*dual_arm_->getCurrentState());
+
+                const double total_angle = M_PI / 2.0;
+                const int preview_points = 24;  // 约每3.75°采样一次，快速筛掉不可旋转姿态
+
+                auto make_constraint = [](const std::vector<double>& seed_vals, double max_change)
+                    -> moveit::core::GroupStateValidityCallbackFn {
+                    return [seed_vals, max_change](
+                        moveit::core::RobotState* /*state*/,
+                        const moveit::core::JointModelGroup* /*group*/,
+                        const double* joint_values) -> bool {
+                        for (size_t j = 0; j < seed_vals.size(); ++j) {
+                            double diff = std::abs(joint_values[j] - seed_vals[j]);
+                            if (diff > M_PI) diff = 2.0 * M_PI - diff;
+                            if (diff > max_change) return false;
+                        }
+                        return true;
+                    };
+                };
+
+                for (int i = 1; i <= preview_points; ++i) {
+                    double angle = total_angle * i / preview_points;
+
+                    geometry_msgs::msg::Pose left_target = left_start_pose;
+                    geometry_msgs::msg::Pose right_target = right_start_pose;
+
+                    left_target.position.x = center_x + radius * std::cos(left_init_angle + angle);
+                    left_target.position.y = center_y + radius * std::sin(left_init_angle + angle);
+                    left_target.position.z = center_z;
+
+                    right_target.position.x = center_x + radius * std::cos(right_init_angle + angle);
+                    right_target.position.y = center_y + radius * std::sin(right_init_angle + angle);
+                    right_target.position.z = center_z;
+
+                    tf2::Quaternion q_rot;
+                    q_rot.setRPY(0, 0, angle);
+
+                    tf2::Quaternion q_left_orig, q_right_orig;
+                    tf2::fromMsg(left_start_pose.orientation, q_left_orig);
+                    tf2::fromMsg(right_start_pose.orientation, q_right_orig);
+
+                    tf2::Quaternion q_left_new = q_rot * q_left_orig;
+                    tf2::Quaternion q_right_new = q_rot * q_right_orig;
+                    q_left_new.normalize();
+                    q_right_new.normalize();
+                    left_target.orientation = tf2::toMsg(q_left_new);
+                    right_target.orientation = tf2::toMsg(q_right_new);
+
+                    std::vector<double> left_seed_vals, right_seed_vals;
+                    seed_state->copyJointGroupPositions(left_jmg, left_seed_vals);
+                    seed_state->copyJointGroupPositions(right_jmg, right_seed_vals);
+
+                    double joint7_bias = total_angle / preview_points;
+                    if (left_seed_vals.size() > 6) left_seed_vals[6] += joint7_bias;
+                    if (right_seed_vals.size() > 6) right_seed_vals[6] += joint7_bias;
+
+                    auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
+                    waypoint_state->setJointGroupPositions(left_jmg, left_seed_vals);
+                    waypoint_state->setJointGroupPositions(right_jmg, right_seed_vals);
+
+                    bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.1,
+                        make_constraint(left_seed_vals, 0.8));
+                    if (!left_ik) {
+                        waypoint_state->setJointGroupPositions(left_jmg, left_seed_vals);
+                        left_ik = waypoint_state->setFromIK(left_jmg, left_target, 1.0);
+                    }
+
+                    bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.1,
+                        make_constraint(right_seed_vals, 0.8));
+                    if (!right_ik) {
+                        waypoint_state->setJointGroupPositions(right_jmg, right_seed_vals);
+                        right_ik = waypoint_state->setFromIK(right_jmg, right_target, 1.0);
+                    }
+
+                    if (!left_ik || !right_ik) {
+                        RCLCPP_WARN(this->get_logger(),
+                            "  [ROTATE预检] 航点 %d/%d 不可达（左=%s, 右=%s）",
+                            i, preview_points, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                        return false;
+                    }
+
+                    waypoint_state->update();
+                    *seed_state = *waypoint_state;
+                }
+
+                RCLCPP_INFO(this->get_logger(), "  [ROTATE预检] 通过：当前搬运位姿可执行90°旋转");
+                return true;
+            };
+
+            // 阶段1：先向X轴正方向移动20cm
+            RCLCPP_INFO(this->get_logger(), "  [TRANSPORT] 阶段1：X方向预搬运 +0.20m");
+            if (!perform_transport_shift(0.20, 0.0, "X+0.20m")) {
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+
+            // 阶段2：再执行原Y方向搬运
+            RCLCPP_INFO(this->get_logger(), "  [TRANSPORT] 阶段2：Y方向搬运 +0.10m");
+            if (!perform_transport_shift(0.0, 0.10, "Y+0.10m")) {
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+
+            if (enable_rotate_) {
+                // 若运输后旋转不可行，则自动沿X轴小步回退，找到“既搬运又可旋转”的安全走廊。
+                if (!rotate_preview_feasible()) {
+                    RCLCPP_WARN(this->get_logger(),
+                        "  [TRANSPORT] 当前位姿旋转预检失败，开始X轴回退寻优（每步-0.02m）");
+
+                    const int max_backoff_steps = 8;  // 最多回退16cm，保留至少部分X搬运收益
+                    double total_backoff = 0.0;
+                    bool found_safe_pose = false;
+
+                    for (int step = 1; step <= max_backoff_steps; ++step) {
+                        if (!perform_transport_shift(-0.02, 0.0, "X回退寻优")) {
+                            RCLCPP_ERROR(this->get_logger(), "  [TRANSPORT] X回退寻优失败（step=%d）", step);
                             current_state_ = TaskState::ERROR;
                             return;
                         }
 
-                        RCLCPP_INFO(this->get_logger(), "  ✓ TRANSPORT 分段执行完成");
-                        RCLCPP_INFO(this->get_logger(), "✓ 平移完成，进入旋转阶段\n");
-                        current_state_ = TaskState::ROTATE;
-                        return;
+                        total_backoff += 0.02;
+
+                        if (rotate_preview_feasible()) {
+                            found_safe_pose = true;
+                            RCLCPP_INFO(this->get_logger(),
+                                "  [TRANSPORT] 寻优成功：累计回退X=%.2fm，净X搬运=%.2fm",
+                                total_backoff, 0.20 - total_backoff);
+                            break;
+                        }
                     }
-                    
-                    auto retry_exec = dual_arm_->execute(plan);
-                    if (retry_exec != moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_ERROR(this->get_logger(), "  ✗ TRANSPORT 重试执行失败");
+
+                    if (!found_safe_pose) {
+                        RCLCPP_ERROR(this->get_logger(),
+                            "  [TRANSPORT] 回退后仍无法保证旋转可行，请减小X预搬运量或提高lift_height");
                         current_state_ = TaskState::ERROR;
                         return;
                     }
-                    
-                    RCLCPP_INFO(this->get_logger(), "  ✓ TRANSPORT 重试执行完成");
                 }
-            }
 
-            RCLCPP_INFO(this->get_logger(), "✓ 平移完成，进入旋转阶段\n");
-            current_state_ = TaskState::ROTATE;
+                RCLCPP_INFO(this->get_logger(), "✓ 平移完成，进入旋转阶段\n");
+                current_state_ = TaskState::ROTATE;
+            } else {
+                RCLCPP_INFO(this->get_logger(), "✓ 平移完成（旋转已禁用），直接进入下降放置阶段\n");
+                current_state_ = TaskState::DESCEND;
+            }
 
         } catch (const std::exception& e) {
             RCLCPP_ERROR(this->get_logger(), "TRANSPORT 阶段异常: %s", e.what());
@@ -1680,7 +1859,7 @@ private:
      *   → 两臂在轨迹的每个中间点都处于正确的对称圆弧位置
      * 
      * 坐标系：X=前方, Y=侧向(mj_left在+Y), Z=上方
-     * 旋转方向：顺时针(-90°)，左臂(+Y端)→(+X端)，右臂(-Y端)→(-X端)
+    * 旋转方向：逆时针(+90°)，左臂(+Y端)→(-X端)，右臂(-Y端)→(+X端)
      */
     void executeRotate()
     {
@@ -1726,7 +1905,7 @@ private:
             const int num_segments = 3;
             const int wp_per_seg = 30;        // 每段30个航点 → 每步1°（加密提升双臂协调性）
             const int total_wp = num_segments * wp_per_seg;
-            const double total_angle = -M_PI / 2.0;
+            const double total_angle = M_PI / 2.0;
             const double step_angle_deg = std::abs(total_angle) * 180.0 / M_PI / total_wp;  // 每步角度(度)
             
             auto robot_model = dual_arm_->getRobotModel();
@@ -1844,13 +2023,13 @@ private:
                     right_target.orientation = tf2::toMsg(q_right_new);
                     
                     // ----- Joint7 种子偏置（引导手腕承担旋转）-----
-                    // TCP Z轴向下(Roll=180)，世界Z轴旋转-90°对应TCP Z轴旋转+90°
-                    // 每步给joint7种子值增加+2°，引导KDL求解器让手腕处理旋转
+                    // TCP Z轴向下(Roll=180)，joint7偏置需跟随旋转方向变号，
+                    // 避免反向旋转时仍用同号偏置把IK推向错误分支。
                     std::vector<double> left_seed_vals, right_seed_vals;
                     seed_state->copyJointGroupPositions(left_jmg, left_seed_vals);
                     seed_state->copyJointGroupPositions(right_jmg, right_seed_vals);
                     
-                    double tcp_z_delta = std::abs(total_angle) / total_wp;  // ≈ 0.035 rad (2°/步)
+                    double tcp_z_delta = total_angle / total_wp;  // 约 ±0.017 rad (1°/步)，符号跟随旋转方向
                     if (left_seed_vals.size() > 6) left_seed_vals[6] += tcp_z_delta;
                     if (right_seed_vals.size() > 6) right_seed_vals[6] += tcp_z_delta;
                     
@@ -1945,8 +2124,8 @@ private:
                 
                 // ----- TOTG时间参数化 -----
                 trajectory_processing::TimeOptimalTrajectoryGeneration totg;
-                double vel_scale = 0.08;
-                double acc_scale = 0.08;
+                double vel_scale = 0.06;
+                double acc_scale = 0.06;
                 bool time_ok = totg.computeTimeStamps(*traj, vel_scale, acc_scale);
                 RCLCPP_INFO(this->get_logger(), "    TOTG缩放: vel=%.4f, acc=%.4f", vel_scale, acc_scale);
                 
@@ -1981,14 +2160,14 @@ private:
                 // → 触发simGripperMove(OPEN方向!)而非simGripperGrasp，导致at(0)从0跳到63
                 // → 夹持力骤降，铝棒脱落。因此删除段间夹爪刷新，保持simGripperGrasp的持续夹持
                 if (seg < num_segments - 1) {
-                    RCLCPP_INFO(this->get_logger(), "  [段间等待] 等待150ms稳定...");
-                    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                    RCLCPP_INFO(this->get_logger(), "  [段间等待] 等待300ms稳定...");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(300));
                     RCLCPP_INFO(this->get_logger(), "  ✓ 段间稳定完成");
                 }
             }
             
             // 旋转后稳定等待
-            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
             
             // 打印最终joint7值
             {
@@ -2030,16 +2209,23 @@ private:
             auto left_current = left_arm_->getCurrentPose();
             auto right_current = right_arm_->getCurrentPose();
             
-            // 修复：由于杆件已经旋转到了X轴，此时由于机械臂在X轴上拉伸很长，手肘(link3)会下垂得非常靠近地面！
-            // 原本设定的 0.13m 刚好是抓取时的极其贴地的极限高度，导致下降末期不可避免地发生 mj_left_link3 与 杆件相撞。
-            // 因此将最终下降高度提升至 0.16m，避免下垂的手肘撞击杆件，之后张开夹爪让铝棒仅从距地不到 3cm 的低空安全落下。
-            double place_z = 0.16;
+            // 旋转模式下：使用更高放置高度+X回避，给旋转后构型留安全间隙。
+            // 非旋转模式下：不做额外X平移，采用较低放置高度。
+            double place_z = enable_rotate_ ? 0.18 : 0.16;
+            double descend_shift_x = enable_rotate_ ? -0.10 : 0.0;
+
             double left_delta_z = place_z - left_current.pose.position.z;
             double right_delta_z = place_z - right_current.pose.position.z;
+            double left_delta_x = descend_shift_x;
+            double right_delta_x = descend_shift_x;
             
             RCLCPP_INFO(this->get_logger(), "  当前Z: 左=%.3f, 右=%.3f → 目标Z: %.3f (下降约%.3fm)",
                         left_current.pose.position.z, right_current.pose.position.z, place_z,
                         std::abs((left_delta_z + right_delta_z) / 2.0));
+            RCLCPP_INFO(this->get_logger(), "  DESCEND阶段附加平移: 双臂X方向 +%.3fm", descend_shift_x);
+            if (!enable_rotate_) {
+                RCLCPP_INFO(this->get_logger(), "  [DESCEND] 当前为无旋转模式：保持铝棒原朝向（沿Y轴）放置");
+            }
             
             // ===== 密集航点 =====
             // 10个航点覆盖约11cm下降，每步约1.1cm
@@ -2065,12 +2251,14 @@ private:
             for (int i = 1; i <= num_waypoints; ++i) {
                 double frac = static_cast<double>(i) / num_waypoints;
                 
-                // 左臂：保持XY和姿态不变，线性插值Z
+                // 左臂：保持Y和姿态不变，线性插值X/Z
                 geometry_msgs::msg::Pose left_target = left_start;
+                left_target.position.x = left_start.position.x + left_delta_x * frac;
                 left_target.position.z = left_start.position.z + left_delta_z * frac;
                 
-                // 右臂：保持XY和姿态不变，线性插值Z
+                // 右臂：保持Y和姿态不变，线性插值X/Z
                 geometry_msgs::msg::Pose right_target = right_start;
+                right_target.position.x = right_start.position.x + right_delta_x * frac;
                 right_target.position.z = right_start.position.z + right_delta_z * frac;
                 
                 // IK求解（加一致性约束，防止关节跳变 - 与ROTATE相同策略）
@@ -2143,7 +2331,7 @@ private:
             // 修复：由于下降过程中手臂向下弯曲产生惯性，加上MuJoCo中摩擦力有限，
             // 较大的加速度会导致铝棒由于惯性直接在两指之间滑动脱落现象！同时如果手肘与杆件发生轻微物理擦碰也会加剧脱落。
             // weld约束保证铝棒不会滑落，可以适当提升下降速度。
-            bool time_ok = totg.computeTimeStamps(*traj, 0.10, 0.10);
+            bool time_ok = totg.computeTimeStamps(*traj, 0.06, 0.06);
             
             if (!time_ok) {
                 RCLCPP_ERROR(this->get_logger(), "  ✗ TOTG时间参数化失败");
@@ -2376,8 +2564,9 @@ private:
     /**
      * @brief 解除物体附着并重新添加为世界碰撞物体
      * 
-     * 杆件旋转后沿X轴方向，使用Rz(90°)旋转box的orientation
-     * 使原来的Y方向40cm长轴变为沿X方向
+    * 根据是否执行ROTATE，设置放置后的杆件方向：
+    * enable_rotate=true  → 沿X轴（Rz=90°）
+    * enable_rotate=false → 沿Y轴（Rz=0°）
      */
     void detachAndReplaceObject()
     {
@@ -2395,8 +2584,8 @@ private:
         double rod_center_y = (left_current.pose.position.y + right_current.pose.position.y) / 2.0;
         double rod_center_z = 0.02;  // 放置到地面（与初始高度相同）
         
-        RCLCPP_INFO(this->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向沿X轴",
-                    rod_center_x, rod_center_y, rod_center_z);
+        RCLCPP_INFO(this->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向沿%s轴",
+                rod_center_x, rod_center_y, rod_center_z, enable_rotate_ ? "X" : "Y");
         
         // ========== 步骤1: 解除附着 ==========
         // 修复：之前只是发了REMOVE消息到话题，但由于ROS 2 MoveIt架构中话题处理的延迟或覆盖，
@@ -2424,7 +2613,7 @@ private:
         rod_pose.position.z = rod_center_z;
         
         tf2::Quaternion q_rod;
-        q_rod.setRPY(0, 0, M_PI / 2.0); 
+        q_rod.setRPY(0, 0, enable_rotate_ ? M_PI / 2.0 : 0.0);
         rod_pose.orientation = tf2::toMsg(q_rod);
         
         collision_object.primitives.push_back(primitive);
@@ -2435,7 +2624,8 @@ private:
         moveit::planning_interface::PlanningSceneInterface psi;
         psi.applyCollisionObject(collision_object);
         
-        RCLCPP_INFO(this->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（沿X轴方向）");
+        RCLCPP_INFO(this->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（沿%s轴方向）",
+                enable_rotate_ ? "X" : "Y");
         std::this_thread::sleep_for(300ms);
         
         // ========== 步骤3: 验证结果 ==========
@@ -2555,6 +2745,7 @@ private:
     double approach_height_;
     double grasp_height_;
     double lift_height_;
+    bool enable_rotate_;
     double gripper_close_pos_;
     
     // 初始关节位置（用于RETREAT阶段）

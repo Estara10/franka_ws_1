@@ -3,6 +3,7 @@
 <package format="3">
   <name>dual_arm_description</name>
   <version>0.0.0</version>
+  <description>The dual_arm_description package</description>
   <maintainer email="wusiala@todo.todo">wusiala</maintainer>
   <license>Apache-2.0</license>
 

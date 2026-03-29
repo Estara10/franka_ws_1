@@ -86,6 +86,7 @@ def launch_setup(context, *args, **kwargs):
                 'approach_height': LaunchConfiguration('approach_height'),
                 'grasp_height': LaunchConfiguration('grasp_height'),
                 'lift_height': LaunchConfiguration('lift_height'),
+                'enable_rotate': LaunchConfiguration('enable_rotate'),
                 'control_mode': LaunchConfiguration('control_mode'),
                 'use_sim_time': True,
             }
@@ -125,20 +126,26 @@ def generate_launch_description():
     
     approach_height_arg = DeclareLaunchArgument(
         'approach_height',
-        default_value='0.15',
+        default_value='0.28',
         description='接近物体时的高度 (m)'
     )
     
     grasp_height_arg = DeclareLaunchArgument(
         'grasp_height',
-        default_value='0.06',
+        default_value='0.13',
         description='抓取物体时的高度 (m)'
     )
     
     lift_height_arg = DeclareLaunchArgument(
         'lift_height',
-        default_value='0.25',
+        default_value='0.40',
         description='抬起物体后的高度 (m)'
+    )
+
+    enable_rotate_arg = DeclareLaunchArgument(
+        'enable_rotate',
+        default_value='true',
+        description='是否执行ROTATE阶段 (true/false)'
     )
     
     # 使用 OpaqueFunction 延迟执行以处理 xacro
@@ -155,5 +162,6 @@ def generate_launch_description():
         approach_height_arg,
         grasp_height_arg,
         lift_height_arg,
+        enable_rotate_arg,
         delayed_task
     ])

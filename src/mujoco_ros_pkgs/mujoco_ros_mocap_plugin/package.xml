@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>mujoco_ros_mocap</name>
   <version>0.9.0</version>
   <description>The mujoco_ros_mocap plugin package</description>
@@ -12,13 +13,16 @@
 
   <license>BSD</license>
 
-  <buildtool_depend>catkin</buildtool_depend>
-  <depend>mujoco_ros</depend>
-  <depend>mujoco_ros_msgs</depend>
+  <buildtool_depend condition="$ROS_VERSION == 1">catkin</buildtool_depend>
+  <buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>
+  <depend condition="$ROS_VERSION == 1">mujoco_ros</depend>
+  <depend condition="$ROS_VERSION == 1">mujoco_ros_msgs</depend>
 
-  <test_depend>rostest</test_depend>
+  <test_depend condition="$ROS_VERSION == 1">rostest</test_depend>
 
   <export>
     <mujoco_ros plugin="${prefix}/mocap_plugin.xml" />
+    <build_type condition="$ROS_VERSION == 1">catkin</build_type>
+    <build_type condition="$ROS_VERSION == 2">ament_cmake</build_type>
   </export>
 </package>

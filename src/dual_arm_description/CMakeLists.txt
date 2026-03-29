@@ -10,7 +10,7 @@ find_package(urdf REQUIRED)
 
 # 安装目录配置 (这一步非常重要，否则launch找不到文件)
 install(
-  DIRECTORY urdf launch rviz
+  DIRECTORY urdf launch
   DESTINATION share/${PROJECT_NAME}
 )
 
