@@ -5,7 +5,8 @@
 ### 一键启动（推荐）
 
 ```bash
-cd ~/mujoco_franka/franka_ws
+cd ~/franka_ws_1
+colcon build
 source install/setup.bash
 ./start_dual_arm_task.sh
 ```
@@ -16,13 +17,20 @@ source install/setup.bash
 3. RViz 可视化
 4. 双臂搬运任务节点
 
-**预计时间:** 约50秒完全启动
+**预计时间:** 约25秒完全启动
 
 ---
 
 ## 📊 系统架构说明
 
-### 重要发现
+### 核心代码 MVC 架构重构 ✨
+目前的 `dual_arm_carry_task` 节点已完成了彻底的模块化（MVC）拆分，结构更加清晰、易于扩展：
+- `carry_task_state_machine.cpp`：负责 ROS 节点生命周期与主状态机的流转。
+- `dual_arm_controller.cpp`：直接对接 MoveIt 2 控制机械臂，处理 IK、轨迹规划与时间参数参数化（TOTG）。
+- `gripper_controller.cpp`：负责双臂 Action 客户端的并发协同夹取与释放控制。
+- `carry_task_context.hpp`：内部传递共享指针和系统状态参数的设计字典。
+
+### 启动序列说明 (重要发现)
 ⚠️ **MoveIt2 会自动启动 MuJoCo！** 
 
 之前的错误是因为重复启动了 MuJoCo，导致：
@@ -50,17 +58,25 @@ source install/setup.bash
 
 ## 🎯 任务执行流程
 
-### 状态机
-```
+### 完整状态机流转 (FSM)
+```text
 INIT (初始化)
-  ↓ 双臂移动到 ready 位置
+  ↓ 双臂移动到 ready 待命位置
 APPROACH (接近)
-  ↓ 移动到物体两侧上方 (高度 0.15m)
+  ↓ 移动到物体两侧上方
 GRASP (抓取)
-  ↓ 下降到抓取高度 (0.06m) 并夹紧
+  ↓ 下降到预定抓取高度，并同步夹紧夹爪
 LIFT (抬起)
-  ↓ 协同抬升到目标高度 (0.25m)
-DONE (完成)
+  ↓ 携带对象无碰撞、绝对稳定地垂直抬升
+TRANSPORT / ROTATE (选配：位移与旋转)
+  ↓ 平移并协同旋转一定角度
+DESCEND (下降)
+  ↓ 紧贴地面释放高度（防悬空掉落保护）
+PLACE (放置)
+  ↓ 柔顺松开双侧夹爪
+RETREAT (撤退)
+  ↓ 脱离接触并返回初始位
+DONE / ERROR (任务完成/异常退出)
 ```
 
 ### 物体配置
@@ -138,7 +154,7 @@ ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
 ```
 
 ### 修改物体位置
-编辑文件: `install/franka_description/share/franka_description/mujoco/franka/objects.xml`
+编辑文件 (`src` 内文件，请勿编辑 `install` 内的文件): `src/multipanda_ros2/franka_description/mujoco/franka/objects.xml`
 
 ```xml
 <body name="obj_rod_01" pos="0.5 0.0 0.04">  <!-- 修改这里的坐标 -->
