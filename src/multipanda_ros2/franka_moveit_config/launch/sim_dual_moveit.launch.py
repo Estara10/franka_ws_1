@@ -157,25 +157,23 @@ def generate_launch_description():
     )
     ompl_planning_pipeline_config['ompl'].update(ompl_planning_yaml)
 
-    # 2. 带有 CHOMP 优化器的 OMPL 管道（用于 APPROACH 和 RETREAT）
-    ompl_chomp_planning_pipeline_config = {
-        'ompl_chomp': {
-            'planning_plugin': 'ompl_interface/OMPLPlanner',
+    # 2. CHOMP 规划管道（使用 CHOMPPlanner，而非不存在的 CHOMPOptimizerAdapter）
+    chomp_planning_pipeline_config = {
+        'chomp': {
+            'planning_plugin': 'chomp_interface/CHOMPPlanner',
             'request_adapters': 'default_planner_request_adapters/AddTimeOptimalParameterization '
                                 'default_planner_request_adapters/ResolveConstraintFrames '
                                 'default_planner_request_adapters/FixWorkspaceBounds '
                                 'default_planner_request_adapters/FixStartStateBounds '
                                 'default_planner_request_adapters/FixStartStateCollision '
-                                'default_planner_request_adapters/FixStartStatePathConstraints '
-                                'default_planner_request_adapters/CHOMPOptimizerAdapter',
+                                'default_planner_request_adapters/FixStartStatePathConstraints',
             'start_state_max_bounds_error': 0.1,
         }
     }
-    ompl_chomp_planning_pipeline_config['ompl_chomp'].update(ompl_planning_yaml)
     
     # 注册所有的 Pipelines
     planning_pipelines_config = {
-        'planning_pipelines': ['ompl', 'ompl_chomp'],
+        'planning_pipelines': ['ompl', 'chomp'],
         'default_planning_pipeline': 'ompl'
     }
 
@@ -224,7 +222,7 @@ def generate_launch_description():
             kinematics_yaml,
             joint_limits_yaml,
             ompl_planning_pipeline_config,
-            ompl_chomp_planning_pipeline_config,
+            chomp_planning_pipeline_config,
             planning_pipelines_config,
             trajectory_execution,
             moveit_controllers,
@@ -248,7 +246,7 @@ def generate_launch_description():
             robot_description,
             robot_description_semantic,
             ompl_planning_pipeline_config,
-            ompl_chomp_planning_pipeline_config,
+            chomp_planning_pipeline_config,
             planning_pipelines_config,
             kinematics_yaml,
         ],

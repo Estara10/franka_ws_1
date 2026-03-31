@@ -6,6 +6,10 @@
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${WORKSPACE_DIR}/launch_logs"
+RESULTS_DIR="${WORKSPACE_DIR}/experiment_results"
+RESULT_DATA_DIR="${RESULTS_DIR}/data"
+RESULT_REPORT_DIR="${RESULTS_DIR}/reports"
+RESULT_PLOT_DIR="${RESULTS_DIR}/plots"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 DIAG_LOG="${LOG_DIR}/diagnosis_${TIMESTAMP}.log"
 
@@ -14,6 +18,7 @@ PID_FILE="${WORKSPACE_DIR}/.running_pids.txt"
 
 # 创建日志目录
 mkdir -p "$LOG_DIR"
+mkdir -p "$RESULT_DATA_DIR" "$RESULT_REPORT_DIR" "$RESULT_PLOT_DIR"
 
 # 清理函数
 cleanup_processes() {
@@ -38,8 +43,80 @@ cleanup_processes() {
     echo "✓ 清理完成"
 }
 
+# 检查 MoveIt + MuJoCo 栈是否真正就绪（不仅 launch 进程存活）
+wait_for_sim_stack_ready() {
+    local timeout_sec="${1:-12}"
+    local elapsed=0
+
+    while [ "$elapsed" -lt "$timeout_sec" ]; do
+        local nodes
+        local services
+        nodes=$(timeout 2s ros2 node list 2>/dev/null || true)
+        services=$(timeout 2s ros2 service list 2>/dev/null || true)
+
+        # 关键判据：
+        # 1) move_group 已就绪
+        # 2) MuJoCo 主节点或 ros2_control 子节点存在
+        # 3) controller_manager 服务可用（比节点名更稳定）
+        local has_move_group=0
+        local has_mujoco=0
+        local has_controller_service=0
+
+        if echo "$nodes" | grep -q "/move_group"; then
+            has_move_group=1
+        fi
+        if echo "$nodes" | grep -q "/mujoco_node" || \
+           echo "$nodes" | grep -q "/mujoco_ros2_control"; then
+            has_mujoco=1
+        fi
+        if echo "$services" | grep -q "/controller_manager/list_controllers"; then
+            has_controller_service=1
+        fi
+
+        if [ "$has_move_group" -eq 1 ] && \
+           [ "$has_mujoco" -eq 1 ] && \
+           [ "$has_controller_service" -eq 1 ]; then
+            return 0
+        fi
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    return 1
+}
+
+# 监控任务终态（DONE / ERROR / 超时 / 进程退出）
+wait_for_task_terminal_state() {
+    local task_log="$1"
+    local task_pid="$2"
+    local timeout_sec="${3:-240}"
+    local elapsed=0
+
+    while [ "$elapsed" -lt "$timeout_sec" ]; do
+        if [ -f "$task_log" ]; then
+            if grep -q "✓ 任务完成！" "$task_log"; then
+                return 0
+            fi
+            if grep -q "✗ 任务失败！" "$task_log"; then
+                return 2
+            fi
+        fi
+
+        if ! ps -p "$task_pid" > /dev/null 2>&1; then
+            return 3
+        fi
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    return 1
+}
+
 # 捕获 Ctrl+C 信号
-trap 'echo ""; echo "检测到 Ctrl+C，正在停止所有进程..."; cleanup_processes; exit 0' INT TERM
+# 注意：必须返回 130（被中断）而不是 0，避免外层批处理脚本误判为“本轮成功”并继续下一轮。
+trap 'echo ""; echo "检测到 Ctrl+C，正在停止所有进程..."; cleanup_processes; exit 130' INT TERM
 
 echo "========================================"
 echo "  双臂搬运任务 - 完整启动"
@@ -138,12 +215,37 @@ echo ""
 echo "✅ 最终设定的运行配置: ===[ 大模式: ${TASK_MAIN_MODE} | 核心策略: ${CONTROL_MODE} ]==="
 echo ""
 
-# 旋转阶段开关（默认启用）。可通过环境变量覆盖：ENABLE_ROTATE=false ./start_dual_arm_task.sh
-ENABLE_ROTATE="${ENABLE_ROTATE:-true}"
+# 自适应柔顺闭环开关：默认随模式自动启停，可用环境变量覆盖
+#   ENABLE_ADAPTIVE_COMPLIANCE=auto|true|false
+ENABLE_ADAPTIVE_COMPLIANCE="${ENABLE_ADAPTIVE_COMPLIANCE:-auto}"
+if [[ "$ENABLE_ADAPTIVE_COMPLIANCE" == "auto" ]]; then
+    case "$CONTROL_MODE" in
+        rigid|chomp_only)
+            ADAPTIVE_COMPLIANCE_ENABLED="false"
+            ;;
+        *)
+            ADAPTIVE_COMPLIANCE_ENABLED="true"
+            ;;
+    esac
+else
+    if [[ "$ENABLE_ADAPTIVE_COMPLIANCE" == "1" || "$ENABLE_ADAPTIVE_COMPLIANCE" == "true" || "$ENABLE_ADAPTIVE_COMPLIANCE" == "yes" ]]; then
+        ADAPTIVE_COMPLIANCE_ENABLED="true"
+    else
+        ADAPTIVE_COMPLIANCE_ENABLED="false"
+    fi
+fi
+echo "自适应柔顺闭环: ${ADAPTIVE_COMPLIANCE_ENABLED} (ENABLE_ADAPTIVE_COMPLIANCE=${ENABLE_ADAPTIVE_COMPLIANCE})"
+
+# 旋转阶段开关（默认禁用）。可通过环境变量覆盖：ENABLE_ROTATE=true ./start_dual_arm_task.sh
+ENABLE_ROTATE="${ENABLE_ROTATE:-false}"
 echo "旋转阶段开关: ${ENABLE_ROTATE}"
 
 echo "日志目录: $LOG_DIR"
 echo "诊断日志: $DIAG_LOG"
+echo "结果目录: $RESULTS_DIR"
+echo "  - 数据CSV: $RESULT_DATA_DIR"
+echo "  - 报告CSV/MD: $RESULT_REPORT_DIR"
+echo "  - 图表PNG: $RESULT_PLOT_DIR"
 echo ""
 
 # 0. Source 工作空间
@@ -246,27 +348,69 @@ fi
 echo "[3/4] 启动 MoveIt2 和 MuJoCo..."
 echo "注意: MoveIt2 会自动启动 MuJoCo 仿真"
 
-MOVEIT_LOG="${LOG_DIR}/moveit_mujoco_${TIMESTAMP}.log"
-echo "日志: $MOVEIT_LOG"
+MAX_SIM_RETRIES=2
+SIM_READY=0
+MOVEIT_PID=""
+MOVEIT_LOG=""
 
-ros2 launch franka_moveit_config sim_dual_moveit.launch.py > "$MOVEIT_LOG" 2>&1 &
-MOVEIT_PID=$!
-echo "进程 PID: $MOVEIT_PID"
-echo $MOVEIT_PID > "$PID_FILE"
+for attempt in $(seq 1 $MAX_SIM_RETRIES); do
+    MOVEIT_LOG="${LOG_DIR}/moveit_mujoco_${TIMESTAMP}_try${attempt}.log"
+    echo "日志: $MOVEIT_LOG"
+    echo "启动尝试: ${attempt}/${MAX_SIM_RETRIES}"
 
-# 等待 MoveIt2 和 MuJoCo 完全启动
-echo "等待 MoveIt2 和 MuJoCo 完全启动 (10秒)..."
-for i in {1..10}; do
-    sleep 1
-    printf "\r  进度: %d/10 秒" $i
+    ros2 launch franka_moveit_config sim_dual_moveit.launch.py > "$MOVEIT_LOG" 2>&1 &
+    MOVEIT_PID=$!
+    echo "进程 PID: $MOVEIT_PID"
+    echo $MOVEIT_PID > "$PID_FILE"
+
+    # 等待 MoveIt2 和 MuJoCo 完全启动
+    echo "等待 MoveIt2 和 MuJoCo 完全启动 (10秒)..."
+    for i in {1..10}; do
+        sleep 1
+        printf "\r  进度: %d/10 秒" $i
+    done
+    echo ""
+
+    # 先检查 launch 进程是否还在运行
+    if ! ps -p $MOVEIT_PID > /dev/null; then
+        echo "✗ MoveIt2 启动失败，请检查日志: $MOVEIT_LOG"
+        echo "最后20行日志:"
+        tail -20 "$MOVEIT_LOG"
+        if [ "$attempt" -lt "$MAX_SIM_RETRIES" ]; then
+            echo "正在重试启动..."
+            cleanup_processes
+            source "${WORKSPACE_DIR}/install/setup.bash"
+            continue
+        fi
+        exit 1
+    fi
+
+    # 再检查关键栈（防止 mujoco_node 崩溃但 launch 仍存活）
+    echo "正在检查关键栈就绪状态（move_group + mujoco + controller_manager service）..."
+    if wait_for_sim_stack_ready 12; then
+        SIM_READY=1
+        break
+    fi
+
+    echo "✗ 关键栈未就绪（/move_group + /mujoco_node(or /mujoco_ros2_control) + /controller_manager/list_controllers）"
+    if grep -q "spin_some() called while already spinning" "$MOVEIT_LOG" 2>/dev/null; then
+        echo "  检测到 MuJoCo 启动期崩溃: spin_some() called while already spinning"
+    fi
+    if grep -q "\[ERROR\] \[mujoco_node" "$MOVEIT_LOG" 2>/dev/null; then
+        echo "  检测到 mujoco_node 进程异常退出"
+    fi
+
+    if [ "$attempt" -lt "$MAX_SIM_RETRIES" ]; then
+        echo "正在自动重试启动 MuJoCo..."
+        cleanup_processes
+        source "${WORKSPACE_DIR}/install/setup.bash"
+    fi
 done
-echo ""
 
-# 检查进程是否还在运行
-if ! ps -p $MOVEIT_PID > /dev/null; then
-    echo "✗ MoveIt2 启动失败，请检查日志: $MOVEIT_LOG"
-    echo "最后20行日志:"
-    tail -20 "$MOVEIT_LOG"
+if [ "$SIM_READY" -ne 1 ]; then
+    echo "✗ MoveIt2/MuJoCo 启动失败（已重试 ${MAX_SIM_RETRIES} 次）"
+    echo "请检查日志: $MOVEIT_LOG"
+    tail -40 "$MOVEIT_LOG"
     exit 1
 fi
 
@@ -321,10 +465,12 @@ else
 fi
 
 echo ""
-echo "✓ MoveIt2 和 MuJoCo 已启动"
+echo "✓ MoveIt2 和 MuJoCo 已启动（关键节点检测通过）"
 echo ""
 
 if [[ "$TASK_MAIN_MODE" == "A" ]]; then
+    ENABLE_SENSOR_GUI="${ENABLE_SENSOR_GUI:-false}"
+
     # 4. 启动任务节点
     echo "[4/5] 启动双臂搬运任务节点 ($CONTROL_MODE 模式)..."
     sleep 5
@@ -337,7 +483,39 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
         approach_height:=0.28 \
         grasp_height:=0.13 \
         lift_height:=0.40 \
-        enable_rotate:=${ENABLE_ROTATE} > "$TASK_LOG" 2>&1 &
+        enable_rotate:=${ENABLE_ROTATE} \
+        enable_latency_monitor:=true \
+        latency_topic:=/joint_states \
+        latency_task_status_topic:=/task_status \
+        latency_target_ms:=100.0 \
+        latency_result_dir:=${RESULT_REPORT_DIR} \
+        latency_result_prefix:=comm_latency_${TIMESTAMP} \
+        enable_task_metrics_monitor:=true \
+        metrics_joint_state_topic:=/joint_states \
+        metrics_task_stage_topic:=/task_stage \
+        metrics_task_status_topic:=/task_status \
+        metrics_base_frame:=base_link \
+        metrics_left_frame:=mj_left_hand \
+        metrics_right_frame:=mj_right_hand \
+        metrics_sync_target_mm:=5.0 \
+        metrics_ee_target_mm:=2.0 \
+        metrics_enable_rotate:=${ENABLE_ROTATE} \
+        metrics_descend_place_z:=0.0 \
+        metrics_descend_shift_x:=999.0 \
+        metrics_result_dir:=${RESULT_REPORT_DIR} \
+        metrics_result_prefix:=task_metrics_${TIMESTAMP}_${CONTROL_MODE} \
+        enable_adaptive_compliance_supervisor:=${ADAPTIVE_COMPLIANCE_ENABLED} \
+        adaptive_left_wrench_topic:=/force_torque_sensor_broadcaster_left/wrench \
+        adaptive_right_wrench_topic:=/force_torque_sensor_broadcaster_right/wrench \
+        adaptive_task_stage_topic:=/task_stage \
+        adaptive_task_status_topic:=/task_status \
+        adaptive_impedance_service:=/left_and_right/dual_cartesian_impedance_controller/parameters \
+        adaptive_params_topic:=/adaptive_impedance_params \
+        adaptive_update_rate_hz:=20.0 \
+        adaptive_nominal_stiffness:=400.0 \
+        adaptive_min_stiffness:=150.0 \
+        adaptive_force_gain:=2.0 \
+        adaptive_imbalance_gain:=8.0 > "$TASK_LOG" 2>&1 &
     TASK_PID=$!
     echo "进程 PID: $TASK_PID"
     echo $TASK_PID >> "$PID_FILE"
@@ -352,12 +530,18 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
 
     echo ""
 
-    # 5. 启动传感器监控及控制参数 GUI
-    echo "[5/5] 启动传感器可视化与参数调优 GUI..."
-    python3 "${WORKSPACE_DIR}/sensor_dashboard.py" "$CONTROL_MODE" > "${LOG_DIR}/sensor_gui_${TIMESTAMP}.log" 2>&1 &
-    GUI_PID=$!
-    echo "进程 PID: $GUI_PID"
-    echo $GUI_PID >> "$PID_FILE"
+    # 5. 启动传感器监控及控制参数 GUI（可选）
+    GUI_PID=""
+    if [ "$ENABLE_SENSOR_GUI" = "true" ]; then
+        echo "[5/5] 启动传感器可视化与参数调优 GUI..."
+        EXPERIMENT_DATA_DIR="${RESULT_DATA_DIR}" python3 "${WORKSPACE_DIR}/sensor_dashboard.py" "$CONTROL_MODE" > "${LOG_DIR}/sensor_gui_${TIMESTAMP}.log" 2>&1 &
+        GUI_PID=$!
+        echo "进程 PID: $GUI_PID"
+        echo $GUI_PID >> "$PID_FILE"
+    else
+        echo "[5/5] 已跳过传感器 GUI（ENABLE_SENSOR_GUI=${ENABLE_SENSOR_GUI}）"
+        echo "      如需启用可视化，请使用: ENABLE_SENSOR_GUI=true ./start_dual_arm_task.sh"
+    fi
 
     echo ""
     echo "========================================"
@@ -367,29 +551,82 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     echo "组件状态:"
     echo "  • MoveIt2 + MuJoCo: PID $MOVEIT_PID"
     echo "  • 任务节点: PID $TASK_PID"
-    echo "  • 可视化终端: PID $GUI_PID"
+    if [ -n "$GUI_PID" ]; then
+        echo "  • 可视化终端: PID $GUI_PID"
+    else
+        echo "  • 可视化终端: 已跳过"
+    fi
     echo ""
     echo "日志位置:"
     echo "  • MoveIt/MuJoCo: $MOVEIT_LOG"
     echo "  • 任务节点: $TASK_LOG"
+    echo "  • 通信时延报告: ${RESULT_REPORT_DIR}/comm_latency_${TIMESTAMP}_*_summary.md"
+    echo "  • 指标报告: ${RESULT_REPORT_DIR}/task_metrics_${TIMESTAMP}_${CONTROL_MODE}_*_summary.md"
+    echo "  • 图表输出目录: ${RESULT_PLOT_DIR}"
     echo "  • 诊断日志: $DIAG_LOG"
     echo ""
     echo "所有组件已顺利启动！机器开始全自动执行固定预编任务流程..."
     echo "========================================"
     echo ""
 
-    # 监控 GUI 进程，直到其因收到任务 DONE 状态发布而自动安全退出 (耗时约几十秒)
-    wait $GUI_PID
+    # 监控 GUI 进程健康状态（不作为任务完成判据）
+    if [ -n "$GUI_PID" ] && ! ps -p $GUI_PID > /dev/null 2>&1; then
+        echo "⚠ 传感器GUI进程启动后立即退出（不影响主任务执行）"
+    fi
+
+    echo "等待任务终态（DONE / ERROR），最长240秒..."
+    wait_for_task_terminal_state "$TASK_LOG" "$TASK_PID" 240
+    TASK_STATE_CODE=$?
+
+    if [ "$TASK_STATE_CODE" -eq 0 ]; then
+        echo "✅ 检测到任务完成状态(DONE)"
+    elif [ "$TASK_STATE_CODE" -eq 2 ]; then
+        echo "❌ 检测到任务失败状态(ERROR)"
+    elif [ "$TASK_STATE_CODE" -eq 3 ]; then
+        echo "❌ 任务节点进程提前退出，请检查日志: $TASK_LOG"
+    else
+        echo "⚠ 240秒内未检测到任务终态，可能仍在执行中"
+    fi
 
     echo ""
     echo "========================================"
-    echo "🎓 监测到全流程搬运已完成，开始读取整周期CSV数据并绘制高精度分析图..."
+    echo "🎓 任务流程结束，开始读取整周期CSV数据并绘制高精度分析图..."
     echo "========================================"
-    python3 "${WORKSPACE_DIR}/plot_experiment_results.py"
+    python3 "${WORKSPACE_DIR}/plot_experiment_results.py" \
+        --data-dir "${RESULT_DATA_DIR}" \
+        --plot-dir "${RESULT_PLOT_DIR}" || true
+
+    LATENCY_SUMMARY_MD=$(ls -t "${RESULT_REPORT_DIR}/comm_latency_${TIMESTAMP}_"*_summary.md 2>/dev/null | head -1)
+    LATENCY_SUMMARY_CSV=$(ls -t "${RESULT_REPORT_DIR}/comm_latency_${TIMESTAMP}_"*_summary.csv 2>/dev/null | head -1)
+    METRICS_SUMMARY_MD=$(ls -t "${RESULT_REPORT_DIR}/task_metrics_${TIMESTAMP}_${CONTROL_MODE}_"*_summary.md 2>/dev/null | head -1)
+    METRICS_SUMMARY_CSV=$(ls -t "${RESULT_REPORT_DIR}/task_metrics_${TIMESTAMP}_${CONTROL_MODE}_"*_summary.csv 2>/dev/null | head -1)
+    if [ -n "$LATENCY_SUMMARY_MD" ]; then
+        echo ""
+        echo "通信时延报告已生成:"
+        echo "  • 表格报告: $LATENCY_SUMMARY_MD"
+        if [ -n "$LATENCY_SUMMARY_CSV" ]; then
+            echo "  • 数据汇总: $LATENCY_SUMMARY_CSV"
+        fi
+    else
+        echo ""
+        echo "⚠ 未检测到通信时延报告，请检查任务日志: $TASK_LOG"
+    fi
+
+    if [ -n "$METRICS_SUMMARY_MD" ]; then
+        echo ""
+        echo "任务量化指标报告已生成:"
+        echo "  • 表格报告: $METRICS_SUMMARY_MD"
+        if [ -n "$METRICS_SUMMARY_CSV" ]; then
+            echo "  • 数据汇总: $METRICS_SUMMARY_CSV"
+        fi
+    else
+        echo ""
+        echo "⚠ 未检测到任务指标报告，请检查任务日志: $TASK_LOG"
+    fi
 
     echo ""
-    echo "⭐⭐图表计算/输出完毕！任务圆满结束。⭐⭐"
-    echo "请前往 mujoco_franka/franka_ws/experiment_data 文件夹查看此轮的对比结果图。"
+    echo "⭐⭐图表计算/输出步骤结束。⭐⭐"
+    echo "请前往 ${RESULTS_DIR} 文件夹查看本轮数据与图表。"
 
 else
     echo "[4/4] 视觉感知与动态搬运模式 (Mode B) 环境就绪..."

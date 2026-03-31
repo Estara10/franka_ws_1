@@ -28,6 +28,8 @@ class SensorDashboard(Node):
     def __init__(self, mode="compliant_chomp"):
         super().__init__('sensor_dashboard')
         self.mode = mode
+        self.output_data_dir = os.getenv("EXPERIMENT_DATA_DIR", "experiment_data")
+        os.makedirs(self.output_data_dir, exist_ok=True)
         self.left_wrench = WrenchStamped()
         self.right_wrench = WrenchStamped()
         self.task_done = False
@@ -75,7 +77,13 @@ class SensorDashboard(Node):
         self.right_wrench = msg
 
     def adaptive_cb(self, msg):
-        if len(msg.data) >= 2:
+        # 兼容不同自适应参数消息格式：
+        # 1) [K, D, ...]
+        # 2) [left_fz, right_fz, imbalance, avg_abs_force, K, D, ...]
+        if len(msg.data) >= 6:
+            self.current_K_scale = msg.data[4]
+            self.current_D_scale = msg.data[5]
+        elif len(msg.data) >= 2:
             self.current_K_scale = msg.data[0]
             self.current_D_scale = msg.data[1]
 
@@ -180,8 +188,8 @@ def update_ui(root, node, vars, canvas, ax1, ax2, ax3, ax4, line_l, line_r, line
         if node.task_done:
             # 任务完成，保存CSV数据并退出
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            os.makedirs("experiment_data", exist_ok=True)
-            filename = f"experiment_data/experiment_{node.mode}_{timestamp}.csv"
+            os.makedirs(node.output_data_dir, exist_ok=True)
+            filename = os.path.join(node.output_data_dir, f"experiment_{node.mode}_{timestamp}.csv")
             
             import csv
             with open(filename, 'w', newline='') as f:

@@ -1,0 +1,737 @@
+/**
+ * @file dual_arm_carry_task.cpp
+ * @brief 双臂协作搬运任务 - 基础开环控制实现
+ * 
+ * 功能: 
+ * 1. 双臂移动到物体两侧
+ * 2. 夹紧物体
+ * 3. 协同抬起物体
+ * 
+ * 状态机: INIT -> APPROACH -> GRASP -> LIFT -> DONE
+ */
+
+#include <rclcpp/rclcpp.hpp>
+#include <moveit/move_group_interface/move_group_interface.h>
+#include <moveit/planning_scene_interface/planning_scene_interface.h>
+#include <moveit_msgs/msg/collision_object.hpp>
+#include <moveit_msgs/msg/planning_scene.hpp>
+#include <moveit_msgs/msg/attached_collision_object.hpp>
+#include <shape_msgs/msg/solid_primitive.hpp>
+#include <moveit_visual_tools/moveit_visual_tools.h>
+#include <moveit/robot_state/robot_state.h>
+#include <moveit/robot_model/robot_model.h>
+#include <control_msgs/action/gripper_command.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
+#include <geometry_msgs/msg/pose.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2_eigen/tf2_eigen.hpp>
+
+#include <memory>
+#include <thread>
+#include <chrono>
+
+// 任务状态枚举
+enum class TaskState {
+    INIT,
+    APPROACH,
+    GRASP,
+    LIFT,
+    PLACE,
+    DONE,
+    ERROR
+};
+
+class DualArmCarryTask : public rclcpp::Node
+{
+public:
+    DualArmCarryTask() : Node("dual_arm_carry_task")
+    {
+        RCLCPP_INFO(this->get_logger(), "=== 双臂协作搬运任务节点初始化 ===");
+        
+        // 初始化参数
+        this->declare_parameter<std::string>("left_arm_group", "mj_left_arm");
+        this->declare_parameter<std::string>("right_arm_group", "mj_right_arm");
+        this->declare_parameter<std::string>("dual_arm_group", "dual_panda");
+        this->declare_parameter<double>("approach_height", 0.20);
+        this->declare_parameter<double>("grasp_height", 0.08);
+        this->declare_parameter<double>("lift_height", 0.25);
+        this->declare_parameter<double>("gripper_close_position", 0.02);
+        
+        left_arm_group_ = this->get_parameter("left_arm_group").as_string();
+        right_arm_group_ = this->get_parameter("right_arm_group").as_string();
+        dual_arm_group_ = this->get_parameter("dual_arm_group").as_string();
+        approach_height_ = this->get_parameter("approach_height").as_double();
+        grasp_height_ = this->get_parameter("grasp_height").as_double();
+        lift_height_ = this->get_parameter("lift_height").as_double();
+        gripper_close_pos_ = this->get_parameter("gripper_close_position").as_double();
+        
+        current_state_ = TaskState::INIT;
+        
+        RCLCPP_INFO(this->get_logger(), "配置参数:");
+        RCLCPP_INFO(this->get_logger(), "  左臂组: %s", left_arm_group_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  右臂组: %s", right_arm_group_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  双臂组: %s", dual_arm_group_.c_str());
+    }
+    
+    void initialize()
+    {
+        RCLCPP_INFO(this->get_logger(), "初始化 MoveIt 接口...");
+        
+        try {
+            // 主要使用双臂协同组
+            dual_arm_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
+                shared_from_this(), dual_arm_group_);
+            RCLCPP_INFO(this->get_logger(), "✓ 双臂协同组已加载");
+            
+            // 设置规划参数
+            dual_arm_->setPlanningTime(10.0);
+            dual_arm_->setNumPlanningAttempts(10);
+            dual_arm_->setMaxVelocityScalingFactor(0.3);
+            dual_arm_->setMaxAccelerationScalingFactor(0.3);
+            
+            // 设置更长的执行超时时间（默认是轨迹时间的1.5倍，我们设置为5倍）
+            dual_arm_->setGoalPositionTolerance(0.01);
+            dual_arm_->setGoalOrientationTolerance(0.01);
+            
+            // 同时创建单臂接口用于获取运动学信息
+            left_arm_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
+                shared_from_this(), left_arm_group_);
+            right_arm_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
+                shared_from_this(), right_arm_group_);
+            
+            RCLCPP_INFO(this->get_logger(), "✓ MoveIt 接口初始化完成");
+            RCLCPP_INFO(this->get_logger(), "  左臂末端: %s", left_arm_->getEndEffectorLink().c_str());
+            RCLCPP_INFO(this->get_logger(), "  右臂末端: %s", right_arm_->getEndEffectorLink().c_str());
+            RCLCPP_INFO(this->get_logger(), "  双臂组关节数: %zu", dual_arm_->getJointNames().size());
+            
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "MoveIt 初始化失败: %s", e.what());
+            current_state_ = TaskState::ERROR;
+            return;
+        }
+        
+        RCLCPP_INFO(this->get_logger(), "=== 初始化完成，准备执行任务 ===\n");
+    }
+    
+    void executeTask()
+    {
+        RCLCPP_INFO(this->get_logger(), "\n========================================");
+        RCLCPP_INFO(this->get_logger(), "    开始执行双臂协作搬运任务");
+        RCLCPP_INFO(this->get_logger(), "========================================\n");
+        
+        while (rclcpp::ok() && current_state_ != TaskState::DONE && current_state_ != TaskState::ERROR) {
+            switch (current_state_) {
+                case TaskState::INIT:
+                    executeInit();
+                    break;
+                case TaskState::APPROACH:
+                    executeApproach();
+                    break;
+                case TaskState::GRASP:
+                    executeGrasp();
+                    break;
+                case TaskState::LIFT:
+                    executeLift();
+                    break;
+                case TaskState::PLACE:
+                    executePlace();
+                    break;
+                default:
+                    break;
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+        
+        if (current_state_ == TaskState::DONE) {
+            RCLCPP_INFO(this->get_logger(), "\n========================================");
+            RCLCPP_INFO(this->get_logger(), "    ✓ 任务完成！");
+            RCLCPP_INFO(this->get_logger(), "========================================\n");
+        } else if (current_state_ == TaskState::ERROR) {
+            RCLCPP_ERROR(this->get_logger(), "\n========================================");
+            RCLCPP_ERROR(this->get_logger(), "    ✗ 任务失败！");
+            RCLCPP_ERROR(this->get_logger(), "========================================\n");
+        }
+    }
+
+private:
+    using GripperAction = control_msgs::action::GripperCommand;
+    using GripperGoalHandle = rclcpp_action::ClientGoalHandle<GripperAction>;
+
+    /**
+     * @brief 修改允许碰撞矩阵(ACM)，允许或禁止夹爪与物体碰撞
+     * @param allow true=允许夹爪碰撞aluminum_rod, false=禁止碰撞
+     */
+    void allow_gripper_collision(bool allow)
+    {
+        // 定义需要允许碰撞的夹爪链接
+        std::vector<std::string> gripper_links = {
+            "mj_left_hand", "mj_left_leftfinger", "mj_left_rightfinger",
+            "mj_right_hand", "mj_right_leftfinger", "mj_right_rightfinger"
+        };
+        
+        std::string object_id = "aluminum_rod";
+        
+        // 构造正确的ACM消息
+        moveit_msgs::msg::PlanningScene planning_scene_msg;
+        planning_scene_msg.is_diff = true;
+        
+        // 设置ACM矩阵：行=夹爪链接, 列=物体
+        planning_scene_msg.allowed_collision_matrix.entry_names = gripper_links;
+        planning_scene_msg.allowed_collision_matrix.default_entry_names.push_back(object_id);
+        planning_scene_msg.allowed_collision_matrix.default_entry_values.push_back(allow);
+        
+        // 为每个夹爪链接创建一行，包含与object_id的碰撞设置
+        for (size_t i = 0; i < gripper_links.size(); ++i) {
+            moveit_msgs::msg::AllowedCollisionEntry entry;
+            entry.enabled.push_back(allow);  // 与object_id的碰撞设置
+            planning_scene_msg.allowed_collision_matrix.entry_values.push_back(entry);
+        }
+        
+        // 发布PlanningScene更新
+        auto planning_scene_diff_pub = this->create_publisher<moveit_msgs::msg::PlanningScene>(
+            "/planning_scene", 10);
+        
+        // 等待publisher连接
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        planning_scene_diff_pub->publish(planning_scene_msg);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));  // 增加等待时间确保ACM更新生效
+        
+        if (allow) {
+            RCLCPP_INFO(this->get_logger(), "  ✓ ACM已更新：允许夹爪与aluminum_rod碰撞");
+        } else {
+            RCLCPP_INFO(this->get_logger(), "  ✓ ACM已更新：禁止夹爪与aluminum_rod碰撞");
+        }
+    }
+    
+    /**
+     * @brief 控制夹爪闭合/打开
+     * @param arm_name "mj_left" or "mj_right"
+     * @param position 目标位置 (0.0=完全闭合, 0.04=完全打开)
+     */
+    void controlGripper(const std::string& arm_name, double position)
+    {
+        // 创建action client
+        std::string action_name = "/" + arm_name + "_gripper/gripper_cmd";
+        auto gripper_client = rclcpp_action::create_client<GripperAction>(
+            this->get_node_base_interface(),
+            this->get_node_graph_interface(),
+            this->get_node_logging_interface(),
+            this->get_node_waitables_interface(),
+            action_name);
+        
+        // 等待action server
+        if (!gripper_client->wait_for_action_server(std::chrono::seconds(3))) {
+            RCLCPP_WARN(this->get_logger(), "  ! Gripper action server '%s' 不可用，跳过夹爪控制", 
+                       action_name.c_str());
+            return;
+        }
+        
+        // 构造goal
+        auto goal_msg = GripperAction::Goal();
+        goal_msg.command.position = position;
+        goal_msg.command.max_effort = 50.0;  // 最大力 50N
+        
+        RCLCPP_INFO(this->get_logger(), "  发送夹爪指令: %s -> %.3f", arm_name.c_str(), position);
+        
+        // 发送goal并等待结果
+        auto send_goal_options = rclcpp_action::Client<GripperAction>::SendGoalOptions();
+        auto goal_handle_future = gripper_client->async_send_goal(goal_msg, send_goal_options);
+        
+        // 等待goal被接受
+        if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), goal_handle_future, 
+                                               std::chrono::seconds(2)) != rclcpp::FutureReturnCode::SUCCESS) {
+            RCLCPP_ERROR(this->get_logger(), "  ✗ 发送夹爪goal失败: %s", arm_name.c_str());
+            return;
+        }
+        
+        auto goal_handle = goal_handle_future.get();
+        if (!goal_handle) {
+            RCLCPP_ERROR(this->get_logger(), "  ✗ 夹爪goal被拒绝: %s", arm_name.c_str());
+            return;
+        }
+        
+        // 等待结果
+        auto result_future = gripper_client->async_get_result(goal_handle);
+        if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), result_future, 
+                                               std::chrono::seconds(5)) != rclcpp::FutureReturnCode::SUCCESS) {
+            RCLCPP_ERROR(this->get_logger(), "  ✗ 夹爪执行超时: %s", arm_name.c_str());
+            return;
+        }
+        
+        auto result = result_future.get();
+        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
+            RCLCPP_INFO(this->get_logger(), "  ✓ 夹爪控制成功: %s", arm_name.c_str());
+        } else {
+            RCLCPP_WARN(this->get_logger(), "  ! 夹爪控制失败: %s", arm_name.c_str());
+        }
+    }
+
+    void executeInit()
+    {
+        RCLCPP_INFO(this->get_logger(), "[状态: INIT] 初始化...");
+        
+        try {
+            // 跳过初始位置移动，直接使用当前位置
+            RCLCPP_INFO(this->get_logger(), "  使用当前机械臂位置作为起始点");
+            
+            // 发布铝棒碰撞物体到 Planning Scene
+            publishAluminumRod();
+            
+            RCLCPP_INFO(this->get_logger(), "✓ 初始化完成，进入接近阶段\n");
+            current_state_ = TaskState::APPROACH;
+            
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "INIT 阶段异常: %s", e.what());
+            current_state_ = TaskState::ERROR;
+        }
+    }
+    
+    void publishAluminumRod()
+    {
+        // 创建 Planning Scene Interface
+        moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+        
+        // 创建碰撞物体消息
+        moveit_msgs::msg::CollisionObject collision_object;
+        collision_object.header.frame_id = "base_link";
+        collision_object.id = "aluminum_rod";
+        
+        // 定义铝棒形状 (横向放置: 4cm(X) x 40cm(Y) x 4cm(Z))
+        // 注意：现在长轴在Y方向
+        shape_msgs::msg::SolidPrimitive primitive;
+        primitive.type = primitive.BOX;
+        primitive.dimensions.resize(3);
+        primitive.dimensions[0] = 0.04;  // X方向宽度
+        primitive.dimensions[1] = 0.40;  // Y方向长度 (长轴)
+        primitive.dimensions[2] = 0.04;  // Z方向高度
+        
+        // 定义铝棒位置 (与MuJoCo中objects.xml一致)
+        geometry_msgs::msg::Pose box_pose;
+        box_pose.orientation.w = 1.0;
+        box_pose.position.x = 0.50;  // 与MuJoCo中的位置一致
+        box_pose.position.y = 0.0;
+        box_pose.position.z = 0.02;  // 物体中心高度 (底部接触地面)
+        
+        collision_object.primitives.push_back(primitive);
+        collision_object.primitive_poses.push_back(box_pose);
+        collision_object.operation = collision_object.ADD;
+        
+        // 发布到 Planning Scene
+        std::vector<moveit_msgs::msg::CollisionObject> collision_objects;
+        collision_objects.push_back(collision_object);
+        planning_scene_interface.addCollisionObjects(collision_objects);
+        
+        RCLCPP_INFO(this->get_logger(), "  ✓ 铝棒碰撞物体已添加到 Planning Scene");
+        
+        // 等待碰撞物体被处理
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    
+    void executeApproach()
+    {
+        RCLCPP_INFO(this->get_logger(), "[状态: APPROACH] 接近物体...");
+        
+        // ========== 物体与机械臂参数定义 ==========
+        // 物体位置 (从objects.xml: pos="0.5 0.0 0.02", 物体底部接触地面)
+        double obj_x = 0.50;
+        double obj_y = 0.0;
+        double obj_height = 0.04;  // 物体总高度 4cm (Z方向)
+        
+        // 杆件参数 (长轴在Y方向，横向放置)
+        double rod_half_length = 0.20;  // Y方向半长 20cm
+        
+        // Franka机械臂参数
+        double gripper_length = 0.11;    // 夹爪指尖到法兰的长度约 11cm
+        double safety_margin = 0.15;     // 安全余量 15cm
+        
+        // ========== Z轴高度计算 ==========
+        double grasp_z = obj_height / 2.0;  // 抓取中心在物体中间 Z=0.02m
+        double approach_z = grasp_z + gripper_length + safety_margin;  // 接近高度 Z≈0.28m
+        
+        // ========== Y方向偏移 ==========
+        double approach_offset_y = 0.10;  // 在杆件两端外侧10cm处接近
+        
+        try {
+            // ========== 注意：MuJoCo场景中mj_left base在Y=+0.26(右侧)，mj_right base在Y=-0.26(左侧) ==========
+            // 因此需要让mj_left去物体+Y端，mj_right去物体-Y端，避免交叉
+            
+            // ========== 左臂目标位姿 (物体Y正侧，因为mj_left base在+Y侧) ==========
+            geometry_msgs::msg::Pose left_target;
+            left_target.position.x = obj_x;
+            left_target.position.y = obj_y + rod_half_length + approach_offset_y;  // Y≈+0.30 (靠近mj_left base)
+            left_target.position.z = approach_z;  // Z≈0.28
+            
+            // 姿态：手心垂直向下，夹爪垂直于长条物体
+            // Roll=180° (M_PI) -> 翻转手腕向下
+            // Pitch=0
+            // Yaw=-90° (-M_PI/2) -> 从+Y侧抓取，夹爪朝向物体中心
+            tf2::Quaternion left_quat;
+            left_quat.setRPY(M_PI, 0, -M_PI/2);  // Yaw=-90°从右侧抓取
+            left_target.orientation = tf2::toMsg(left_quat);
+            
+            // ========== 右臂目标位姿 (物体Y负侧，因为mj_right base在-Y侧) ==========
+            geometry_msgs::msg::Pose right_target;
+            right_target.position.x = obj_x;
+            right_target.position.y = obj_y - rod_half_length - approach_offset_y;  // Y≈-0.30 (靠近mj_right base)
+            right_target.position.z = approach_z;  // Z≈0.28
+            
+            // 姿态：与左臂对称，Yaw=+90°
+            tf2::Quaternion right_quat;
+            right_quat.setRPY(M_PI, 0, M_PI/2);  // Yaw=+90°从左侧抓取
+            right_target.orientation = tf2::toMsg(right_quat);
+            
+            RCLCPP_INFO(this->get_logger(), "  左臂(mj_left,物理右侧)目标: [%.2f, %.2f, %.2f] 姿态:(R=180°,P=0°,Y=-90°)", 
+                        left_target.position.x, left_target.position.y, left_target.position.z);
+            RCLCPP_INFO(this->get_logger(), "  右臂(mj_right,物理左侧)目标: [%.2f, %.2f, %.2f] 姿态:(R=180°,P=0°,Y=90°)",
+                        right_target.position.x, right_target.position.y, right_target.position.z);
+            
+            // ========== 使用setPoseTarget设置目标（关键改变！） ==========
+            left_arm_->setPoseTarget(left_target);
+            right_arm_->setPoseTarget(right_target);
+            
+            // ========== 使用双臂协同组规划 ==========
+            // 获取当前状态
+            auto robot_state = dual_arm_->getCurrentState();
+            
+            // 从单臂目标构建双臂目标状态
+            auto robot_model = dual_arm_->getRobotModel();
+            auto target_state = std::make_shared<moveit::core::RobotState>(robot_model);
+            *target_state = *robot_state;
+            
+            // 为左臂设置目标位姿并计算IK
+            Eigen::Isometry3d left_pose, right_pose;
+            tf2::fromMsg(left_target, left_pose);
+            tf2::fromMsg(right_target, right_pose);
+            
+            auto left_jmg = robot_model->getJointModelGroup(left_arm_group_);
+            bool left_ik_ok = target_state->setFromIK(left_jmg, left_pose, 5.0);
+            
+            auto right_jmg = robot_model->getJointModelGroup(right_arm_group_);
+            bool right_ik_ok = target_state->setFromIK(right_jmg, right_pose, 5.0);
+            
+            if (!left_ik_ok || !right_ik_ok) {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ IK求解失败 (左臂:%d 右臂:%d)", left_ik_ok, right_ik_ok);
+                RCLCPP_ERROR(this->get_logger(), "    左臂目标: [%.3f, %.3f, %.3f]", 
+                            left_target.position.x, left_target.position.y, left_target.position.z);
+                RCLCPP_ERROR(this->get_logger(), "    右臂目标: [%.3f, %.3f, %.3f]",
+                            right_target.position.x, right_target.position.y, right_target.position.z);
+                RCLCPP_WARN(this->get_logger(), "  ! 目标位姿可能超出工作空间或存在奇异点，跳过此阶段");
+                current_state_ = TaskState::DONE;
+                return;
+            }
+            
+            // 使用双臂组规划到IK解
+            dual_arm_->setJointValueTarget(*target_state);
+            
+            moveit::planning_interface::MoveGroupInterface::Plan plan;
+            auto success = dual_arm_->plan(plan);
+            
+            if (success != moveit::core::MoveItErrorCode::SUCCESS) {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ 双臂规划失败");
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+            
+            RCLCPP_INFO(this->get_logger(), "  ✓ 双臂规划成功，开始执行...");
+            auto result = dual_arm_->execute(plan);
+            if (result != moveit::core::MoveItErrorCode::SUCCESS) {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ 双臂执行失败");
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+            RCLCPP_INFO(this->get_logger(), "  ✓ 双臂移动完成");
+            
+            RCLCPP_INFO(this->get_logger(), "✓ 接近完成，进入抓取阶段\n");
+            current_state_ = TaskState::GRASP;
+            
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "APPROACH 阶段异常: %s", e.what());
+            current_state_ = TaskState::ERROR;
+        }
+    }
+    
+    void executeGrasp()
+    {
+        RCLCPP_INFO(this->get_logger(), "[状态: GRASP] 夹紧物体...");
+        RCLCPP_INFO(this->get_logger(), "  策略: 保持当前位置，直接闭合夹爪夹取物体");
+        
+        // ========== 步骤1: 修改ACM允许夹爪碰撞 ==========
+        RCLCPP_INFO(this->get_logger(), "  步骤1: 允许夹爪与物体碰撞（为后续LIFT阶段准备）");
+        allow_gripper_collision(true);
+        
+        try {
+            // ========== 步骤2: 使用笛卡尔路径接近物体 ==========
+            RCLCPP_INFO(this->get_logger(), "  步骤2: 规划笛卡尔接近路径");
+            
+            // 左臂目标位姿 (去+Y端)
+            geometry_msgs::msg::Pose left_grasp;
+            left_grasp.position.x = obj_x;
+            left_grasp.position.y = obj_y + rod_half_length + grasp_offset_y;  // Y≈+0.25
+            left_grasp.position.z = grasp_target_z;  // Z≈0.05
+            tf2::Quaternion left_quat;
+            left_quat.setRPY(M_PI, 0, -M_PI/2);
+            left_grasp.orientation = tf2::toMsg(left_quat);
+            
+            // 右臂目标位姿 (去-Y端)
+            geometry_msgs::msg::Pose right_grasp;
+            right_grasp.position.x = obj_x;
+            right_grasp.position.y = obj_y - rod_half_length - grasp_offset_y;  // Y≈-0.25
+            right_grasp.position.z = grasp_target_z;
+            tf2::Quaternion right_quat;
+            right_quat.setRPY(M_PI, 0, M_PI/2);
+            right_grasp.orientation = tf2::toMsg(right_quat);
+            
+            // 使用IK计算双臂目标关节状态
+            auto robot_model = dual_arm_->getRobotModel();
+            auto robot_state = std::make_shared<moveit::core::RobotState>(robot_model);
+            *robot_state = *dual_arm_->getCurrentState();
+            
+            Eigen::Isometry3d left_pose, right_pose;
+            tf2::fromMsg(left_grasp, left_pose);
+            tf2::fromMsg(right_grasp, right_pose);
+            
+            auto left_jmg = robot_model->getJointModelGroup(left_arm_group_);
+            bool left_ik_ok = robot_state->setFromIK(left_jmg, left_pose);
+            
+            auto right_jmg = robot_model->getJointModelGroup(right_arm_group_);
+            bool right_ik_ok = robot_state->setFromIK(right_jmg, right_pose);
+            
+            if (!left_ik_ok || !right_ik_ok) {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ IK求解失败 (left=%d, right=%d)", left_ik_ok, right_ik_ok);
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+            
+            RCLCPP_INFO(this->get_logger(), "  ✓ IK求解成功");
+            
+            // 检查当前状态是否有效
+            auto current_state = dual_arm_->getCurrentState(5.0);
+            if (!current_state) {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ 无法获取当前机械臂状态");
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+            
+            // 检查目标状态是否有效（碰撞检测）
+            if (!robot_state->satisfiesBounds()) {
+                RCLCPP_WARN(this->get_logger(), "  ! 目标状态超出关节限制");
+            }
+            
+            // 设置目标并规划（增加规划时间和尝试次数）
+            dual_arm_->setJointValueTarget(*robot_state);
+            dual_arm_->setPlanningTime(15.0);  // 增加到15秒
+            dual_arm_->setNumPlanningAttempts(20);  // 增加尝试次数
+            dual_arm_->setMaxVelocityScalingFactor(0.1);  // 慢速接近
+            dual_arm_->setMaxAccelerationScalingFactor(0.1);
+            
+            RCLCPP_INFO(this->get_logger(), "  开始规划（时间限制15秒，20次尝试）...");
+            moveit::planning_interface::MoveGroupInterface::Plan plan;
+            auto success = dual_arm_->plan(plan);
+            
+            if (success != moveit::core::MoveItErrorCode::SUCCESS) {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ 双臂抓取路径规划失败 (错误码: %d)", success.val);
+                
+                // 尝试获取详细错误信息
+                RCLCPP_ERROR(this->get_logger(), "  提示: 检查ACM是否正确更新，当前状态是否有碰撞");
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+            
+            RCLCPP_INFO(this->get_logger(), "  ✓ 规划成功，执行接近动作");
+            auto result = dual_arm_->execute(plan);
+            if (result != moveit::core::MoveItErrorCode::SUCCESS) {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ 双臂执行失败");
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+            RCLCPP_INFO(this->get_logger(), "  ✓ 双臂到达抓取位置");
+            
+            // ========== 步骤3: 闭合夹爪 ==========
+            RCLCPP_INFO(this->get_logger(), "  步骤3: 闭合夹爪");
+            controlGripper("mj_left", 0.02);   // 闭合到2cm
+            controlGripper("mj_right", 0.02);
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            
+            // ========== 步骤4: 附着物体到Planning Scene ==========
+            RCLCPP_INFO(this->get_logger(), "  步骤4: 附着物体到机械臂");
+            moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+            
+            // 定义接触链接
+            std::vector<std::string> touch_links = {
+                "mj_left_hand", "mj_left_leftfinger", "mj_left_rightfinger",
+                "mj_right_hand", "mj_right_rightfinger", "mj_right_leftfinger"
+            };
+            
+            // 创建附着碰撞对象
+            moveit_msgs::msg::AttachedCollisionObject attached_object;
+            attached_object.link_name = left_arm_->getEndEffectorLink();  // mj_left_link8
+            attached_object.object.header.frame_id = left_arm_->getEndEffectorLink();
+            attached_object.object.id = "aluminum_rod";
+            
+            // 定义附着物体形状（与publishAluminumRod保持一致）
+            shape_msgs::msg::SolidPrimitive primitive;
+            primitive.type = primitive.BOX;
+            primitive.dimensions.resize(3);
+            primitive.dimensions[0] = 0.04;
+            primitive.dimensions[1] = 0.40;
+            primitive.dimensions[2] = 0.04;
+            
+            // 物体相对于末端执行器的位置
+            geometry_msgs::msg::Pose attach_pose;
+            attach_pose.orientation.w = 1.0;
+            attach_pose.position.x = 0.0;
+            attach_pose.position.y = 0.0;
+            attach_pose.position.z = -0.08;  // 夹爪下方8cm
+            
+            attached_object.object.primitives.push_back(primitive);
+            attached_object.object.primitive_poses.push_back(attach_pose);
+            attached_object.object.operation = attached_object.object.ADD;
+            attached_object.touch_links = touch_links;
+            
+            // 发布附着对象
+            auto planning_scene_msg = moveit_msgs::msg::PlanningScene();
+            planning_scene_msg.robot_state.attached_collision_objects.push_back(attached_object);
+            planning_scene_msg.is_diff = true;
+            
+            auto planning_scene_pub = this->create_publisher<moveit_msgs::msg::PlanningScene>(
+                "/planning_scene", 10);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            planning_scene_pub->publish(planning_scene_msg);
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            
+            RCLCPP_INFO(this->get_logger(), "  ✓ 物体已附着到左臂");
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            
+            // 恢复正常速度
+            dual_arm_->setMaxVelocityScalingFactor(0.3);
+            dual_arm_->setMaxAccelerationScalingFactor(0.3);
+            
+            RCLCPP_INFO(this->get_logger(), "✓ 抓取完成，进入抬起阶段\n");
+            current_state_ = TaskState::LIFT;
+            
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "GRASP 阶段异常: %s", e.what());
+            current_state_ = TaskState::ERROR;
+        }
+    }
+    
+    void executeLift()
+    {
+        RCLCPP_INFO(this->get_logger(), "[状态: LIFT] 抬起物体...");
+        
+        try {
+            // 获取当前位置
+            auto left_current = left_arm_->getCurrentPose();
+            auto right_current = right_arm_->getCurrentPose();
+            
+            // 保持 x, y 不变，只改变 z
+            geometry_msgs::msg::Pose left_lift = left_current.pose;
+            left_lift.position.z = lift_height_;
+            
+            geometry_msgs::msg::Pose right_lift = right_current.pose;
+            right_lift.position.z = lift_height_;
+            
+            // 使用IK计算双臂目标关节状态
+            auto robot_model = dual_arm_->getRobotModel();
+            auto robot_state = std::make_shared<moveit::core::RobotState>(robot_model);
+            *robot_state = *dual_arm_->getCurrentState();
+            
+            auto left_jmg = robot_model->getJointModelGroup(left_arm_group_);
+            bool left_ik_ok = robot_state->setFromIK(left_jmg, left_lift);
+            
+            auto right_jmg = robot_model->getJointModelGroup(right_arm_group_);
+            bool right_ik_ok = robot_state->setFromIK(right_jmg, right_lift);
+            
+            if (!left_ik_ok || !right_ik_ok) {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ 抬升IK求解失败");
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+            
+            dual_arm_->setJointValueTarget(*robot_state);
+            moveit::planning_interface::MoveGroupInterface::Plan plan;
+            auto success = dual_arm_->plan(plan);
+            
+            if (success == moveit::core::MoveItErrorCode::SUCCESS) {
+                auto result = dual_arm_->execute(plan);
+                if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+                    RCLCPP_INFO(this->get_logger(), "  ✓ 双臂抬升完成");
+                } else {
+                    RCLCPP_ERROR(this->get_logger(), "  ✗ 双臂执行失败");
+                    current_state_ = TaskState::ERROR;
+                    return;
+                }
+            } else {
+                RCLCPP_ERROR(this->get_logger(), "  ✗ 双臂抬升规划失败");
+                current_state_ = TaskState::ERROR;
+                return;
+            }
+            
+            RCLCPP_INFO(this->get_logger(), "✓ 抬起完成\n");
+            current_state_ = TaskState::DONE;
+            
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "LIFT 阶段异常: %s", e.what());
+            current_state_ = TaskState::ERROR;
+        }
+    }
+    
+    void executePlace()
+    {
+        RCLCPP_INFO(this->get_logger(), "[状态: PLACE] 放置物体...");
+        // TODO: 实现放置逻辑
+        current_state_ = TaskState::DONE;
+    }
+
+    // 成员变量
+    std::shared_ptr<moveit::planning_interface::MoveGroupInterface> left_arm_;
+    std::shared_ptr<moveit::planning_interface::MoveGroupInterface> right_arm_;
+    std::shared_ptr<moveit::planning_interface::MoveGroupInterface> dual_arm_;
+    
+    std::string left_arm_group_;
+    std::string right_arm_group_;
+    std::string dual_arm_group_;
+    
+    double approach_height_;
+    double grasp_height_;
+    double lift_height_;
+    double gripper_close_pos_;
+    
+    TaskState current_state_;
+};
+
+int main(int argc, char** argv)
+{
+    rclcpp::init(argc, argv);
+    
+    auto node = std::make_shared<DualArmCarryTask>();
+    
+    // 创建多线程执行器
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
+    
+    // 在单独线程中运行执行器
+    std::thread executor_thread([&executor]() {
+        executor.spin();
+    });
+    
+    // 等待节点初始化
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    
+    // 初始化 MoveIt
+    node->initialize();
+    
+    // 执行任务
+    node->executeTask();
+    
+    // 任务完成后继续spin等待，不退出
+    RCLCPP_INFO(node->get_logger(), "任务执行完成，节点继续运行...");
+    RCLCPP_INFO(node->get_logger(), "按 Ctrl+C 停止节点");
+    
+    // 阻塞主线程，让executor线程继续运行
+    executor_thread.join();
+    
+    return 0;
+}

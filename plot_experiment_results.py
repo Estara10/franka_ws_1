@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import csv
 import sys
 import glob
@@ -9,14 +10,67 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-def main():
-    # 找到最新生成的 csv 文件
-    csv_files = glob.glob('/home/wusiala/mujoco_franka/franka_ws/experiment_data/*.csv')
-    if not csv_files:
-        print("❌ 未找到实验数据CSV文件！图表生成失败。")
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="绘制实验CSV的离线分析图（受力/内应力/平滑度/阻抗缩放）"
+    )
+    parser.add_argument(
+        "--csv",
+        default="",
+        help="指定输入CSV文件路径；为空时自动查找最新CSV"
+    )
+    parser.add_argument(
+        "--data-dir",
+        default="",
+        help="CSV搜索目录；为空时依次搜索脚本目录下 experiment_data 与当前目录 experiment_data"
+    )
+    parser.add_argument(
+        "--output",
+        default="",
+        help="输出PNG路径；为空时默认与CSV同目录同名 .png"
+    )
+    parser.add_argument(
+        "--plot-dir",
+        default="",
+        help="图表输出目录；当未指定 --output 时生效，默认输出到 experiment_results/plots"
+    )
+    return parser.parse_args()
+
+
+def discover_latest_csv(explicit_data_dir: str) -> str:
+    if explicit_data_dir:
+        search_dirs = [explicit_data_dir]
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        search_dirs = [
+            os.path.join(script_dir, "experiment_results", "data"),
+            os.path.join(os.getcwd(), "experiment_results", "data"),
+            os.path.join(script_dir, "experiment_data"),
+            os.path.join(os.getcwd(), "experiment_data"),
+        ]
+
+    candidates = []
+    for directory in search_dirs:
+        if not os.path.isdir(directory):
+            continue
+        candidates.extend(glob.glob(os.path.join(directory, "*.csv")))
+
+    if not candidates:
+        print("❌ 未找到实验数据CSV文件！")
+        print("   可选：传入 --csv 指定文件，或传入 --data-dir 指定目录。")
         sys.exit(1)
 
-    latest_csv = max(csv_files, key=os.path.getctime)
+    return max(candidates, key=os.path.getctime)
+
+
+def main():
+    args = parse_args()
+
+    latest_csv = args.csv if args.csv else discover_latest_csv(args.data_dir)
+    if not os.path.isfile(latest_csv):
+        print(f"❌ 输入CSV不存在: {latest_csv}")
+        sys.exit(1)
+
     print(f"📊 正在读取数据并绘制全阶段性能图表: {latest_csv}")
 
     times = []
@@ -102,11 +156,18 @@ def main():
 
     plt.tight_layout()
     
-    # 替换后缀保存成同一目录下的图片
-    png_name = latest_csv.replace('.csv', '.png')
+    # 默认保存到专门图表目录；可由 --output 或 --plot-dir 覆盖
+    if args.output:
+        png_name = args.output
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        plot_dir = args.plot_dir if args.plot_dir else os.path.join(script_dir, "experiment_results", "plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        csv_root, _ = os.path.splitext(latest_csv)
+        png_name = os.path.join(plot_dir, os.path.basename(csv_root) + '.png')
     plt.savefig(png_name, dpi=300)
     print(f"✅ 【完美】全阶段数据高精度分析曲线已生成，并保存至: {png_name}")
-    print( "   你现在可以前往 experiment_data 文件夹打开查阅该图！")
+    print("   你现在可以直接打开该PNG查看结果。")
     
     # 退出前释放内存
     plt.close()
