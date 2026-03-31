@@ -149,7 +149,7 @@ ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
 修改后需要重启系统。
 
 ### 修改运动速度
-编辑文件: `src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_carry_task.cpp` (第98-99行)
+编辑文件: `src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp` 
 
 ```cpp
 left_arm_->setMaxVelocityScalingFactor(0.5);    // 0.1-1.0

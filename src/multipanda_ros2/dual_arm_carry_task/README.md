@@ -17,7 +17,7 @@
 9. RETREAT
 10. DONE / ERROR
 
-代码定义见 src/dual_arm_carry_task.cpp 文件头注释与 TaskState 枚举。
+**当前代码采用了 MVC 组件化架构**，核心定义见 `include/dual_arm_carry_task/carry_task_context.hpp` 文件中的 `TaskState` 枚举，具体行为实现在 `src/dual_arm_controller.cpp` 和 `src/gripper_controller.cpp`。
 
 ## 快速启动
 
@@ -79,12 +79,17 @@ ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
 
 ## 包内节点
 
-src 目录当前主要节点：
+`dual_arm_carry_task_node` 主任务节点现已重构为 MVC 架构，其主要源文件包含：
 
-1. dual_arm_carry_task.cpp：主任务状态机执行节点
-2. communication_latency_monitor.cpp：通信时延统计节点
-3. task_metrics_monitor.cpp：同步误差/能耗代理/末端误差统计节点
-4. adaptive_compliance_supervisor.cpp：主从+自适应阻抗闭环监督节点
+1. `carry_task_state_machine.cpp`：主任务状态机与节点生命周期管理核心
+2. `dual_arm_controller.cpp`：双臂 MoveIt 运动学规划、轨迹插补及控制逻辑
+3. `gripper_controller.cpp`：双侧 Franka 夹爪 Action Client 同步抓取控制器
+
+其他独立的监测节点包括：
+
+4. communication_latency_monitor.cpp：通信时延统计节点
+5. task_metrics_monitor.cpp：同步误差/能耗代理/末端误差统计节点
+6. adaptive_compliance_supervisor.cpp：主从+自适应阻抗闭环监督节点
 
 ## 故障排查
 
