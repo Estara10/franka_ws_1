@@ -58,6 +58,9 @@ void DualArmCarryTask::executeTask()
                 case TaskState::GRASP:
                     arms_->executeGrasp();
                     break;
+                case TaskState::WAITING_PHYSICS:
+                    // 异步等待物理引擎稳定，由 Timer 触发状态流转
+                    break;
                 case TaskState::LIFT:
                     arms_->executeLift();
                     break;

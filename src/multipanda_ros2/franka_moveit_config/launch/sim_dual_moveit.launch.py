@@ -132,10 +132,21 @@ def generate_launch_description():
     )
 
     # Joint limits (acceleration limits for TOTG time parameterization)
+    robot_description_planning = load_yaml(
+        'franka_moveit_config', 'config/joint_limits.yaml'
+    )
+    if robot_description_planning is None:
+        robot_description_planning = {}
+    # Pilz LIN/PTP planning requires cartesian limits.
+    if 'cartesian_limits' not in robot_description_planning:
+        robot_description_planning['cartesian_limits'] = {
+            'max_trans_vel': 1.0,
+            'max_trans_acc': 2.25,
+            'max_trans_dec': -5.0,
+            'max_rot_vel': 1.57,
+        }
     joint_limits_yaml = {
-        'robot_description_planning': load_yaml(
-            'franka_moveit_config', 'config/joint_limits.yaml'
-        )
+        'robot_description_planning': robot_description_planning
     }
 
     # Planning Functionality
@@ -170,10 +181,21 @@ def generate_launch_description():
             'start_state_max_bounds_error': 0.1,
         }
     }
+
+    # 3. Pilz 工业规划管道（LIN/PTP）
+    pilz_planning_pipeline_config = {
+        'pilz_industrial_motion_planner': {
+            'planning_plugin': 'pilz_industrial_motion_planner/CommandPlanner',
+            'request_adapters': '',
+            'default_planner_config': 'PTP',
+            'capabilities': 'pilz_industrial_motion_planner/MoveGroupSequenceAction '
+                            'pilz_industrial_motion_planner/MoveGroupSequenceService',
+        }
+    }
     
     # 注册所有的 Pipelines
     planning_pipelines_config = {
-        'planning_pipelines': ['ompl', 'chomp'],
+        'planning_pipelines': ['ompl', 'chomp', 'pilz_industrial_motion_planner'],
         'default_planning_pipeline': 'ompl'
     }
 
@@ -223,6 +245,7 @@ def generate_launch_description():
             joint_limits_yaml,
             ompl_planning_pipeline_config,
             chomp_planning_pipeline_config,
+            pilz_planning_pipeline_config,
             planning_pipelines_config,
             trajectory_execution,
             moveit_controllers,
@@ -247,6 +270,7 @@ def generate_launch_description():
             robot_description_semantic,
             ompl_planning_pipeline_config,
             chomp_planning_pipeline_config,
+            pilz_planning_pipeline_config,
             planning_pipelines_config,
             kinematics_yaml,
         ],

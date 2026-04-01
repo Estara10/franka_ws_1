@@ -1,6 +1,39 @@
 #include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
+#if __has_include(<moveit/trajectory_processing/ruckig_traj_smoothing.h>)
+#include <moveit/trajectory_processing/ruckig_traj_smoothing.h>
+#define DUAL_ARM_HAS_RUCKIG 1
+#else
+#define DUAL_ARM_HAS_RUCKIG 0
+#endif
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
 #include "dual_arm_carry_task/gripper_controller.hpp"
+
+namespace {
+bool parameterizeAndSmoothTrajectory(robot_trajectory::RobotTrajectory& traj,
+                                     double vel_scale,
+                                     double acc_scale,
+                                     const rclcpp::Logger& logger,
+                                     const char* phase)
+{
+    trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+    if (!totg.computeTimeStamps(traj, vel_scale, acc_scale)) {
+        RCLCPP_ERROR(logger, "  ✗ [%s] TOTG 时间参数化失败", phase);
+        return false;
+    }
+
+#if DUAL_ARM_HAS_RUCKIG
+    if (trajectory_processing::RuckigSmoothing::applySmoothing(traj, vel_scale, acc_scale)) {
+        RCLCPP_INFO(logger, "  ✓ [%s] 已启用 Ruckig jerk 限制平滑", phase);
+    } else {
+        RCLCPP_WARN(logger, "  ! [%s] Ruckig 平滑失败，沿用 TOTG 轨迹", phase);
+    }
+#else
+    RCLCPP_INFO(logger, "  ! [%s] 当前环境无 Ruckig，沿用 TOTG 轨迹", phase);
+#endif
+
+    return true;
+}
+}
 
 void DualArmController::initialize()
     {
@@ -18,9 +51,10 @@ void DualArmController::initialize()
             ctx_->dual_arm_->setMaxVelocityScalingFactor(0.5);
             ctx_->dual_arm_->setMaxAccelerationScalingFactor(0.5);
             
-            // 设置更长的执行超时时间（默认是轨迹时间的1.5倍，我们设置为5倍）
             ctx_->dual_arm_->setGoalPositionTolerance(0.01);
             ctx_->dual_arm_->setGoalOrientationTolerance(0.01);
+            
+            
             
             // 同时创建单臂接口用于获取运动学信息
             ctx_->left_arm_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
@@ -28,6 +62,11 @@ void DualArmController::initialize()
             ctx_->right_arm_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
                 ctx_->shared_from_this(), ctx_->right_arm_group_);
             
+            // 切换为 Pilz 工业运动规划器
+            ctx_->dual_arm_->setPlanningPipelineId("pilz_industrial_motion_planner");
+            ctx_->left_arm_->setPlanningPipelineId("pilz_industrial_motion_planner");
+            ctx_->right_arm_->setPlanningPipelineId("pilz_industrial_motion_planner");
+            RCLCPP_INFO(ctx_->get_logger(), "✓ 规划管道已全局切换至 Pilz Industrial Motion Planner");
             RCLCPP_INFO(ctx_->get_logger(), "✓ MoveIt 接口初始化完成");
             RCLCPP_INFO(ctx_->get_logger(), "  左臂末端: %s", ctx_->left_arm_->getEndEffectorLink().c_str());
             RCLCPP_INFO(ctx_->get_logger(), "  右臂末端: %s", ctx_->right_arm_->getEndEffectorLink().c_str());
@@ -347,13 +386,22 @@ void DualArmController::allow_gripper_collision(bool allow)
         
         auto& acm = current_scene.allowed_collision_matrix;
         
-        // 查找物体在 ACM 中的索引
+        // 查找物体在 ACM 中的索引；若不存在则补建一列/一行
         auto obj_it = std::find(acm.entry_names.begin(), acm.entry_names.end(), object_id);
+        size_t obj_idx = 0;
         if (obj_it == acm.entry_names.end()) {
-            RCLCPP_WARN(ctx_->get_logger(), "  ! 物体 %s 不在 ACM 中，跳过更新", object_id.c_str());
-            return;
+            RCLCPP_WARN(ctx_->get_logger(), "  ! 物体 %s 不在 ACM 中，正在自动补建条目", object_id.c_str());
+            acm.entry_names.push_back(object_id);
+            for (auto& entry : acm.entry_values) {
+                entry.enabled.push_back(false);
+            }
+            moveit_msgs::msg::AllowedCollisionEntry new_entry;
+            new_entry.enabled.resize(acm.entry_names.size(), false);
+            acm.entry_values.push_back(new_entry);
+            obj_idx = acm.entry_names.size() - 1;
+        } else {
+            obj_idx = std::distance(acm.entry_names.begin(), obj_it);
         }
-        size_t obj_idx = std::distance(acm.entry_names.begin(), obj_it);
         
         // 修改每个夹爪与物体的碰撞
         for (const auto& gripper : gripper_links) {
@@ -640,6 +688,7 @@ void DualArmController::executeApproach()
             
             // 使用双臂组规划到IK解
             ctx_->dual_arm_->setJointValueTarget(*target_state);
+            ctx_->dual_arm_->setPlannerId("PTP");
             
             moveit::planning_interface::MoveGroupInterface::Plan plan;
             auto success = ctx_->dual_arm_->plan(plan);
@@ -697,21 +746,22 @@ void DualArmController::executeGrasp()
             geometry_msgs::msg::Pose right_target = current_right.pose;
             right_target.position.z = grasp_z;
             
-            // IK求解双臂目标关节角
+            // 双末端组在 LIN 下稳定性较差：改用 IK 求目标关节 + Pilz PTP 执行同步下降
             const moveit::core::JointModelGroup* left_jmg = current_state->getJointModelGroup(ctx_->left_arm_group_);
             const moveit::core::JointModelGroup* right_jmg = current_state->getJointModelGroup(ctx_->right_arm_group_);
-            
+
             bool left_ik = current_state->setFromIK(left_jmg, left_target, 0.05);
             bool right_ik = current_state->setFromIK(right_jmg, right_target, 0.05);
-            
             if (!left_ik || !right_ik) {
-                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 下降阶段IK无解! Left=%s, Right=%s", left_ik ? "OK":"FAIL", right_ik ? "OK":"FAIL");
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 下降阶段IK无解! Left=%s, Right=%s", left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
                 ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
-            
-            // 使用双臂组规划并执行
+
+            ctx_->dual_arm_->clearPoseTargets();
             ctx_->dual_arm_->setJointValueTarget(*current_state);
+            ctx_->dual_arm_->setPlannerId("PTP");
+            
             moveit::planning_interface::MoveGroupInterface::Plan descent_plan;
             
             if (ctx_->dual_arm_->plan(descent_plan) != moveit::core::MoveItErrorCode::SUCCESS) {
@@ -741,28 +791,33 @@ void DualArmController::executeGrasp()
             ctx_->grippers_->controlDualGrippers(ctx_->gripper_close_pos_);   // 同步闭合
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ Grippers closed");
             
-            // 关键：等待MuJoCo物理引擎完全稳定
-            // 夹爪闭合瞬间会产生反作用力，需要时间让物理引擎收敛
-            RCLCPP_INFO(ctx_->get_logger(), "  [等待] 物理引擎稳定中（1.5秒）...");
-            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            // 关键：非阻塞式等待MuJoCo物理引擎完全稳定
             
             // 激活MuJoCo weld约束 —— 将铝棒刚性绑定到左手
-            // 原理：MoveIt的attachObject()只是规划层面的附着，MuJoCo物理引擎并不知道
-            // weld约束是MuJoCo中实现刚性抓取的标准方法
-            {
+            if (ctx_->weld_pub_) {
                 auto weld_msg = std_msgs::msg::Bool();
                 weld_msg.data = true;
                 ctx_->weld_pub_->publish(weld_msg);
                 RCLCPP_INFO(ctx_->get_logger(), "  [MuJoCo] Weld约束已激活（铝棒刚性绑定到双手）");
-                std::this_thread::sleep_for(std::chrono::milliseconds(300));
             }
             
             // 附着物体到机器人
             ctx_->arms_->attachObject();
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ Object attached to robot");
             
-            RCLCPP_INFO(ctx_->get_logger(), "✓ 抓取完成，进入提升阶段\n");
-            ctx_->current_state_ = TaskState::LIFT;
+            RCLCPP_INFO(ctx_->get_logger(), "  [等待] 异步等待物理引擎稳定中（1.5秒）...");
+            ctx_->current_state_ = TaskState::WAITING_PHYSICS;
+            
+            // 创建一次性定时器，不阻塞当前执行器
+            ctx_->wait_timer_ = ctx_->create_wall_timer(
+                std::chrono::milliseconds(1500),
+                [this]() {
+                    RCLCPP_INFO(ctx_->get_logger(), "  [Timer Triggered] ✓ Physics stabilized, entering LIFT");
+                    ctx_->current_state_ = TaskState::LIFT;
+                    if (ctx_->wait_timer_) {
+                        ctx_->wait_timer_->cancel();
+                    }
+                });
             
         } catch (const std::exception& e) {
             RCLCPP_ERROR(ctx_->get_logger(), "GRASP 阶段异常: %s", e.what());
@@ -905,518 +960,144 @@ void DualArmController::attachObject()
 void DualArmController::executeLift()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: LIFT] 抬起物体...");
-        
         try {
-            // 提升速度执行，weld约束保证铝棒稳固
             ctx_->dual_arm_->setMaxVelocityScalingFactor(0.5);
             ctx_->dual_arm_->setMaxAccelerationScalingFactor(0.5);
-            RCLCPP_INFO(ctx_->get_logger(), "  [参数] 速度/加速度缩放: 50%%（weld约束保护）");
 
-            // 关键：强制同步物理真实位置
-            // 夹取动作可能导致机械臂被物理反作用力"推"开
             ctx_->dual_arm_->setStartStateToCurrentState();
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));  // 等待状态更新
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
             
-            // 获取当前位置
             auto left_current = ctx_->left_arm_->getCurrentPose();
             auto right_current = ctx_->right_arm_->getCurrentPose();
             
-            // 保持 x, y 不变，只改变 z
             geometry_msgs::msg::Pose left_lift = left_current.pose;
             left_lift.position.z = ctx_->lift_height_;
             
             geometry_msgs::msg::Pose right_lift = right_current.pose;
             right_lift.position.z = ctx_->lift_height_;
-            
-            // 使用IK计算双臂目标关节状态
-            auto robot_model = ctx_->dual_arm_->getRobotModel();
-            auto robot_state = std::make_shared<moveit::core::RobotState>(robot_model);
-            *robot_state = *ctx_->dual_arm_->getCurrentState();
-            
-            auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
-            bool left_ik_ok = robot_state->setFromIK(left_jmg, left_lift);
-            
-            auto right_jmg = robot_model->getJointModelGroup(ctx_->right_arm_group_);
-            bool right_ik_ok = robot_state->setFromIK(right_jmg, right_lift);
-            
-            if (!left_ik_ok || !right_ik_ok) {
-                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 抬升IK求解失败");
+
+            auto target_state = ctx_->dual_arm_->getCurrentState();
+            const moveit::core::JointModelGroup* left_jmg = target_state->getJointModelGroup(ctx_->left_arm_group_);
+            const moveit::core::JointModelGroup* right_jmg = target_state->getJointModelGroup(ctx_->right_arm_group_);
+            bool left_ik = target_state->setFromIK(left_jmg, left_lift, 0.05);
+            bool right_ik = target_state->setFromIK(right_jmg, right_lift, 0.05);
+            if (!left_ik || !right_ik) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [LIFT] IK 失败 Left=%s Right=%s", left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
                 ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
+
+            ctx_->dual_arm_->clearPoseTargets();
+            ctx_->dual_arm_->setJointValueTarget(*target_state);
+            ctx_->dual_arm_->setPlannerId("PTP");
             
-            ctx_->dual_arm_->setJointValueTarget(*robot_state);
             moveit::planning_interface::MoveGroupInterface::Plan plan;
-            auto success = ctx_->dual_arm_->plan(plan);
-            
-            if (success == moveit::core::MoveItErrorCode::SUCCESS) {
-                auto result = ctx_->dual_arm_->execute(plan);
-                if (result == moveit::core::MoveItErrorCode::SUCCESS) {
-                    RCLCPP_INFO(ctx_->get_logger(), "  ✓ 双臂抬升完成");
-                } else {
-                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 双臂执行失败");
-                    ctx_->current_state_ = TaskState::ERROR;
+            if (ctx_->dual_arm_->plan(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+                if (ctx_->dual_arm_->execute(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+                    RCLCPP_INFO(ctx_->get_logger(), "  ✓ [LIFT] Pilz PTP 抬升成功");
+                    ctx_->current_state_ = TaskState::TRANSPORT;
                     return;
                 }
-            } else {
-                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 双臂抬升规划失败");
-                ctx_->current_state_ = TaskState::ERROR;
-                return;
             }
-            
-            RCLCPP_INFO(ctx_->get_logger(), "✓ 抬起完成\n");
-            ctx_->current_state_ = TaskState::TRANSPORT;
-            
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [LIFT] Pilz 规划或执行失败");
+            ctx_->current_state_ = TaskState::ERROR;
         } catch (const std::exception& e) {
-            RCLCPP_ERROR(ctx_->get_logger(), "LIFT 阶段异常: %s", e.what());
+            RCLCPP_ERROR(ctx_->get_logger(), "LIFT 异常: %s", e.what());
             ctx_->current_state_ = TaskState::ERROR;
         }
-    }
+}
 
 void DualArmController::executeTransport()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: TRANSPORT] 平移物体...");
-
         try {
-            // 提升速度执行，weld约束保证铝棒稳固
-            ctx_->dual_arm_->setMaxVelocityScalingFactor(0.4);
-            ctx_->dual_arm_->setMaxAccelerationScalingFactor(0.4);
-            RCLCPP_INFO(ctx_->get_logger(), "  [参数] 速度/加速度缩放: 40%%（降低运输阶段动态冲击）");
+            auto left_start_pose = ctx_->left_arm_->getCurrentPose().pose;
+            auto right_start_pose = ctx_->right_arm_->getCurrentPose().pose;
+            const double transport_z = 0.5 * (left_start_pose.position.z + right_start_pose.position.z);
+            const bool near_ground_transport = (transport_z <= ctx_->grasp_height_ + 0.10);
 
-            // 发生IK/规划失败时，优先尝试在“同一末端目标”下调整冗余关节（肘/腕）来绕开碰撞与奇异构型。
-            auto attempt_joint_redundancy_avoidance = [&](const geometry_msgs::msg::Pose& left_target,
-                                                          const geometry_msgs::msg::Pose& right_target,
-                                                          const std::string& stage_name) -> bool {
-                auto robot_model = ctx_->dual_arm_->getRobotModel();
-                auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
-                auto right_jmg = robot_model->getJointModelGroup(ctx_->right_arm_group_);
+            // 低高度时增加航点密度并降低速度，加速度，避免“一卡一卡”的段间停顿。
+            const int num_waypoints = near_ground_transport ? 28 : 16;
+            const double vel_scale = near_ground_transport ? 0.20 : 0.35;
+            const double acc_scale = near_ground_transport ? 0.14 : 0.28;
+            const double ik_timeout = near_ground_transport ? 0.15 : 0.10;
 
-                // [j4_delta, j6_delta, j7_delta]，左右臂采取相反符号，尽量把肘/腕从碰撞区“拧开”。
-                const std::vector<std::vector<double>> bias_sets = {
-                    {0.00, 0.00, 0.45},
-                    {0.20, 0.00, 0.35},
-                    {-0.20, 0.00, -0.35},
-                    {0.25, 0.15, 0.30},
-                    {-0.25, -0.15, -0.30},
-                    {0.00, 0.25, 0.55},
-                    {0.00, -0.25, -0.55}
-                };
+            const double total_dx = 0.20;
+            const double total_dy = 0.10;
 
-                for (size_t i = 0; i < bias_sets.size(); ++i) {
-                    ctx_->dual_arm_->setStartStateToCurrentState();
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [TRANSPORT] 连续轨迹参数: z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
+                        transport_z, near_ground_transport ? "true" : "false", num_waypoints, vel_scale, acc_scale);
 
-                    auto candidate_state = std::make_shared<moveit::core::RobotState>(robot_model);
-                    *candidate_state = *ctx_->dual_arm_->getCurrentState();
-                    candidate_state->update();
+            auto robot_model = ctx_->dual_arm_->getRobotModel();
+            auto current_state = ctx_->dual_arm_->getCurrentState();
+            auto traj = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, ctx_->dual_arm_group_);
+            traj->addSuffixWayPoint(*current_state, 0.0);
 
-                    std::vector<double> left_seed_vals, right_seed_vals;
-                    candidate_state->copyJointGroupPositions(left_jmg, left_seed_vals);
-                    candidate_state->copyJointGroupPositions(right_jmg, right_seed_vals);
+            const moveit::core::JointModelGroup* left_jmg = current_state->getJointModelGroup(ctx_->left_arm_group_);
+            const moveit::core::JointModelGroup* right_jmg = current_state->getJointModelGroup(ctx_->right_arm_group_);
+            auto seed_state = std::make_shared<moveit::core::RobotState>(*current_state);
 
-                    if (left_seed_vals.size() > 3 && right_seed_vals.size() > 3) {
-                        left_seed_vals[3] += bias_sets[i][0];
-                        right_seed_vals[3] -= bias_sets[i][0];
-                    }
-                    if (left_seed_vals.size() > 5 && right_seed_vals.size() > 5) {
-                        left_seed_vals[5] += bias_sets[i][1];
-                        right_seed_vals[5] -= bias_sets[i][1];
-                    }
-                    if (left_seed_vals.size() > 6 && right_seed_vals.size() > 6) {
-                        left_seed_vals[6] += bias_sets[i][2];
-                        right_seed_vals[6] -= bias_sets[i][2];
-                    }
-
-                    candidate_state->setJointGroupPositions(left_jmg, left_seed_vals);
-                    candidate_state->setJointGroupPositions(right_jmg, right_seed_vals);
-                    candidate_state->enforceBounds();
-
-                    bool left_ik = candidate_state->setFromIK(left_jmg, left_target, 0.3);
-                    if (!left_ik) {
-                        left_ik = candidate_state->setFromIK(left_jmg, left_target, 1.0);
-                    }
-                    bool right_ik = candidate_state->setFromIK(right_jmg, right_target, 0.3);
-                    if (!right_ik) {
-                        right_ik = candidate_state->setFromIK(right_jmg, right_target, 1.0);
-                    }
-
-                    if (!left_ik || !right_ik) {
-                        RCLCPP_WARN(ctx_->get_logger(),
-                            "  [%s] 关节避碰候选%zu IK失败 (左=%s, 右=%s)",
-                            stage_name.c_str(), i + 1, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
-                        continue;
-                    }
-
-                    candidate_state->update();
-                    ctx_->dual_arm_->setJointValueTarget(*candidate_state);
-
-                    moveit::planning_interface::MoveGroupInterface::Plan candidate_plan;
-                    auto candidate_plan_result = ctx_->dual_arm_->plan(candidate_plan);
-                    if (candidate_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_WARN(ctx_->get_logger(),
-                            "  [%s] 关节避碰候选%zu 规划失败", stage_name.c_str(), i + 1);
-                        continue;
-                    }
-
-                    auto candidate_exec_result = ctx_->dual_arm_->execute(candidate_plan);
-                    if (candidate_exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_WARN(ctx_->get_logger(),
-                            "  [%s] 关节避碰候选%zu 执行失败", stage_name.c_str(), i + 1);
-                        continue;
-                    }
-
-                    RCLCPP_INFO(ctx_->get_logger(),
-                        "  [%s] 关节避碰候选%zu 成功（通过肘/腕重构绕开冲突）",
-                        stage_name.c_str(), i + 1);
-                    return true;
-                }
-
-                return false;
+            auto smoothstep5 = [](double s) {
+                return s * s * s * (10.0 - 15.0 * s + 6.0 * s * s);
             };
 
-            auto perform_transport_shift = [&](double dx, double dy, const std::string& stage_name) -> bool {
-                // 关键：强制同步物理真实位置（防止前一步执行后的残余偏移）
-                ctx_->dual_arm_->setStartStateToCurrentState();
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            for (int i = 1; i <= num_waypoints; ++i) {
+                const double t = static_cast<double>(i) / static_cast<double>(num_waypoints);
+                const double s = smoothstep5(t);
 
-                auto left_current = ctx_->left_arm_->getCurrentPose();
-                auto right_current = ctx_->right_arm_->getCurrentPose();
+                geometry_msgs::msg::Pose left_target = left_start_pose;
+                geometry_msgs::msg::Pose right_target = right_start_pose;
+                left_target.position.x += total_dx * s;
+                left_target.position.y += total_dy * s;
+                right_target.position.x += total_dx * s;
+                right_target.position.y += total_dy * s;
 
-                geometry_msgs::msg::Pose left_target = left_current.pose;
-                geometry_msgs::msg::Pose right_target = right_current.pose;
-                left_target.position.x += dx;
-                left_target.position.y += dy;
-                right_target.position.x += dx;
-                right_target.position.y += dy;
+                auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
+                bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, ik_timeout);
+                bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, ik_timeout);
 
-                RCLCPP_INFO(ctx_->get_logger(), "  [%s] 当前: Left(%.3f, %.3f, %.3f), Right(%.3f, %.3f, %.3f)",
-                    stage_name.c_str(),
-                    left_current.pose.position.x, left_current.pose.position.y, left_current.pose.position.z,
-                    right_current.pose.position.x, right_current.pose.position.y, right_current.pose.position.z);
-                RCLCPP_INFO(ctx_->get_logger(), "  [%s] 目标: Left(%.3f, %.3f, %.3f), Right(%.3f, %.3f, %.3f)",
-                    stage_name.c_str(),
-                    left_target.position.x, left_target.position.y, left_target.position.z,
-                    right_target.position.x, right_target.position.y, right_target.position.z);
-
-                auto robot_model = ctx_->dual_arm_->getRobotModel();
-                auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
-                auto right_jmg = robot_model->getJointModelGroup(ctx_->right_arm_group_);
-
-                auto robot_state = std::make_shared<moveit::core::RobotState>(robot_model);
-                *robot_state = *ctx_->dual_arm_->getCurrentState();
-                robot_state->update();
-
-                bool left_ik_ok = robot_state->setFromIK(left_jmg, left_target, 0.1);
-                if (!left_ik_ok) {
-                    left_ik_ok = robot_state->setFromIK(left_jmg, left_target, 5.0);
+                if (!left_ik || !right_ik) {
+                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.5);
+                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.5);
                 }
 
-                bool right_ik_ok = robot_state->setFromIK(right_jmg, right_target, 0.1);
-                if (!right_ik_ok) {
-                    right_ik_ok = robot_state->setFromIK(right_jmg, right_target, 5.0);
+                if (!left_ik || !right_ik) {
+                    RCLCPP_ERROR(ctx_->get_logger(),
+                                 "  ✗ [TRANSPORT] 连续轨迹航点 %d/%d IK失败 Left=%s Right=%s",
+                                 i, num_waypoints, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                    ctx_->current_state_ = TaskState::ERROR;
+                    return;
                 }
 
-                // IK失败时采用分段小步回退
-                if (!left_ik_ok || !right_ik_ok) {
-                    RCLCPP_WARN(ctx_->get_logger(), "  [%s] IK失败，先尝试关节避碰重构", stage_name.c_str());
-                    if (attempt_joint_redundancy_avoidance(left_target, right_target, stage_name)) {
-                        return true;
-                    }
+                waypoint_state->update();
+                traj->addSuffixWayPoint(*waypoint_state, 0.0);
+                *seed_state = *waypoint_state;
+            }
 
-                    RCLCPP_WARN(ctx_->get_logger(), "  [%s] IK失败，切换分段小步执行", stage_name.c_str());
-
-                    double max_delta = std::max(std::abs(dx), std::abs(dy));
-                    int segment_count = std::max(2, static_cast<int>(std::ceil(max_delta / 0.05)));
-                    double seg_dx = dx / segment_count;
-                    double seg_dy = dy / segment_count;
-
-                    for (int seg = 0; seg < segment_count; ++seg) {
-                        ctx_->dual_arm_->setStartStateToCurrentState();
-                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-                        auto seg_left_current = ctx_->left_arm_->getCurrentPose();
-                        auto seg_right_current = ctx_->right_arm_->getCurrentPose();
-
-                        geometry_msgs::msg::Pose seg_left_target = seg_left_current.pose;
-                        geometry_msgs::msg::Pose seg_right_target = seg_right_current.pose;
-                        seg_left_target.position.x += seg_dx;
-                        seg_left_target.position.y += seg_dy;
-                        seg_right_target.position.x += seg_dx;
-                        seg_right_target.position.y += seg_dy;
-
-                        auto seg_state = std::make_shared<moveit::core::RobotState>(robot_model);
-                        *seg_state = *ctx_->dual_arm_->getCurrentState();
-                        seg_state->update();
-
-                        bool seg_left_ik = seg_state->setFromIK(left_jmg, seg_left_target, 5.0);
-                        bool seg_right_ik = seg_state->setFromIK(right_jmg, seg_right_target, 5.0);
-
-                        if (!seg_left_ik || !seg_right_ik) {
-                            RCLCPP_ERROR(ctx_->get_logger(), "  [%s] 分段 %d/%d IK失败", stage_name.c_str(), seg + 1, segment_count);
-                            return false;
-                        }
-
-                        ctx_->dual_arm_->setJointValueTarget(*seg_state);
-                        moveit::planning_interface::MoveGroupInterface::Plan seg_plan;
-                        auto seg_plan_result = ctx_->dual_arm_->plan(seg_plan);
-                        if (seg_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                            RCLCPP_ERROR(ctx_->get_logger(), "  [%s] 分段 %d/%d 规划失败", stage_name.c_str(), seg + 1, segment_count);
-                            return false;
-                        }
-
-                        auto seg_exec_result = ctx_->dual_arm_->execute(seg_plan);
-                        if (seg_exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                            RCLCPP_ERROR(ctx_->get_logger(), "  [%s] 分段 %d/%d 执行失败", stage_name.c_str(), seg + 1, segment_count);
-                            return false;
-                        }
-
-                        RCLCPP_INFO(ctx_->get_logger(), "  [%s] 分段 %d/%d 完成", stage_name.c_str(), seg + 1, segment_count);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(150));
-                    }
-
-                    return true;
-                }
-
-                // IK成功，一步规划执行
-                ctx_->dual_arm_->setStartStateToCurrentState();
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                ctx_->dual_arm_->setJointValueTarget(*robot_state);
-
-                moveit::planning_interface::MoveGroupInterface::Plan plan;
-                auto plan_result = ctx_->dual_arm_->plan(plan);
-
-                if (plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                    // 增加规划时间重试一次
-                    ctx_->dual_arm_->setPlanningTime(10.0);
-                    auto retry_plan_result = ctx_->dual_arm_->plan(plan);
-                    ctx_->dual_arm_->setPlanningTime(5.0);
-                    if (retry_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_WARN(ctx_->get_logger(), "  [%s] 一步规划失败，尝试关节避碰重构", stage_name.c_str());
-                        if (attempt_joint_redundancy_avoidance(left_target, right_target, stage_name)) {
-                            return true;
-                        }
-                        RCLCPP_ERROR(ctx_->get_logger(), "  [%s] 一步规划失败", stage_name.c_str());
-                        return false;
-                    }
-                }
-
-                auto exec_result = ctx_->dual_arm_->execute(plan);
-                if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) {
-                    RCLCPP_INFO(ctx_->get_logger(), "  [%s] 一步执行成功", stage_name.c_str());
-                    return true;
-                }
-
-                // 执行失败再重试一次
-                RCLCPP_WARN(ctx_->get_logger(), "  [%s] 执行失败，尝试重试一次", stage_name.c_str());
-                ctx_->dual_arm_->setStartStateToCurrentState();
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                ctx_->dual_arm_->setJointValueTarget(*robot_state);
-
-                moveit::planning_interface::MoveGroupInterface::Plan retry_plan;
-                auto retry_plan_result = ctx_->dual_arm_->plan(retry_plan);
-                if (retry_plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                    RCLCPP_ERROR(ctx_->get_logger(), "  [%s] 重试规划失败", stage_name.c_str());
-                    return false;
-                }
-
-                auto retry_exec_result = ctx_->dual_arm_->execute(retry_plan);
-                if (retry_exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                    RCLCPP_WARN(ctx_->get_logger(), "  [%s] 重试执行失败，尝试关节避碰重构", stage_name.c_str());
-                    if (attempt_joint_redundancy_avoidance(left_target, right_target, stage_name)) {
-                        return true;
-                    }
-                    RCLCPP_ERROR(ctx_->get_logger(), "  [%s] 重试执行失败", stage_name.c_str());
-                    return false;
-                }
-
-                RCLCPP_INFO(ctx_->get_logger(), "  [%s] 重试执行成功", stage_name.c_str());
-                return true;
-            };
-
-            // 预检当前运输后姿态是否还能完成ROTATE阶段，避免进入“可搬运但不可旋转”的死角构型。
-            auto rotate_preview_feasible = [&]() -> bool {
-                ctx_->dual_arm_->setStartStateToCurrentState();
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-                auto left_current = ctx_->left_arm_->getCurrentPose();
-                auto right_current = ctx_->right_arm_->getCurrentPose();
-
-                double center_x = (left_current.pose.position.x + right_current.pose.position.x) / 2.0;
-                double center_y = (left_current.pose.position.y + right_current.pose.position.y) / 2.0;
-                double center_z = (left_current.pose.position.z + right_current.pose.position.z) / 2.0;
-
-                double left_dx0 = left_current.pose.position.x - center_x;
-                double left_dy0 = left_current.pose.position.y - center_y;
-                double radius = std::sqrt(left_dx0 * left_dx0 + left_dy0 * left_dy0);
-
-                if (radius < 1e-4) {
-                    RCLCPP_WARN(ctx_->get_logger(), "  [ROTATE预检] 半径过小(%.6f)，无法构造旋转轨迹", radius);
-                    return false;
-                }
-
-                double left_init_angle = std::atan2(left_dy0, left_dx0);
-                double right_dx0 = right_current.pose.position.x - center_x;
-                double right_dy0 = right_current.pose.position.y - center_y;
-                double right_init_angle = std::atan2(right_dy0, right_dx0);
-
-                geometry_msgs::msg::Pose left_start_pose = left_current.pose;
-                geometry_msgs::msg::Pose right_start_pose = right_current.pose;
-
-                auto robot_model = ctx_->dual_arm_->getRobotModel();
-                auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
-                auto right_jmg = robot_model->getJointModelGroup(ctx_->right_arm_group_);
-
-                auto seed_state = std::make_shared<moveit::core::RobotState>(*ctx_->dual_arm_->getCurrentState());
-
-                const double total_angle = M_PI / 2.0;
-                const int preview_points = 24;  // 约每3.75°采样一次，快速筛掉不可旋转姿态
-
-                auto make_constraint = [](const std::vector<double>& seed_vals, double max_change)
-                    -> moveit::core::GroupStateValidityCallbackFn {
-                    return [seed_vals, max_change](
-                        moveit::core::RobotState* /*state*/,
-                        const moveit::core::JointModelGroup* /*group*/,
-                        const double* joint_values) -> bool {
-                        for (size_t j = 0; j < seed_vals.size(); ++j) {
-                            double diff = std::abs(joint_values[j] - seed_vals[j]);
-                            if (diff > M_PI) diff = 2.0 * M_PI - diff;
-                            if (diff > max_change) return false;
-                        }
-                        return true;
-                    };
-                };
-
-                for (int i = 1; i <= preview_points; ++i) {
-                    double angle = total_angle * i / preview_points;
-
-                    geometry_msgs::msg::Pose left_target = left_start_pose;
-                    geometry_msgs::msg::Pose right_target = right_start_pose;
-
-                    left_target.position.x = center_x + radius * std::cos(left_init_angle + angle);
-                    left_target.position.y = center_y + radius * std::sin(left_init_angle + angle);
-                    left_target.position.z = center_z;
-
-                    right_target.position.x = center_x + radius * std::cos(right_init_angle + angle);
-                    right_target.position.y = center_y + radius * std::sin(right_init_angle + angle);
-                    right_target.position.z = center_z;
-
-                    tf2::Quaternion q_rot;
-                    q_rot.setRPY(0, 0, angle);
-
-                    tf2::Quaternion q_left_orig, q_right_orig;
-                    tf2::fromMsg(left_start_pose.orientation, q_left_orig);
-                    tf2::fromMsg(right_start_pose.orientation, q_right_orig);
-
-                    tf2::Quaternion q_left_new = q_rot * q_left_orig;
-                    tf2::Quaternion q_right_new = q_rot * q_right_orig;
-                    q_left_new.normalize();
-                    q_right_new.normalize();
-                    left_target.orientation = tf2::toMsg(q_left_new);
-                    right_target.orientation = tf2::toMsg(q_right_new);
-
-                    std::vector<double> left_seed_vals, right_seed_vals;
-                    seed_state->copyJointGroupPositions(left_jmg, left_seed_vals);
-                    seed_state->copyJointGroupPositions(right_jmg, right_seed_vals);
-
-                    double joint7_bias = total_angle / preview_points;
-                    if (left_seed_vals.size() > 6) left_seed_vals[6] += joint7_bias;
-                    if (right_seed_vals.size() > 6) right_seed_vals[6] += joint7_bias;
-
-                    auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
-                    waypoint_state->setJointGroupPositions(left_jmg, left_seed_vals);
-                    waypoint_state->setJointGroupPositions(right_jmg, right_seed_vals);
-
-                    bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.1,
-                        make_constraint(left_seed_vals, 0.8));
-                    if (!left_ik) {
-                        waypoint_state->setJointGroupPositions(left_jmg, left_seed_vals);
-                        left_ik = waypoint_state->setFromIK(left_jmg, left_target, 1.0);
-                    }
-
-                    bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.1,
-                        make_constraint(right_seed_vals, 0.8));
-                    if (!right_ik) {
-                        waypoint_state->setJointGroupPositions(right_jmg, right_seed_vals);
-                        right_ik = waypoint_state->setFromIK(right_jmg, right_target, 1.0);
-                    }
-
-                    if (!left_ik || !right_ik) {
-                        RCLCPP_WARN(ctx_->get_logger(),
-                            "  [ROTATE预检] 航点 %d/%d 不可达（左=%s, 右=%s）",
-                            i, preview_points, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
-                        return false;
-                    }
-
-                    waypoint_state->update();
-                    *seed_state = *waypoint_state;
-                }
-
-                RCLCPP_INFO(ctx_->get_logger(), "  [ROTATE预检] 通过：当前搬运位姿可执行90°旋转");
-                return true;
-            };
-
-            // 阶段1：先向X轴正方向移动20cm
-            RCLCPP_INFO(ctx_->get_logger(), "  [TRANSPORT] 阶段1：X方向预搬运 +0.20m");
-            if (!perform_transport_shift(0.20, 0.0, "X+0.20m")) {
+            if (!parameterizeAndSmoothTrajectory(*traj, vel_scale, acc_scale,
+                                                 ctx_->get_logger(), "TRANSPORT")) {
                 ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
 
-            // 阶段2：再执行原Y方向搬运
-            RCLCPP_INFO(ctx_->get_logger(), "  [TRANSPORT] 阶段2：Y方向搬运 +0.10m");
-            if (!perform_transport_shift(0.0, 0.10, "Y+0.10m")) {
+            moveit::planning_interface::MoveGroupInterface::Plan plan;
+            traj->getRobotTrajectoryMsg(plan.trajectory_);
+            plan.planning_time_ = 0.0;
+
+            if (ctx_->dual_arm_->execute(plan) != moveit::core::MoveItErrorCode::SUCCESS) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [TRANSPORT] 连续轨迹执行失败");
                 ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
 
-            if (ctx_->enable_rotate_) {
-                // 若运输后旋转不可行，则自动沿X轴小步回退，找到“既搬运又可旋转”的安全走廊。
-                if (!rotate_preview_feasible()) {
-                    RCLCPP_WARN(ctx_->get_logger(),
-                        "  [TRANSPORT] 当前位姿旋转预检失败，开始X轴回退寻优（每步-0.02m）");
-
-                    const int max_backoff_steps = 8;  // 最多回退16cm，保留至少部分X搬运收益
-                    double total_backoff = 0.0;
-                    bool found_safe_pose = false;
-
-                    for (int step = 1; step <= max_backoff_steps; ++step) {
-                        if (!perform_transport_shift(-0.02, 0.0, "X回退寻优")) {
-                            RCLCPP_ERROR(ctx_->get_logger(), "  [TRANSPORT] X回退寻优失败（step=%d）", step);
-                            ctx_->current_state_ = TaskState::ERROR;
-                            return;
-                        }
-
-                        total_backoff += 0.02;
-
-                        if (rotate_preview_feasible()) {
-                            found_safe_pose = true;
-                            RCLCPP_INFO(ctx_->get_logger(),
-                                "  [TRANSPORT] 寻优成功：累计回退X=%.2fm，净X搬运=%.2fm",
-                                total_backoff, 0.20 - total_backoff);
-                            break;
-                        }
-                    }
-
-                    if (!found_safe_pose) {
-                        RCLCPP_ERROR(ctx_->get_logger(),
-                            "  [TRANSPORT] 回退后仍无法保证旋转可行，请减小X预搬运量或提高lift_height");
-                        ctx_->current_state_ = TaskState::ERROR;
-                        return;
-                    }
-                }
-
-                RCLCPP_INFO(ctx_->get_logger(), "✓ 平移完成，进入旋转阶段\n");
-                ctx_->current_state_ = TaskState::ROTATE;
-            } else {
-                RCLCPP_INFO(ctx_->get_logger(), "✓ 平移完成（旋转已禁用），直接进入下降放置阶段\n");
-                ctx_->current_state_ = TaskState::DESCEND;
-            }
-
+            RCLCPP_INFO(ctx_->get_logger(), "  ✓ [TRANSPORT] 连续平移执行成功");
+            ctx_->current_state_ = ctx_->enable_rotate_ ? TaskState::ROTATE : TaskState::DESCEND;
+            return;
         } catch (const std::exception& e) {
-            RCLCPP_ERROR(ctx_->get_logger(), "TRANSPORT 阶段异常: %s", e.what());
             ctx_->current_state_ = TaskState::ERROR;
         }
-    }
+}
 
 void DualArmController::executeRotate()
     {
@@ -1749,171 +1430,106 @@ void DualArmController::executeRotate()
 
 void DualArmController::executeDescend()
     {
-        RCLCPP_INFO(ctx_->get_logger(), "[状态: DESCEND] 下降准备放置...");
-        RCLCPP_INFO(ctx_->get_logger(), "  策略: 密集航点插值 + TOTG时间参数化（绕过OMPL，保证双臂严格同步）");
-        
+        RCLCPP_INFO(ctx_->get_logger(), "[状态: DESCEND] 下降准 备放置...");
         try {
             ctx_->dual_arm_->setStartStateToCurrentState();
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            
+
             auto left_current = ctx_->left_arm_->getCurrentPose();
             auto right_current = ctx_->right_arm_->getCurrentPose();
-            
-            // 旋转模式下：使用较高放置高度+X回避，给旋转后构型留安全间隙。
-            // 非旋转模式下：直接使用抓取时的高度，确保铝棒直接贴合地面。
+
             double place_z = ctx_->enable_rotate_ ? (ctx_->grasp_height_ + 0.02) : ctx_->grasp_height_;
             double descend_shift_x = ctx_->enable_rotate_ ? -0.10 : 0.0;
 
-            double left_delta_z = place_z - left_current.pose.position.z;
-            double right_delta_z = place_z - right_current.pose.position.z;
-            double left_delta_x = descend_shift_x;
-            double right_delta_x = descend_shift_x;
-            
-            RCLCPP_INFO(ctx_->get_logger(), "  当前Z: 左=%.3f, 右=%.3f → 目标Z: %.3f (下降约%.3fm)",
-                        left_current.pose.position.z, right_current.pose.position.z, place_z,
-                        std::abs((left_delta_z + right_delta_z) / 2.0));
-            RCLCPP_INFO(ctx_->get_logger(), "  DESCEND阶段附加平移: 双臂X方向 +%.3fm", descend_shift_x);
-            if (!ctx_->enable_rotate_) {
-                RCLCPP_INFO(ctx_->get_logger(), "  [DESCEND] 当前为无旋转模式：保持铝棒原朝向（沿Y轴）放置");
-            }
-            
-            // ===== 密集航点 =====
-            // 10个航点覆盖约11cm下降，每步约1.1cm
-            int num_waypoints = 10;
-            
-            auto robot_model = ctx_->dual_arm_->getRobotModel();
-            auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
-            auto right_jmg = robot_model->getJointModelGroup(ctx_->right_arm_group_);
-            
-            auto traj = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, ctx_->dual_arm_group_);
-            
-            // 添加起始航点
-            auto current_state = ctx_->dual_arm_->getCurrentState();
-            traj->addSuffixWayPoint(*current_state, 0.0);
-            
-            auto seed_state = std::make_shared<moveit::core::RobotState>(*current_state);
-            
             geometry_msgs::msg::Pose left_start = left_current.pose;
             geometry_msgs::msg::Pose right_start = right_current.pose;
-            
-            RCLCPP_INFO(ctx_->get_logger(), "  生成%d个密集航点...", num_waypoints);
-            
+            geometry_msgs::msg::Pose left_goal = left_start;
+            geometry_msgs::msg::Pose right_goal = right_start;
+            left_goal.position.x += descend_shift_x;
+            right_goal.position.x += descend_shift_x;
+            left_goal.position.z = place_z;
+            right_goal.position.z = place_z;
+
+            const double descend_dist = std::max(std::abs(left_start.position.z - place_z),
+                                                 std::abs(right_start.position.z - place_z));
+            const bool near_ground = (place_z <= ctx_->grasp_height_ + 0.02);
+            const int num_waypoints = near_ground ? 30 : 22;
+            const double vel_scale = near_ground ? 0.10 : 0.16;
+            const double acc_scale = near_ground ? 0.06 : 0.10;
+            const double ik_timeout = near_ground ? 0.16 : 0.12;
+
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [DESCEND] 连续下降参数: dz=%.3f, place_z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
+                        descend_dist, place_z, near_ground ? "true" : "false", num_waypoints, vel_scale, acc_scale);
+
+            auto robot_model = ctx_->dual_arm_->getRobotModel();
+            auto current_state = ctx_->dual_arm_->getCurrentState();
+            auto traj = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, ctx_->dual_arm_group_);
+            traj->addSuffixWayPoint(*current_state, 0.0);
+
+            const moveit::core::JointModelGroup* left_jmg = current_state->getJointModelGroup(ctx_->left_arm_group_);
+            const moveit::core::JointModelGroup* right_jmg = current_state->getJointModelGroup(ctx_->right_arm_group_);
+            auto seed_state = std::make_shared<moveit::core::RobotState>(*current_state);
+
+            auto smoothstep5 = [](double s) {
+                return s * s * s * (10.0 - 15.0 * s + 6.0 * s * s);
+            };
+
             for (int i = 1; i <= num_waypoints; ++i) {
-                double frac = static_cast<double>(i) / num_waypoints;
-                
-                // 左臂：保持Y和姿态不变，线性插值X/Z
+                const double t = static_cast<double>(i) / static_cast<double>(num_waypoints);
+                const double s = smoothstep5(t);
+
                 geometry_msgs::msg::Pose left_target = left_start;
-                left_target.position.x = left_start.position.x + left_delta_x * frac;
-                left_target.position.z = left_start.position.z + left_delta_z * frac;
-                
-                // 右臂：保持Y和姿态不变，线性插值X/Z
                 geometry_msgs::msg::Pose right_target = right_start;
-                right_target.position.x = right_start.position.x + right_delta_x * frac;
-                right_target.position.z = right_start.position.z + right_delta_z * frac;
-                
-                // IK求解（加一致性约束，防止关节跳变 - 与ROTATE相同策略）
-                std::vector<double> left_seed_vals, right_seed_vals;
-                seed_state->copyJointGroupPositions(left_jmg, left_seed_vals);
-                seed_state->copyJointGroupPositions(right_jmg, right_seed_vals);
-                
+                left_target.position.x = left_start.position.x + (left_goal.position.x - left_start.position.x) * s;
+                right_target.position.x = right_start.position.x + (right_goal.position.x - right_start.position.x) * s;
+                left_target.position.z = left_start.position.z + (left_goal.position.z - left_start.position.z) * s;
+                right_target.position.z = right_start.position.z + (right_goal.position.z - right_start.position.z) * s;
+
                 auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
-                
-                auto make_constraint = [](const std::vector<double>& seed_vals, double max_change)
-                    -> moveit::core::GroupStateValidityCallbackFn {
-                    return [seed_vals, max_change](
-                        moveit::core::RobotState*, const moveit::core::JointModelGroup*,
-                        const double* joint_values) -> bool {
-                        for (size_t j = 0; j < seed_vals.size(); ++j) {
-                            double diff = std::abs(joint_values[j] - seed_vals[j]);
-                            if (diff > M_PI) diff = 2.0 * M_PI - diff;
-                            if (diff > max_change) return false;
-                        }
-                        return true;
-                    };
-                };
-                
-                // 左臂：三级约束递减
-                bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.1,
-                    make_constraint(left_seed_vals, 0.5));
-                if (!left_ik) {
-                    waypoint_state->setJointGroupPositions(left_jmg, left_seed_vals);
-                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 1.0,
-                        make_constraint(left_seed_vals, 1.0));
-                }
-                if (!left_ik) {
-                    waypoint_state->setJointGroupPositions(left_jmg, left_seed_vals);
-                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 3.0);
-                    if (left_ik) RCLCPP_WARN(ctx_->get_logger(),
-                        "  DESCEND航点%d 左臂无约束解（可能跳变）", i);
-                }
-                
-                // 右臂：三级约束递减
-                bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.1,
-                    make_constraint(right_seed_vals, 0.5));
-                if (!right_ik) {
-                    waypoint_state->setJointGroupPositions(right_jmg, right_seed_vals);
-                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 1.0,
-                        make_constraint(right_seed_vals, 1.0));
-                }
-                if (!right_ik) {
-                    waypoint_state->setJointGroupPositions(right_jmg, right_seed_vals);
-                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 3.0);
-                    if (right_ik) RCLCPP_WARN(ctx_->get_logger(),
-                        "  DESCEND航点%d 右臂无约束解（可能跳变）", i);
-                }
-                
+                bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, ik_timeout);
+                bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, ik_timeout);
+
                 if (!left_ik || !right_ik) {
-                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 航点 %d/%d IK求解失败: 左=%s, 右=%s",
+                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.5);
+                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.5);
+                }
+
+                if (!left_ik || !right_ik) {
+                    RCLCPP_ERROR(ctx_->get_logger(),
+                                 "  ✗ [DESCEND] 连续轨迹航点 %d/%d IK失败 Left=%s Right=%s",
                                  i, num_waypoints, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
                     ctx_->current_state_ = TaskState::ERROR;
                     return;
                 }
-                
+
                 waypoint_state->update();
                 traj->addSuffixWayPoint(*waypoint_state, 0.0);
                 *seed_state = *waypoint_state;
             }
-            
-            RCLCPP_INFO(ctx_->get_logger(), "  ✓ 全部%d个航点IK求解成功", num_waypoints);
-            
-            // ===== TOTG时间参数化 =====
-            trajectory_processing::TimeOptimalTrajectoryGeneration totg;
-            // 修复：由于下降过程中手臂向下弯曲产生惯性，加上MuJoCo中摩擦力有限，
-            // 较大的加速度会导致铝棒由于惯性直接在两指之间滑动脱落现象！同时如果手肘与杆件发生轻微物理擦碰也会加剧脱落。
-            // weld约束保证铝棒不会滑落，可以适当提升下降速度。
-            bool time_ok = totg.computeTimeStamps(*traj, 0.06, 0.06);
-            
-            if (!time_ok) {
-                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ TOTG时间参数化失败");
+
+            if (!parameterizeAndSmoothTrajectory(*traj, vel_scale, acc_scale,
+                                                 ctx_->get_logger(), "DESCEND")) {
                 ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
-            
-            RCLCPP_INFO(ctx_->get_logger(), "  ✓ TOTG时间参数化完成: 总时长=%.2f秒, 轨迹点数=%zu",
-                        traj->getDuration(), traj->getWayPointCount());
-            
-            // ===== 构建Plan并直接执行 =====
+
             moveit::planning_interface::MoveGroupInterface::Plan plan;
             traj->getRobotTrajectoryMsg(plan.trajectory_);
             plan.planning_time_ = 0.0;
-            
-            RCLCPP_INFO(ctx_->get_logger(), "  执行下降轨迹（绕过OMPL，双臂严格同步）...");
-            auto exec_result = ctx_->dual_arm_->execute(plan);
-            
-            if (exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
-                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 下降轨迹执行失败 (error: %d)", exec_result.val);
-                ctx_->current_state_ = TaskState::ERROR;
+
+            if (ctx_->dual_arm_->execute(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+                RCLCPP_INFO(ctx_->get_logger(), "  ✓ [DESCEND] 连续减速下降成功");
+                ctx_->current_state_ = TaskState::PLACE;
                 return;
             }
-            
-            RCLCPP_INFO(ctx_->get_logger(), "✓ 下降完成，进入放置阶段\n");
-            ctx_->current_state_ = TaskState::PLACE;
-            
+
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [DESCEND] 连续下降执行失败");
+            ctx_->current_state_ = TaskState::ERROR;
         } catch (const std::exception& e) {
-            RCLCPP_ERROR(ctx_->get_logger(), "DESCEND 阶段异常: %s", e.what());
             ctx_->current_state_ = TaskState::ERROR;
         }
-    }
+}
 
 void DualArmController::executePlace()
     {
@@ -1948,150 +1564,103 @@ void DualArmController::executePlace()
             // ========== Step B2: 恢复ACM（禁止夹爪与铝棒碰撞）==========
             // GRASP Step C 中调用了 ctx_->arms_->allow_gripper_collision(true) 允许夹爪碰撞铝棒
             // 放置完成后必须恢复为禁止碰撞，保证后续阶段的碰撞检测正确性
-            RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step B2: 恢复ACM（禁止夹爪-铝棒碰撞）");
-            ctx_->arms_->allow_gripper_collision(false);
+            RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step B2: 允许夹爪-杆件临时碰撞（撤离后再恢复）");
+            ctx_->arms_->allow_gripper_collision(true);
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             
             // ========== Step C: 水平撤退 + 垂直抬升（合并为TOTG密集航点）==========
             // 旋转后：左臂在+X端，右臂在-X端，杆件沿X方向
             // 撤退方向：左臂向+X，右臂向-X，同时抬升到安全高度
             // 使用TOTG避免OMPL在紧凑构型下的规划失败（之前3次测试2次OMPL失败）
-            RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step C+D: 水平撤退+垂直抬升（TOTG密集航点）");
             
-            ctx_->dual_arm_->setStartStateToCurrentState();
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            
-            auto left_current = ctx_->left_arm_->getCurrentPose();
-            auto right_current = ctx_->right_arm_->getCurrentPose();
-            
+            RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step C+D: 连续水平撤退+垂直抬升 (IK轨迹+TOTG)");
+
+            auto left_start_pose = ctx_->left_arm_->getCurrentPose().pose;
+            auto right_start_pose = ctx_->right_arm_->getCurrentPose().pose;
+            const double retreat_start_z = 0.5 * (left_start_pose.position.z + right_start_pose.position.z);
+            const bool near_ground_retreat = retreat_start_z <= ctx_->grasp_height_ + 0.08;
+
+            const int num_waypoints = near_ground_retreat ? 26 : 16;
+            const double vel_scale = near_ground_retreat ? 0.18 : 0.28;
+            const double acc_scale = near_ground_retreat ? 0.12 : 0.22;
+            const double ik_timeout = near_ground_retreat ? 0.15 : 0.10;
+
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [PLACE] 连续撤离参数: z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
+                        retreat_start_z, near_ground_retreat ? "true" : "false", num_waypoints, vel_scale, acc_scale);
+
+            geometry_msgs::msg::Pose left_goal = left_start_pose;
+            geometry_msgs::msg::Pose right_goal = right_start_pose;
+            left_goal.position.x += 0.08;
+            right_goal.position.x -= 0.08;
+            left_goal.position.z = ctx_->lift_height_;
+            right_goal.position.z = ctx_->lift_height_;
+
             auto robot_model = ctx_->dual_arm_->getRobotModel();
-            auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
-            auto right_jmg = robot_model->getJointModelGroup(ctx_->right_arm_group_);
-            
-            // 目标位置：水平撤退10cm + 垂直抬升到安全高度
-            double retreat_offset = 0.10;
-            double safe_z = ctx_->lift_height_;  // 0.40m
-            
-            geometry_msgs::msg::Pose left_final = left_current.pose;
-            left_final.position.x += retreat_offset;
-            left_final.position.z = safe_z;
-            
-            geometry_msgs::msg::Pose right_final = right_current.pose;
-            right_final.position.x -= retreat_offset;
-            right_final.position.z = safe_z;
-            
-            RCLCPP_INFO(ctx_->get_logger(), "    左臂: (%.3f,%.3f) → (%.3f,%.3f)",
-                        left_current.pose.position.x, left_current.pose.position.z,
-                        left_final.position.x, left_final.position.z);
-            RCLCPP_INFO(ctx_->get_logger(), "    右臂: (%.3f,%.3f) → (%.3f,%.3f)",
-                        right_current.pose.position.x, right_current.pose.position.z,
-                        right_final.position.x, right_final.position.z);
-            
-            // 生成密集航点（10步）
-            int num_retreat_wp = 10;
-            auto retreat_traj = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, ctx_->dual_arm_group_);
-            
-            auto retreat_current_state = ctx_->dual_arm_->getCurrentState();
-            retreat_traj->addSuffixWayPoint(*retreat_current_state, 0.0);
-            
-            auto retreat_seed = std::make_shared<moveit::core::RobotState>(*retreat_current_state);
-            
-            auto make_constraint = [](const std::vector<double>& seed_vals, double max_change)
-                -> moveit::core::GroupStateValidityCallbackFn {
-                return [seed_vals, max_change](
-                    moveit::core::RobotState*, const moveit::core::JointModelGroup*,
-                    const double* joint_values) -> bool {
-                    for (size_t j = 0; j < seed_vals.size(); ++j) {
-                        double diff = std::abs(joint_values[j] - seed_vals[j]);
-                        if (diff > M_PI) diff = 2.0 * M_PI - diff;
-                        if (diff > max_change) return false;
-                    }
-                    return true;
-                };
+            auto current_state = ctx_->dual_arm_->getCurrentState();
+            auto traj = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, ctx_->dual_arm_group_);
+            traj->addSuffixWayPoint(*current_state, 0.0);
+
+            const moveit::core::JointModelGroup* left_jmg = current_state->getJointModelGroup(ctx_->left_arm_group_);
+            const moveit::core::JointModelGroup* right_jmg = current_state->getJointModelGroup(ctx_->right_arm_group_);
+            auto seed_state = std::make_shared<moveit::core::RobotState>(*current_state);
+
+            auto smoothstep5 = [](double s) {
+                return s * s * s * (10.0 - 15.0 * s + 6.0 * s * s);
             };
-            
-            bool retreat_ik_ok = true;
-            for (int i = 1; i <= num_retreat_wp; ++i) {
-                double frac = static_cast<double>(i) / num_retreat_wp;
-                
-                geometry_msgs::msg::Pose left_wp = left_current.pose;
-                left_wp.position.x += retreat_offset * frac;
-                left_wp.position.z += (safe_z - left_current.pose.position.z) * frac;
-                
-                geometry_msgs::msg::Pose right_wp = right_current.pose;
-                right_wp.position.x -= retreat_offset * frac;
-                right_wp.position.z += (safe_z - right_current.pose.position.z) * frac;
-                
-                std::vector<double> left_seed_vals, right_seed_vals;
-                retreat_seed->copyJointGroupPositions(left_jmg, left_seed_vals);
-                retreat_seed->copyJointGroupPositions(right_jmg, right_seed_vals);
-                
-                auto wp_state = std::make_shared<moveit::core::RobotState>(*retreat_seed);
-                
-                // 三级约束IK
-                bool left_ik = wp_state->setFromIK(left_jmg, left_wp, 0.1,
-                    make_constraint(left_seed_vals, 0.5));
-                if (!left_ik) {
-                    wp_state->setJointGroupPositions(left_jmg, left_seed_vals);
-                    left_ik = wp_state->setFromIK(left_jmg, left_wp, 1.0,
-                        make_constraint(left_seed_vals, 1.0));
-                }
-                if (!left_ik) {
-                    wp_state->setJointGroupPositions(left_jmg, left_seed_vals);
-                    left_ik = wp_state->setFromIK(left_jmg, left_wp, 3.0);
-                }
-                
-                bool right_ik = wp_state->setFromIK(right_jmg, right_wp, 0.1,
-                    make_constraint(right_seed_vals, 0.5));
-                if (!right_ik) {
-                    wp_state->setJointGroupPositions(right_jmg, right_seed_vals);
-                    right_ik = wp_state->setFromIK(right_jmg, right_wp, 1.0,
-                        make_constraint(right_seed_vals, 1.0));
-                }
-                if (!right_ik) {
-                    wp_state->setJointGroupPositions(right_jmg, right_seed_vals);
-                    right_ik = wp_state->setFromIK(right_jmg, right_wp, 3.0);
-                }
-                
+
+            for (int i = 1; i <= num_waypoints; ++i) {
+                const double t = static_cast<double>(i) / static_cast<double>(num_waypoints);
+                const double s = smoothstep5(t);
+
+                geometry_msgs::msg::Pose left_target = left_start_pose;
+                geometry_msgs::msg::Pose right_target = right_start_pose;
+                left_target.position.x = left_start_pose.position.x + (left_goal.position.x - left_start_pose.position.x) * s;
+                right_target.position.x = right_start_pose.position.x + (right_goal.position.x - right_start_pose.position.x) * s;
+                left_target.position.z = left_start_pose.position.z + (left_goal.position.z - left_start_pose.position.z) * s;
+                right_target.position.z = right_start_pose.position.z + (right_goal.position.z - right_start_pose.position.z) * s;
+
+                auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
+                bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, ik_timeout);
+                bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, ik_timeout);
+
                 if (!left_ik || !right_ik) {
-                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 撤退航点 %d/%d IK失败: 左=%s, 右=%s",
-                                 i, num_retreat_wp, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
-                    retreat_ik_ok = false;
-                    break;
+                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.5);
+                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.5);
                 }
-                
-                wp_state->update();
-                retreat_traj->addSuffixWayPoint(*wp_state, 0.0);
-                *retreat_seed = *wp_state;
-            }
-            
-            if (retreat_ik_ok) {
-                trajectory_processing::TimeOptimalTrajectoryGeneration retreat_totg;
-                bool time_ok = retreat_totg.computeTimeStamps(*retreat_traj, 0.5, 0.5);
-                
-                if (time_ok) {
-                    moveit::planning_interface::MoveGroupInterface::Plan retreat_plan;
-                    retreat_traj->getRobotTrajectoryMsg(retreat_plan.trajectory_);
-                    retreat_plan.planning_time_ = 0.0;
-                    
-                    RCLCPP_INFO(ctx_->get_logger(), "    TOTG完成: 时长=%.2fs, 轨迹点=%zu",
-                                retreat_traj->getDuration(), retreat_traj->getWayPointCount());
-                    
-                    auto exec_result = ctx_->dual_arm_->execute(retreat_plan);
-                    if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) {
-                        RCLCPP_INFO(ctx_->get_logger(), "  ✓ 水平撤退+垂直抬升完成");
-                    } else {
-                        RCLCPP_WARN(ctx_->get_logger(), "  ! 撤退轨迹执行失败（继续撤退）");
-                    }
-                } else {
-                    RCLCPP_WARN(ctx_->get_logger(), "  ! TOTG参数化失败（继续撤退）");
+
+                if (!left_ik || !right_ik) {
+                    RCLCPP_ERROR(ctx_->get_logger(),
+                                 "  ✗ [PLACE] 连续撤离航点 %d/%d IK失败 Left=%s Right=%s",
+                                 i, num_waypoints, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                    ctx_->current_state_ = TaskState::ERROR;
+                    return;
                 }
-            } else {
-                RCLCPP_WARN(ctx_->get_logger(), "  ! 撤退IK部分失败（跳过撤退，直接进入RETREAT）");
+
+                waypoint_state->update();
+                traj->addSuffixWayPoint(*waypoint_state, 0.0);
+                *seed_state = *waypoint_state;
             }
-            
-            RCLCPP_INFO(ctx_->get_logger(), "✓ 放置完成，进入撤退阶段\n");
+
+            if (!parameterizeAndSmoothTrajectory(*traj, vel_scale, acc_scale,
+                                                 ctx_->get_logger(), "PLACE")) {
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
+            moveit::planning_interface::MoveGroupInterface::Plan plan;
+            traj->getRobotTrajectoryMsg(plan.trajectory_);
+            plan.planning_time_ = 0.0;
+
+            if (ctx_->dual_arm_->execute(plan) != moveit::core::MoveItErrorCode::SUCCESS) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [PLACE] 连续撤离轨迹执行失败");
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
+            RCLCPP_INFO(ctx_->get_logger(), "  ✓ [PLACE] 连续撤离阶段完成");
             ctx_->current_state_ = TaskState::RETREAT;
+
             
         } catch (const std::exception& e) {
             RCLCPP_ERROR(ctx_->get_logger(), "PLACE 阶段异常: %s", e.what());
@@ -2172,89 +1741,42 @@ void DualArmController::detachAndReplaceObject()
 void DualArmController::executeRetreat()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: RETREAT] 撤退至初始位置...");
-        
         try {
-            // ===== 直接使用 TOTG 关节空间插值撤退 =====
-            // 彻底放弃 OMPL 规划：RETREAT 起始状态下铝棒作为世界碰撞体
-            // 与hand link碰撞，导致 OMPL 起始状态校验必然失败。
-            // TOTG 绕过碰撞检测，直接在关节空间线性插值到初始位置。
-            
-            // 检查是否有保存的初始关节位置
             if (ctx_->initial_left_joints_.empty() || ctx_->initial_right_joints_.empty()) {
-                RCLCPP_WARN(ctx_->get_logger(), "  ! 无初始关节角记录，使用Franka默认ready位置");
                 ctx_->initial_left_joints_ = {0, -0.785, 0, -2.356, 0, 1.571, 0.785};
                 ctx_->initial_right_joints_ = {0, -0.785, 0, -2.356, 0, 1.571, 0.785};
             }
             
-            RCLCPP_INFO(ctx_->get_logger(), "  [TOTG] 关节空间直接插值到初始位置...");
-            RCLCPP_INFO(ctx_->get_logger(), "  左臂目标: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                        ctx_->initial_left_joints_[0], ctx_->initial_left_joints_[1], ctx_->initial_left_joints_[2],
-                        ctx_->initial_left_joints_[3], ctx_->initial_left_joints_[4], ctx_->initial_left_joints_[5],
-                        ctx_->initial_left_joints_[6]);
-            RCLCPP_INFO(ctx_->get_logger(), "  右臂目标: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                        ctx_->initial_right_joints_[0], ctx_->initial_right_joints_[1], ctx_->initial_right_joints_[2],
-                        ctx_->initial_right_joints_[3], ctx_->initial_right_joints_[4], ctx_->initial_right_joints_[5],
-                        ctx_->initial_right_joints_[6]);
+            ctx_->dual_arm_->setMaxVelocityScalingFactor(0.8);
+            ctx_->dual_arm_->setMaxAccelerationScalingFactor(0.8);
             
-            auto robot_model = ctx_->dual_arm_->getRobotModel();
-            auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
-            auto right_jmg = robot_model->getJointModelGroup(ctx_->right_arm_group_);
-            
-            ctx_->dual_arm_->setStartStateToCurrentState();
+            // Allow collision between hand and object for retreat start state
+            allow_gripper_collision(true);
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+            ctx_->dual_arm_->setStartStateToCurrentState();
+            ctx_->dual_arm_->clearPoseTargets();
+            ctx_->dual_arm_->setPlannerId("PTP"); // Point-to-point motion in joint space natively supported by Pilz
             
-            auto current_st = ctx_->dual_arm_->getCurrentState();
-            std::vector<double> curr_left, curr_right;
-            current_st->copyJointGroupPositions(left_jmg, curr_left);
-            current_st->copyJointGroupPositions(right_jmg, curr_right);
-            
-            int num_wp = 20;  // 20步线性插值
-            auto retreat_traj = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, ctx_->dual_arm_group_);
-            retreat_traj->addSuffixWayPoint(*current_st, 0.0);
-            
-            for (int i = 1; i <= num_wp; ++i) {
-                double frac = static_cast<double>(i) / num_wp;
-                auto wp = std::make_shared<moveit::core::RobotState>(*current_st);
-                
-                std::vector<double> interp_left(curr_left.size()), interp_right(curr_right.size());
-                for (size_t j = 0; j < curr_left.size(); ++j)
-                    interp_left[j] = curr_left[j] + (ctx_->initial_left_joints_[j] - curr_left[j]) * frac;
-                for (size_t j = 0; j < curr_right.size(); ++j)
-                    interp_right[j] = curr_right[j] + (ctx_->initial_right_joints_[j] - curr_right[j]) * frac;
-                
-                wp->setJointGroupPositions(left_jmg, interp_left);
-                wp->setJointGroupPositions(right_jmg, interp_right);
-                wp->update();
-                retreat_traj->addSuffixWayPoint(*wp, 0.0);
-            }
-            
-            trajectory_processing::TimeOptimalTrajectoryGeneration retreat_totg;
-            bool time_ok = retreat_totg.computeTimeStamps(*retreat_traj, 0.5, 0.5);
-            
-            if (time_ok) {
-                moveit::planning_interface::MoveGroupInterface::Plan totg_plan;
-                retreat_traj->getRobotTrajectoryMsg(totg_plan.trajectory_);
-                totg_plan.planning_time_ = 0.0;
-                
-                RCLCPP_INFO(ctx_->get_logger(), "    TOTG完成: 时长=%.2fs, 轨迹点=%zu",
-                            retreat_traj->getDuration(), retreat_traj->getWayPointCount());
-                
-                auto totg_exec = ctx_->dual_arm_->execute(totg_plan);
-                if (totg_exec == moveit::core::MoveItErrorCode::SUCCESS) {
-                    RCLCPP_INFO(ctx_->get_logger(), "✓ 撤退完成，任务结束\n");
+            moveit::core::RobotState target_state(*ctx_->dual_arm_->getCurrentState());
+            target_state.setJointGroupPositions(ctx_->left_arm_group_, ctx_->initial_left_joints_);
+            target_state.setJointGroupPositions(ctx_->right_arm_group_, ctx_->initial_right_joints_);
+            ctx_->dual_arm_->setJointValueTarget(target_state);
+
+            moveit::planning_interface::MoveGroupInterface::Plan plan;
+            if (ctx_->dual_arm_->plan(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+                if (ctx_->dual_arm_->execute(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+                    RCLCPP_INFO(ctx_->get_logger(), "  ✓ [RETREAT] Pilz PTP 返航成功");
                     ctx_->current_state_ = TaskState::DONE;
-                } else {
-                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ TOTG撤退执行失败");
-                    ctx_->current_state_ = TaskState::ERROR;
+                    allow_gripper_collision(false);
+                    return;
                 }
-            } else {
-                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ TOTG时间参数化失败");
-                ctx_->current_state_ = TaskState::ERROR;
             }
             
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [RETREAT] Pilz PTP 规划执行失败");
+            ctx_->current_state_ = TaskState::ERROR;
         } catch (const std::exception& e) {
-            RCLCPP_ERROR(ctx_->get_logger(), "RETREAT 阶段异常: %s", e.what());
             ctx_->current_state_ = TaskState::ERROR;
         }
-    }
+}
 

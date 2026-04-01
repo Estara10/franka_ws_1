@@ -56,9 +56,9 @@ def discover_latest_csv(explicit_data_dir: str) -> str:
         candidates.extend(glob.glob(os.path.join(directory, "*.csv")))
 
     if not candidates:
-        print("❌ 未找到实验数据CSV文件！")
-        print("   可选：传入 --csv 指定文件，或传入 --data-dir 指定目录。")
-        sys.exit(1)
+        print("⚠ 未找到实验数据CSV文件，跳过图表绘制。")
+        print("  可选：传入 --csv 指定文件，或传入 --data-dir 指定目录。")
+        return ""
 
     return max(candidates, key=os.path.getctime)
 
@@ -67,9 +67,12 @@ def main():
     args = parse_args()
 
     latest_csv = args.csv if args.csv else discover_latest_csv(args.data_dir)
+    if not latest_csv:
+        return 0
+
     if not os.path.isfile(latest_csv):
-        print(f"❌ 输入CSV不存在: {latest_csv}")
-        sys.exit(1)
+        print(f"⚠ 输入CSV不存在，跳过图表绘制: {latest_csv}")
+        return 0
 
     print(f"📊 正在读取数据并绘制全阶段性能图表: {latest_csv}")
 

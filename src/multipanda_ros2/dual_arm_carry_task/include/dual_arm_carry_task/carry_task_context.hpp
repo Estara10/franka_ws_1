@@ -34,6 +34,7 @@ enum class TaskState {
     INIT,
     APPROACH,
     GRASP,
+    WAITING_PHYSICS, // 等待物理引擎稳定
     LIFT,
     TRANSPORT,
     ROTATE,      // 旋转物体方向（Y轴→X轴）
@@ -71,6 +72,7 @@ public:
     
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr weld_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr task_status_pub_;
+    rclcpp::TimerBase::SharedPtr wait_timer_;
     
     std::shared_ptr<GripperController> grippers_;
     std::shared_ptr<DualArmController> arms_;
