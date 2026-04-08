@@ -71,6 +71,7 @@ public:
     std::vector<double> initial_right_joints_;
     
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr weld_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr task_stage_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr task_status_pub_;
     rclcpp::TimerBase::SharedPtr wait_timer_;
     

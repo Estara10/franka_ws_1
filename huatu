@@ -1,0 +1,77 @@
+我会继续把“多次通信实验求平均值、且最多统计10次”这件事完整做完。先快速检查现有脚本和历史记忆，再直接改脚本并跑一遍验证输出。
+
+读取内存
+
+读取记忆 [](file:///home/lidio/.config/Code/User/workspaceStorage/1a2e9c2c10b6c3a2dbd8750edb507b1b/GitHub.copilot-chat/memory-tool/memories/repo/ros2_moveit_notes.md)
+
+我已经确认了仓库记忆里没有和统计脚本冲突的约束。下一步我会检查现有的 plot_comm_latency.py 和 plot_comm_latency_stats.py 实现，然后按“默认最多10次+平均值统计”补齐。
+
+读取 [](file:///home/lidio/franka_ws_1/plot_comm_latency.py)
+
+读取 [](file:///home/lidio/franka_ws_1/plot_comm_latency_stats.py)
+
+我先实际运行当前统计脚本确认行为，再按“多次平均值统计且默认最多10次”做成可配置版本，避免你后续手改。
+
+Ran terminal command:  python3 plot_comm_latency_stats.py
+Completed with input: {
+  "command": "python3 plot_comm_latency_stats.py",
+  "explanation": "运行现有通信延迟统计脚本，确认其当前输出与限制逻辑",
+  "goal": "Verify current stats script behavior",
+  "isBackground": false,
+  "timeout": 120000
+}
+
+现在我会直接改 plot_comm_latency_stats.py：保留“默认最多10次”，同时加上可选参数（比如 --all 或 --max-files）并输出聚合统计结果，便于你长期复用。
+
+正在生成 [](file:///home/lidio/franka_ws_1/plot_comm_latency_stats.py) 中的修补程序(379 行)
+
+
+```
+
+```
+脚本已升级完成，我现在会分别跑默认模式和全量模式做回归验证，确认“默认10次、可选全部”的行为都正确并生成结果文件。
+
+Ran terminal command:  python3 plot_comm_latency_stats.py && python3 plot_comm_latency_stats.py --all
+Completed with input: {
+  "command": "python3 plot_comm_latency_stats.py && python3 plot_comm_latency_stats.py --all",
+  "explanation": "验证通信延迟聚合统计脚本在默认限制和全量统计两种模式下都可运行",
+  "goal": "Validate updated stats script",
+  "isBackground": false,
+  "timeout": 120000
+}
+
+已继续完成。统计脚本已经升级，默认仍然只统计最近10次实验，同时支持你按需改数量或全量统计。
+
+脚本位置：
+plot_comm_latency_stats.py
+
+这次改动包含：
+1. 默认模式：最近10次实验（保持你要的限制）。
+2. 可配置次数：支持 --max-files N。
+3. 全量模式：支持 --all。
+4. 每次实验统计：mean、median、p95、min、max、std。
+5. 总体统计：weighted mean、weighted median、weighted p95、mean of means。
+6. 输出图和CSV两份结果，便于汇报和复查。
+
+我已实际跑通两种模式，生成结果如下：
+1. 最近10次图表：comm_latency_average_stats_top10.png
+2. 最近10次统计表：comm_latency_average_stats_top10.csv
+3. 全部实验图表：comm_latency_average_stats_all.png
+4. 全部实验统计表：comm_latency_average_stats_all.csv
+
+直接运行方式：
+1. 最近10次（默认）：python3 plot_comm_latency_stats.py
+2. 指定最近N次：python3 plot_comm_latency_stats.py --max-files 10
+3. 全部实验：python3 plot_comm_latency_stats.py --all
+
+本次实测汇总值：
+1. Top10 weighted mean: 0.382 ms
+2. All weighted mean: 0.399 ms
+
+如果你要，我下一步可以再加一个开关：忽略 latency=0 的样本后再统计（很多日志里0值会把 median 压到0）。
+
+已进行更改。、、、
+
+
+
+ENABLE_EXPERIMENT_RECORDER=true ./start_dual_arm_task.sh 

@@ -1,6 +1,40 @@
 #include "dual_arm_carry_task/carry_task_context.hpp"
 #include "dual_arm_carry_task/gripper_controller.hpp"
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
+
+namespace {
+
+const char* to_stage_name(TaskState state)
+{
+    switch (state) {
+        case TaskState::INIT: return "INIT";
+        case TaskState::APPROACH: return "APPROACH";
+        case TaskState::GRASP: return "GRASP";
+        case TaskState::WAITING_PHYSICS: return "WAITING_PHYSICS";
+        case TaskState::LIFT: return "LIFT";
+        case TaskState::TRANSPORT: return "TRANSPORT";
+        case TaskState::ROTATE: return "ROTATE";
+        case TaskState::DESCEND: return "DESCEND";
+        case TaskState::PLACE: return "PLACE";
+        case TaskState::RETREAT: return "RETREAT";
+        case TaskState::DONE: return "DONE";
+        case TaskState::ERROR: return "ERROR";
+        default: return "UNKNOWN";
+    }
+}
+
+void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pub, TaskState state)
+{
+    if (!pub) {
+        return;
+    }
+    std_msgs::msg::String stage_msg;
+    stage_msg.data = to_stage_name(state);
+    pub->publish(stage_msg);
+}
+
+}  // namespace
+
     DualArmCarryTask::DualArmCarryTask() : rclcpp::Node("dual_arm_carry_task")
     {
         RCLCPP_INFO(this->get_logger(), "=== 双臂协作搬运任务节点初始化 ===");
@@ -17,6 +51,7 @@
         
         left_arm_group_ = this->get_parameter("left_arm_group").as_string();
         right_arm_group_ = this->get_parameter("right_arm_group").as_string();
+        task_stage_pub_ = this->create_publisher<std_msgs::msg::String>("/task_stage", 20);
         task_status_pub_ = this->create_publisher<std_msgs::msg::String>("/task_status", 10);
         dual_arm_group_ = this->get_parameter("dual_arm_group").as_string();
         approach_height_ = this->get_parameter("approach_height").as_double();
@@ -29,6 +64,7 @@
         weld_pub_ = this->create_publisher<std_msgs::msg::Bool>("/grasp_weld_active", 10);
         
         current_state_ = TaskState::INIT;
+        publish_stage(task_stage_pub_, current_state_);
         grippers_ = std::make_shared<GripperController>(this);
         arms_ = std::make_shared<DualArmController>(this);
         
@@ -47,7 +83,15 @@ void DualArmCarryTask::executeTask()
         RCLCPP_INFO(get_logger(), "    开始执行双臂协作搬运任务");
         RCLCPP_INFO(get_logger(), "========================================\n");
         
+        TaskState last_published_state = current_state_;
+        publish_stage(task_stage_pub_, last_published_state);
+
         while (rclcpp::ok() && current_state_ != TaskState::DONE && current_state_ != TaskState::ERROR) {
+            if (current_state_ != last_published_state) {
+                publish_stage(task_stage_pub_, current_state_);
+                last_published_state = current_state_;
+            }
+
             switch (current_state_) {
                 case TaskState::INIT:
                     arms_->executeInit();
@@ -87,6 +131,7 @@ void DualArmCarryTask::executeTask()
         }
         
         if (current_state_ == TaskState::DONE) {
+            publish_stage(task_stage_pub_, TaskState::DONE);
             RCLCPP_INFO(get_logger(), "\n========================================");
             RCLCPP_INFO(get_logger(), "    ✓ 任务完成！");
             std_msgs::msg::String msg;
@@ -96,8 +141,13 @@ void DualArmCarryTask::executeTask()
 
             RCLCPP_INFO(get_logger(), "========================================\n");
         } else if (current_state_ == TaskState::ERROR) {
+            publish_stage(task_stage_pub_, TaskState::ERROR);
             RCLCPP_ERROR(get_logger(), "\n========================================");
             RCLCPP_ERROR(get_logger(), "    ✗ 任务失败！");
+            std_msgs::msg::String msg;
+            msg.data = "ERROR";
+            task_status_pub_->publish(msg);
+            RCLCPP_INFO(get_logger(), "已发布任务失败状态(ERROR)。");
             RCLCPP_ERROR(get_logger(), "========================================\n");
         }
     }

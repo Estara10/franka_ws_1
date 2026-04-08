@@ -470,6 +470,7 @@ echo ""
 
 if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     ENABLE_SENSOR_GUI="${ENABLE_SENSOR_GUI:-false}"
+    ENABLE_EXPERIMENT_RECORDER="${ENABLE_EXPERIMENT_RECORDER:-false}"
 
     # 4. 启动任务节点
     echo "[4/5] 启动双臂搬运任务节点 ($CONTROL_MODE 模式)..."
@@ -530,16 +531,31 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
 
     echo ""
 
-    # 5. 启动传感器监控及控制参数 GUI（可选）
+    # 5. 启动实验数据记录器（默认开启，支持无GUI）
+    RECORDER_PID=""
+    if [ "$ENABLE_EXPERIMENT_RECORDER" = "true" ]; then
+        echo "[5/6] 启动实验数据记录器..."
+        EXPERIMENT_DATA_DIR="${RESULT_DATA_DIR}" /usr/bin/python3 "${WORKSPACE_DIR}/experiment_data_recorder.py" "$CONTROL_MODE" > "${LOG_DIR}/experiment_recorder_${TIMESTAMP}.log" 2>&1 &
+        RECORDER_PID=$!
+        echo "进程 PID: $RECORDER_PID"
+        echo $RECORDER_PID >> "$PID_FILE"
+    else
+        echo "[5/6] 已跳过实验数据记录器（ENABLE_EXPERIMENT_RECORDER=${ENABLE_EXPERIMENT_RECORDER}）"
+        echo "      如需自动生成 experiment_results/data CSV，请使用: ENABLE_EXPERIMENT_RECORDER=true ./start_dual_arm_task.sh"
+    fi
+
+    echo ""
+
+    # 6. 启动传感器监控及控制参数 GUI（可选）
     GUI_PID=""
     if [ "$ENABLE_SENSOR_GUI" = "true" ]; then
-        echo "[5/5] 启动传感器可视化与参数调优 GUI..."
+        echo "[6/6] 启动传感器可视化与参数调优 GUI..."
         EXPERIMENT_DATA_DIR="${RESULT_DATA_DIR}" python3 "${WORKSPACE_DIR}/sensor_dashboard.py" "$CONTROL_MODE" > "${LOG_DIR}/sensor_gui_${TIMESTAMP}.log" 2>&1 &
         GUI_PID=$!
         echo "进程 PID: $GUI_PID"
         echo $GUI_PID >> "$PID_FILE"
     else
-        echo "[5/5] 已跳过传感器 GUI（ENABLE_SENSOR_GUI=${ENABLE_SENSOR_GUI}）"
+        echo "[6/6] 已跳过传感器 GUI（ENABLE_SENSOR_GUI=${ENABLE_SENSOR_GUI}）"
         echo "      如需启用可视化，请使用: ENABLE_SENSOR_GUI=true ./start_dual_arm_task.sh"
     fi
 
@@ -551,6 +567,11 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     echo "组件状态:"
     echo "  • MoveIt2 + MuJoCo: PID $MOVEIT_PID"
     echo "  • 任务节点: PID $TASK_PID"
+    if [ -n "$RECORDER_PID" ]; then
+        echo "  • 数据记录器: PID $RECORDER_PID"
+    else
+        echo "  • 数据记录器: 已跳过"
+    fi
     if [ -n "$GUI_PID" ]; then
         echo "  • 可视化终端: PID $GUI_PID"
     else
@@ -560,6 +581,7 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     echo "日志位置:"
     echo "  • MoveIt/MuJoCo: $MOVEIT_LOG"
     echo "  • 任务节点: $TASK_LOG"
+    echo "  • 数据记录器: ${LOG_DIR}/experiment_recorder_${TIMESTAMP}.log"
     echo "  • 通信时延报告: ${RESULT_REPORT_DIR}/comm_latency_${TIMESTAMP}_*_summary.md"
     echo "  • 指标报告: ${RESULT_REPORT_DIR}/task_metrics_${TIMESTAMP}_${CONTROL_MODE}_*_summary.md"
     echo "  • 图表输出目录: ${RESULT_PLOT_DIR}"
@@ -570,6 +592,10 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     echo ""
 
     # 监控 GUI 进程健康状态（不作为任务完成判据）
+    if [ -n "$RECORDER_PID" ] && ! ps -p $RECORDER_PID > /dev/null 2>&1; then
+        echo "⚠ 实验数据记录器进程启动后立即退出（请检查日志）"
+    fi
+
     if [ -n "$GUI_PID" ] && ! ps -p $GUI_PID > /dev/null 2>&1; then
         echo "⚠ 传感器GUI进程启动后立即退出（不影响主任务执行）"
     fi

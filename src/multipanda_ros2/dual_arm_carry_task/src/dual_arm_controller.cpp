@@ -759,6 +759,9 @@ void DualArmController::executeGrasp()
             }
 
             ctx_->dual_arm_->clearPoseTargets();
+            // Ensure the planned trajectory starts from the latest joint state,
+            // otherwise execution may abort due to start-state tolerance checks.
+            ctx_->dual_arm_->setStartStateToCurrentState();
             ctx_->dual_arm_->setJointValueTarget(*current_state);
             ctx_->dual_arm_->setPlannerId("PTP");
             
