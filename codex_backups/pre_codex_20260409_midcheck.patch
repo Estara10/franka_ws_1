@@ -1,0 +1,743 @@
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp b/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp
+index b8df66e..386bc65 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp
+@@ -61,6 +61,7 @@ public:
+     std::string left_arm_group_;
+     std::string right_arm_group_;
+     std::string dual_arm_group_;
++    std::string control_mode_;
+     double approach_height_;
+     double grasp_height_;
+     double lift_height_;
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/src/adaptive_compliance_supervisor.cpp b/src/multipanda_ros2/dual_arm_carry_task/src/adaptive_compliance_supervisor.cpp
+index 4a8fed3..11725b1 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/src/adaptive_compliance_supervisor.cpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/src/adaptive_compliance_supervisor.cpp
+@@ -51,6 +51,8 @@ public:
+     this->declare_parameter<double>("damping_update_epsilon", 0.02);
+     this->declare_parameter<double>("min_service_interval_sec", 0.20);
+     this->declare_parameter<double>("max_refresh_interval_sec", 1.0);
++    this->declare_parameter<double>("service_startup_wait_sec", 2.0);
++    this->declare_parameter<double>("service_recheck_interval_sec", 2.0);
+ 
+     this->declare_parameter<bool>("stop_on_done", true);
+ 
+@@ -81,6 +83,8 @@ public:
+     damping_update_epsilon_ = this->get_parameter("damping_update_epsilon").as_double();
+     min_service_interval_sec_ = this->get_parameter("min_service_interval_sec").as_double();
+     max_refresh_interval_sec_ = this->get_parameter("max_refresh_interval_sec").as_double();
++    service_startup_wait_sec_ = this->get_parameter("service_startup_wait_sec").as_double();
++    service_recheck_interval_sec_ = this->get_parameter("service_recheck_interval_sec").as_double();
+     stop_on_done_ = this->get_parameter("stop_on_done").as_bool();
+ 
+     if (update_rate_hz_ <= 0.0) {
+@@ -100,8 +104,14 @@ public:
+       std::clamp(nominal_damping_ratio_, min_damping_ratio_, max_damping_ratio_);
+     min_service_interval_sec_ = std::max(0.01, min_service_interval_sec_);
+     max_refresh_interval_sec_ = std::max(min_service_interval_sec_, max_refresh_interval_sec_);
+-
+-    for (auto stage : this->get_parameter("active_stages").as_string_array()) {
++    service_startup_wait_sec_ = std::max(0.0, service_startup_wait_sec_);
++    service_recheck_interval_sec_ = std::max(0.2, service_recheck_interval_sec_);
++
++    // NOTE:
++    // get_parameter(...).as_string_array() returns a reference to data owned by
++    // a temporary Parameter object. Iterating it directly can dangle and crash.
++    const auto active_stages_param = this->get_parameter("active_stages").as_string_array();
++    for (auto stage : active_stages_param) {
+       std::transform(stage.begin(), stage.end(), stage.begin(), [](unsigned char c) {
+         return static_cast<char>(std::toupper(c));
+       });
+@@ -131,6 +141,11 @@ public:
+ 
+     impedance_client_ = this->create_client<SetCartesianImpedance>(impedance_service_);
+ 
++    const auto startup_wait_ms = static_cast<int>(std::round(service_startup_wait_sec_ * 1000.0));
++    if (!impedance_client_->wait_for_service(std::chrono::milliseconds(std::max(startup_wait_ms, 0)))) {
++      enter_degraded_mode("service_unavailable_at_startup");
++    }
++
+     last_command_time_ = this->now();
+     last_sent_stiffness_ = nominal_translation_stiffness_;
+     last_sent_damping_ = nominal_damping_ratio_;
+@@ -228,6 +243,12 @@ private:
+       return;
+     }
+ 
++    if (degraded_due_to_service_) {
++      try_recover_from_degraded_mode();
++      publish_adaptive_status(nominal_translation_stiffness_, nominal_damping_ratio_, false);
++      return;
++    }
++
+     if (!is_active_stage()) {
+       maybe_send_nominal(false);
+       publish_adaptive_status(nominal_translation_stiffness_, nominal_damping_ratio_, false);
+@@ -294,9 +315,7 @@ private:
+       return;
+     }
+     if (!impedance_client_->service_is_ready()) {
+-      RCLCPP_WARN_THROTTLE(
+-        this->get_logger(), *this->get_clock(), 2000,
+-        "Impedance service not ready: %s", impedance_service_.c_str());
++      enter_degraded_mode("service_became_unavailable");
+       return;
+     }
+ 
+@@ -327,6 +346,50 @@ private:
+       });
+   }
+ 
++  void enter_degraded_mode(const char * reason)
++  {
++    if (degraded_due_to_service_) {
++      return;
++    }
++    degraded_due_to_service_ = true;
++    request_in_flight_ = false;
++    adaptive_applied_ = false;
++    degraded_reason_ = reason ? reason : "unknown";
++    last_service_recheck_time_ = this->now();
++
++    RCLCPP_ERROR(
++      this->get_logger(),
++      "Adaptive impedance degraded (%s): service unavailable [%s]. "
++      "Supervisor enters passive mode and will periodically probe for recovery.",
++      degraded_reason_.c_str(), impedance_service_.c_str());
++  }
++
++  void try_recover_from_degraded_mode()
++  {
++    const rclcpp::Time now = this->now();
++    const double since_last_probe = (now - last_service_recheck_time_).seconds();
++    if (since_last_probe < service_recheck_interval_sec_) {
++      return;
++    }
++
++    last_service_recheck_time_ = now;
++    if (!impedance_client_->service_is_ready()) {
++      RCLCPP_WARN_THROTTLE(
++        this->get_logger(), *this->get_clock(), 5000,
++        "Adaptive impedance still degraded: waiting for service [%s]",
++        impedance_service_.c_str());
++      return;
++    }
++
++    degraded_due_to_service_ = false;
++    degraded_reason_.clear();
++    last_command_time_ = now;
++    RCLCPP_WARN(
++      this->get_logger(),
++      "Adaptive impedance service recovered: [%s]. Supervisor resumes active adaptation.",
++      impedance_service_.c_str());
++  }
++
+   void publish_adaptive_status(double stiffness, double damping, bool active)
+   {
+     std_msgs::msg::Float64MultiArray msg;
+@@ -368,6 +431,8 @@ private:
+   double damping_update_epsilon_ {0.02};
+   double min_service_interval_sec_ {0.20};
+   double max_refresh_interval_sec_ {1.0};
++  double service_startup_wait_sec_ {2.0};
++  double service_recheck_interval_sec_ {2.0};
+   bool stop_on_done_ {true};
+ 
+   std::unordered_set<std::string> active_stages_;
+@@ -377,6 +442,7 @@ private:
+   bool task_finished_ {false};
+   bool request_in_flight_ {false};
+   bool adaptive_applied_ {false};
++  bool degraded_due_to_service_ {false};
+ 
+   double filtered_left_force_z_ {0.0};
+   double filtered_right_force_z_ {0.0};
+@@ -384,7 +450,9 @@ private:
+   double last_sent_damping_ {0.8};
+ 
+   std::string current_stage_ {"INIT"};
++  std::string degraded_reason_;
+   rclcpp::Time last_command_time_;
++  rclcpp::Time last_service_recheck_time_ {0, 0, RCL_ROS_TIME};
+ 
+   rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr left_wrench_sub_;
+   rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr right_wrench_sub_;
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp b/src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp
+index 412824d..227e7d8 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp
+@@ -43,6 +43,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
+         this->declare_parameter<std::string>("left_arm_group", "mj_left_arm");
+         this->declare_parameter<std::string>("right_arm_group", "mj_right_arm");
+         this->declare_parameter<std::string>("dual_arm_group", "dual_panda");
++        this->declare_parameter<std::string>("control_mode", "compliant_chomp");
+         this->declare_parameter<double>("approach_height", 0.28);
+         this->declare_parameter<double>("grasp_height", 0.13);
+         this->declare_parameter<double>("lift_height", 0.40);  // 增加到40cm，便于后续运动规划
+@@ -51,6 +52,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
+         
+         left_arm_group_ = this->get_parameter("left_arm_group").as_string();
+         right_arm_group_ = this->get_parameter("right_arm_group").as_string();
++        control_mode_ = this->get_parameter("control_mode").as_string();
+         task_stage_pub_ = this->create_publisher<std_msgs::msg::String>("/task_stage", 20);
+         task_status_pub_ = this->create_publisher<std_msgs::msg::String>("/task_status", 10);
+         dual_arm_group_ = this->get_parameter("dual_arm_group").as_string();
+@@ -72,6 +74,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
+         RCLCPP_INFO(this->get_logger(), "  左臂组: %s", left_arm_group_.c_str());
+         RCLCPP_INFO(this->get_logger(), "  右臂组: %s", right_arm_group_.c_str());
+         RCLCPP_INFO(this->get_logger(), "  双臂组: %s", dual_arm_group_.c_str());
++        RCLCPP_INFO(this->get_logger(), "  控制模式: %s", control_mode_.c_str());
+         RCLCPP_INFO(this->get_logger(), "  旋转阶段: %s", enable_rotate_ ? "启用" : "禁用（直接放置）");
+     }
+     
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp b/src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp
+index 9353048..ec520e6 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp
+@@ -5,10 +5,114 @@
+ #else
+ #define DUAL_ARM_HAS_RUCKIG 0
+ #endif
++#include <cctype>
+ #include "dual_arm_carry_task/dual_arm_controller.hpp"
+ #include "dual_arm_carry_task/gripper_controller.hpp"
+ 
+ namespace {
++struct MotionModeProfile
++{
++    double transport_vel_scale {1.0};
++    double transport_acc_scale {1.0};
++    double transport_waypoint_scale {1.0};
++
++    double rotate_vel_scale {1.0};
++    double rotate_acc_scale {1.0};
++    double rotate_waypoint_scale {1.0};
++
++    double descend_vel_scale {1.0};
++    double descend_acc_scale {1.0};
++    double descend_waypoint_scale {1.0};
++
++    double place_vel_scale {1.0};
++    double place_acc_scale {1.0};
++    double place_waypoint_scale {1.0};
++};
++
++std::string normalizeControlMode(std::string mode)
++{
++    std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
++        return static_cast<char>(std::tolower(c));
++    });
++    return mode;
++}
++
++double clampScale(double value, double lo, double hi)
++{
++    return std::clamp(value, lo, hi);
++}
++
++int scaledWaypointCount(int base, double scale, int min_count)
++{
++    return std::max(min_count, static_cast<int>(std::round(static_cast<double>(base) * scale)));
++}
++
++MotionModeProfile getMotionModeProfile(const std::string& raw_mode)
++{
++    MotionModeProfile p;
++    const std::string mode = normalizeControlMode(raw_mode);
++
++    if (mode == "compliant") {
++        p.transport_vel_scale = 0.90;
++        p.transport_acc_scale = 0.82;
++        p.transport_waypoint_scale = 1.10;
++
++        p.rotate_vel_scale = 0.88;
++        p.rotate_acc_scale = 0.80;
++        p.rotate_waypoint_scale = 1.15;
++
++        p.descend_vel_scale = 0.88;
++        p.descend_acc_scale = 0.80;
++        p.descend_waypoint_scale = 1.10;
++
++        p.place_vel_scale = 0.90;
++        p.place_acc_scale = 0.82;
++        p.place_waypoint_scale = 1.10;
++        return p;
++    }
++
++    if (mode == "chomp_only") {
++        p.transport_vel_scale = 0.84;
++        p.transport_acc_scale = 0.74;
++        p.transport_waypoint_scale = 1.20;
++
++        p.rotate_vel_scale = 0.80;
++        p.rotate_acc_scale = 0.72;
++        p.rotate_waypoint_scale = 1.25;
++
++        p.descend_vel_scale = 0.82;
++        p.descend_acc_scale = 0.72;
++        p.descend_waypoint_scale = 1.20;
++
++        p.place_vel_scale = 0.84;
++        p.place_acc_scale = 0.74;
++        p.place_waypoint_scale = 1.20;
++        return p;
++    }
++
++    if (mode == "compliant_chomp") {
++        p.transport_vel_scale = 0.76;
++        p.transport_acc_scale = 0.64;
++        p.transport_waypoint_scale = 1.35;
++
++        p.rotate_vel_scale = 0.68;
++        p.rotate_acc_scale = 0.58;
++        p.rotate_waypoint_scale = 1.40;
++
++        p.descend_vel_scale = 0.74;
++        p.descend_acc_scale = 0.60;
++        p.descend_waypoint_scale = 1.35;
++
++        p.place_vel_scale = 0.76;
++        p.place_acc_scale = 0.62;
++        p.place_waypoint_scale = 1.35;
++        return p;
++    }
++
++    // rigid 或未知模式均回退到基线剖面。
++    return p;
++}
++
+ bool parameterizeAndSmoothTrajectory(robot_trajectory::RobotTrajectory& traj,
+                                      double vel_scale,
+                                      double acc_scale,
+@@ -1014,23 +1118,35 @@ void DualArmController::executeTransport()
+     {
+         RCLCPP_INFO(ctx_->get_logger(), "[状态: TRANSPORT] 平移物体...");
+         try {
++            const auto mode_profile = getMotionModeProfile(ctx_->control_mode_);
++
+             auto left_start_pose = ctx_->left_arm_->getCurrentPose().pose;
+             auto right_start_pose = ctx_->right_arm_->getCurrentPose().pose;
+             const double transport_z = 0.5 * (left_start_pose.position.z + right_start_pose.position.z);
+             const bool near_ground_transport = (transport_z <= ctx_->grasp_height_ + 0.10);
+ 
+             // 低高度时增加航点密度并降低速度，加速度，避免“一卡一卡”的段间停顿。
+-            const int num_waypoints = near_ground_transport ? 28 : 16;
+-            const double vel_scale = near_ground_transport ? 0.20 : 0.35;
+-            const double acc_scale = near_ground_transport ? 0.14 : 0.28;
++            const int base_waypoints = near_ground_transport ? 28 : 16;
++            const int num_waypoints = scaledWaypointCount(
++                base_waypoints, mode_profile.transport_waypoint_scale, 12);
++            const double vel_scale = clampScale(
++                (near_ground_transport ? 0.20 : 0.35) * mode_profile.transport_vel_scale,
++                0.05, 0.40);
++            const double acc_scale = clampScale(
++                (near_ground_transport ? 0.14 : 0.28) * mode_profile.transport_acc_scale,
++                0.04, 0.35);
+             const double ik_timeout = near_ground_transport ? 0.15 : 0.10;
+ 
+-            const double total_dx = 0.20;
+-            const double total_dy = 0.10;
++            // 旋转场景下若平移过远，右臂在ROTATE中段（约20°附近）更容易出现IK无解。
++            // 这里对启用旋转的工况使用更保守的平移终点，优先保证旋转可达性与稳定性。
++            const double total_dx = ctx_->enable_rotate_ ? 0.12 : 0.20;
++            const double total_dy = ctx_->enable_rotate_ ? 0.06 : 0.10;
+ 
+             RCLCPP_INFO(ctx_->get_logger(),
+-                        "  [TRANSPORT] 连续轨迹参数: z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
+-                        transport_z, near_ground_transport ? "true" : "false", num_waypoints, vel_scale, acc_scale);
++                        "  [TRANSPORT] 模式=%s, z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f, dx=%.3f, dy=%.3f",
++                        ctx_->control_mode_.c_str(),
++                        transport_z, near_ground_transport ? "true" : "false", num_waypoints,
++                        vel_scale, acc_scale, total_dx, total_dy);
+ 
+             auto robot_model = ctx_->dual_arm_->getRobotModel();
+             auto current_state = ctx_->dual_arm_->getCurrentState();
+@@ -1104,13 +1220,15 @@ void DualArmController::executeTransport()
+ 
+ void DualArmController::executeRotate()
+     {
+-        RCLCPP_INFO(ctx_->get_logger(), "[状态: ROTATE] 旋转物体方向（Y轴→X轴）...");
+-        RCLCPP_INFO(ctx_->get_logger(), "  策略: 分段执行(3×30°) + 密集航点(1°/步) + TOTG（无段间刷新）");
+-        RCLCPP_INFO(ctx_->get_logger(), "  [原理] 分段执行: 每30°重新获取实际关节状态，补偿跟踪误差");
++        RCLCPP_INFO(ctx_->get_logger(), "[状态: ROTATE] 旋转物体方向（Y轴→45°）...");
++        RCLCPP_INFO(ctx_->get_logger(), "  策略: 分段执行 + 密集航点 + TOTG（无段间刷新）");
++        RCLCPP_INFO(ctx_->get_logger(), "  [原理] 分段执行: 每15°重新获取实际关节状态，补偿跟踪误差");
+         RCLCPP_INFO(ctx_->get_logger(), "  [原理] 不刷新夹爪: simGripperGrasp保持at(0)=0(最大夹持力)，段间刷新会触发simGripperMove导致松手");
+         RCLCPP_INFO(ctx_->get_logger(), "  [原理] Joint7偏置: 引导手腕关节主动承担Z轴旋转，避免中段/根部关节漂移翻转");
+         
+         try {
++            const auto mode_profile = getMotionModeProfile(ctx_->control_mode_);
++
+             // ===== Phase 1: 计算固定几何参数（整个旋转过程使用同一参考基准） =====
+             ctx_->dual_arm_->setStartStateToCurrentState();
+             std::this_thread::sleep_for(std::chrono::milliseconds(50));
+@@ -1144,10 +1262,17 @@ void DualArmController::executeRotate()
+             
+             // ===== Phase 2: 分段参数 =====
+             const int num_segments = 3;
+-            const int wp_per_seg = 30;        // 每段30个航点 → 每步1°（加密提升双臂协调性）
++            const int wp_per_seg = scaledWaypointCount(15, mode_profile.rotate_waypoint_scale, 12);
+             const int total_wp = num_segments * wp_per_seg;
+-            const double total_angle = M_PI / 2.0;
++            const double total_angle = M_PI / 4.0;
+             const double step_angle_deg = std::abs(total_angle) * 180.0 / M_PI / total_wp;  // 每步角度(度)
++
++            RCLCPP_INFO(ctx_->get_logger(),
++                        "  [ROTATE] 模式=%s, 航点密度缩放=%.2f, 速度缩放=%.2f, 加速度缩放=%.2f",
++                        ctx_->control_mode_.c_str(),
++                        mode_profile.rotate_waypoint_scale,
++                        mode_profile.rotate_vel_scale,
++                        mode_profile.rotate_acc_scale);
+             
+             auto robot_model = ctx_->dual_arm_->getRobotModel();
+             auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
+@@ -1365,8 +1490,8 @@ void DualArmController::executeRotate()
+                 
+                 // ----- TOTG时间参数化 -----
+                 trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+-                double vel_scale = 0.06;
+-                double acc_scale = 0.06;
++                double vel_scale = clampScale(0.06 * mode_profile.rotate_vel_scale, 0.025, 0.10);
++                double acc_scale = clampScale(0.06 * mode_profile.rotate_acc_scale, 0.025, 0.10);
+                 bool time_ok = totg.computeTimeStamps(*traj, vel_scale, acc_scale);
+                 RCLCPP_INFO(ctx_->get_logger(), "    TOTG缩放: vel=%.4f, acc=%.4f", vel_scale, acc_scale);
+                 
+@@ -1435,6 +1560,8 @@ void DualArmController::executeDescend()
+     {
+         RCLCPP_INFO(ctx_->get_logger(), "[状态: DESCEND] 下降准 备放置...");
+         try {
++            const auto mode_profile = getMotionModeProfile(ctx_->control_mode_);
++
+             ctx_->dual_arm_->setStartStateToCurrentState();
+             std::this_thread::sleep_for(std::chrono::milliseconds(50));
+ 
+@@ -1456,13 +1583,20 @@ void DualArmController::executeDescend()
+             const double descend_dist = std::max(std::abs(left_start.position.z - place_z),
+                                                  std::abs(right_start.position.z - place_z));
+             const bool near_ground = (place_z <= ctx_->grasp_height_ + 0.02);
+-            const int num_waypoints = near_ground ? 30 : 22;
+-            const double vel_scale = near_ground ? 0.10 : 0.16;
+-            const double acc_scale = near_ground ? 0.06 : 0.10;
++            const int base_waypoints = near_ground ? 30 : 22;
++            const int num_waypoints = scaledWaypointCount(
++                base_waypoints, mode_profile.descend_waypoint_scale, 14);
++            const double vel_scale = clampScale(
++                (near_ground ? 0.10 : 0.16) * mode_profile.descend_vel_scale,
++                0.04, 0.22);
++            const double acc_scale = clampScale(
++                (near_ground ? 0.06 : 0.10) * mode_profile.descend_acc_scale,
++                0.03, 0.16);
+             const double ik_timeout = near_ground ? 0.16 : 0.12;
+ 
+             RCLCPP_INFO(ctx_->get_logger(),
+-                        "  [DESCEND] 连续下降参数: dz=%.3f, place_z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
++                        "  [DESCEND] 模式=%s, dz=%.3f, place_z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
++                        ctx_->control_mode_.c_str(),
+                         descend_dist, place_z, near_ground ? "true" : "false", num_waypoints, vel_scale, acc_scale);
+ 
+             auto robot_model = ctx_->dual_arm_->getRobotModel();
+@@ -1539,6 +1673,8 @@ void DualArmController::executePlace()
+         RCLCPP_INFO(ctx_->get_logger(), "[状态: PLACE] 放置物体（GRASP逆操作）...");
+         
+         try {
++            const auto mode_profile = getMotionModeProfile(ctx_->control_mode_);
++
+             // ========== Step A: 去激活MuJoCo weld约束 + 打开夹爪释放物体 ==========
+             RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step A: 去激活weld约束并打开夹爪释放物体");
+             
+@@ -1583,13 +1719,20 @@ void DualArmController::executePlace()
+             const double retreat_start_z = 0.5 * (left_start_pose.position.z + right_start_pose.position.z);
+             const bool near_ground_retreat = retreat_start_z <= ctx_->grasp_height_ + 0.08;
+ 
+-            const int num_waypoints = near_ground_retreat ? 26 : 16;
+-            const double vel_scale = near_ground_retreat ? 0.18 : 0.28;
+-            const double acc_scale = near_ground_retreat ? 0.12 : 0.22;
++            const int base_waypoints = near_ground_retreat ? 26 : 16;
++            const int num_waypoints = scaledWaypointCount(
++                base_waypoints, mode_profile.place_waypoint_scale, 12);
++            const double vel_scale = clampScale(
++                (near_ground_retreat ? 0.18 : 0.28) * mode_profile.place_vel_scale,
++                0.06, 0.32);
++            const double acc_scale = clampScale(
++                (near_ground_retreat ? 0.12 : 0.22) * mode_profile.place_acc_scale,
++                0.04, 0.26);
+             const double ik_timeout = near_ground_retreat ? 0.15 : 0.10;
+ 
+             RCLCPP_INFO(ctx_->get_logger(),
+-                        "  [PLACE] 连续撤离参数: z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
++                        "  [PLACE] 模式=%s, z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
++                        ctx_->control_mode_.c_str(),
+                         retreat_start_z, near_ground_retreat ? "true" : "false", num_waypoints, vel_scale, acc_scale);
+ 
+             geometry_msgs::msg::Pose left_goal = left_start_pose;
+@@ -1687,8 +1830,8 @@ void DualArmController::detachAndReplaceObject()
+         double rod_center_y = (left_current.pose.position.y + right_current.pose.position.y) / 2.0;
+         double rod_center_z = 0.02;  // 放置到地面（与初始高度相同）
+         
+-        RCLCPP_INFO(ctx_->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向沿%s轴",
+-                rod_center_x, rod_center_y, rod_center_z, ctx_->enable_rotate_ ? "X" : "Y");
++        RCLCPP_INFO(ctx_->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向 Rz=%s",
++            rod_center_x, rod_center_y, rod_center_z, ctx_->enable_rotate_ ? "45°" : "0°");
+         
+         // ========== 步骤1: 解除附着 ==========
+         // 修复：之前只是发了REMOVE消息到话题，但由于ROS 2 MoveIt架构中话题处理的延迟或覆盖，
+@@ -1701,7 +1844,7 @@ void DualArmController::detachAndReplaceObject()
+         // 为了绝对安全，额外从 MoveGroupInterface 中显式调用
+         ctx_->dual_arm_->detachObject("aluminum_rod");
+         
+-        // ========== 步骤2: 重新添加为世界碰撞物体（沿X轴方向）==========
++        // ========== 步骤2: 重新添加为世界碰撞物体（旋转后姿态）==========
+         moveit_msgs::msg::CollisionObject collision_object;
+         collision_object.header.frame_id = "base_link";
+         collision_object.id = "aluminum_rod";
+@@ -1716,7 +1859,7 @@ void DualArmController::detachAndReplaceObject()
+         rod_pose.position.z = rod_center_z;
+         
+         tf2::Quaternion q_rod;
+-        q_rod.setRPY(0, 0, ctx_->enable_rotate_ ? M_PI / 2.0 : 0.0);
++        q_rod.setRPY(0, 0, ctx_->enable_rotate_ ? M_PI / 4.0 : 0.0);
+         rod_pose.orientation = tf2::toMsg(q_rod);
+         
+         collision_object.primitives.push_back(primitive);
+@@ -1727,8 +1870,8 @@ void DualArmController::detachAndReplaceObject()
+         moveit::planning_interface::PlanningSceneInterface psi;
+         psi.applyCollisionObject(collision_object);
+         
+-        RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（沿%s轴方向）",
+-                ctx_->enable_rotate_ ? "X" : "Y");
++        RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（Rz=%s）",
++            ctx_->enable_rotate_ ? "45°" : "0°");
+         std::this_thread::sleep_for(300ms);
+         
+         // ========== 步骤3: 验证结果 ==========
+diff --git a/start_dual_arm_task.sh b/start_dual_arm_task.sh
+index 40ab86e..2a91141 100755
+--- a/start_dual_arm_task.sh
++++ b/start_dual_arm_task.sh
+@@ -114,6 +114,41 @@ wait_for_task_terminal_state() {
+     return 1
+ }
+ 
++# 解析可用的双臂阻抗参数服务。返回0并输出服务名表示成功。
++resolve_adaptive_impedance_service() {
++    local requested_service="$1"
++    local services
++    local detected
++
++    services=$(timeout 3s ros2 service list 2>/dev/null || true)
++    if [ -z "$services" ]; then
++        return 1
++    fi
++
++    if [ "$requested_service" != "auto" ]; then
++        if echo "$services" | grep -Fxq "$requested_service"; then
++            echo "$requested_service"
++            return 0
++        fi
++        return 2
++    fi
++
++    detected=$(echo "$services" | grep -E '/[[:alnum:]_]+_and_[[:alnum:]_]+/dual_cartesian_impedance_controller/parameters$' | head -1 || true)
++    if [ -z "$detected" ]; then
++        detected=$(echo "$services" | grep -E '/left_and_right/dual_cartesian_impedance_controller/parameters$' | head -1 || true)
++    fi
++    if [ -z "$detected" ]; then
++        detected=$(echo "$services" | grep -E '/.*/dual_cartesian_impedance_controller/parameters$' | head -1 || true)
++    fi
++
++    if [ -n "$detected" ]; then
++        echo "$detected"
++        return 0
++    fi
++
++    return 1
++}
++
+ # 捕获 Ctrl+C 信号
+ # 注意：必须返回 130（被中断）而不是 0，避免外层批处理脚本误判为“本轮成功”并继续下一轮。
+ trap 'echo ""; echo "检测到 Ctrl+C，正在停止所有进程..."; cleanup_processes; exit 130' INT TERM
+@@ -234,10 +269,14 @@ else
+         ADAPTIVE_COMPLIANCE_ENABLED="false"
+     fi
+ fi
++ADAPTIVE_IMPEDANCE_SERVICE="${ADAPTIVE_IMPEDANCE_SERVICE:-auto}"
++ADAPTIVE_MMC_FORCE_SWITCH="${ADAPTIVE_MMC_FORCE_SWITCH:-false}"
+ echo "自适应柔顺闭环: ${ADAPTIVE_COMPLIANCE_ENABLED} (ENABLE_ADAPTIVE_COMPLIANCE=${ENABLE_ADAPTIVE_COMPLIANCE})"
++echo "自适应阻抗服务策略: ${ADAPTIVE_IMPEDANCE_SERVICE}"
++echo "自适应MMC强制切换: ${ADAPTIVE_MMC_FORCE_SWITCH}"
+ 
+-# 旋转阶段开关（默认禁用）。可通过环境变量覆盖：ENABLE_ROTATE=true ./start_dual_arm_task.sh
+-ENABLE_ROTATE="${ENABLE_ROTATE:-false}"
++# 旋转阶段开关（默认启用）。可通过环境变量覆盖：ENABLE_ROTATE=false ./start_dual_arm_task.sh
++ENABLE_ROTATE="${ENABLE_ROTATE:-true}"
+ echo "旋转阶段开关: ${ENABLE_ROTATE}"
+ 
+ echo "日志目录: $LOG_DIR"
+@@ -254,6 +293,64 @@ source "${WORKSPACE_DIR}/install/setup.bash"
+ echo "✓ 环境已加载"
+ echo ""
+ 
++# 0.5 防呆：若源码比 install 二进制新，自动重编译，避免“改了代码但仍跑旧版本”
++echo "[0.5/4] 检查 dual_arm_carry_task 是否需要重编译..."
++TASK_NODE_BIN="${WORKSPACE_DIR}/install/dual_arm_carry_task/lib/dual_arm_carry_task/dual_arm_carry_task_node"
++TASK_SRC_DIR="${WORKSPACE_DIR}/src/multipanda_ros2/dual_arm_carry_task"
++
++needs_rebuild=0
++if [ ! -f "$TASK_NODE_BIN" ]; then
++    needs_rebuild=1
++else
++    if find "${TASK_SRC_DIR}/src" "${TASK_SRC_DIR}/include" "${TASK_SRC_DIR}/launch" \
++        -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" -o -name "*.py" -o -name "CMakeLists.txt" -o -name "package.xml" \) \
++        -newer "$TASK_NODE_BIN" | head -1 | grep -q .; then
++        needs_rebuild=1
++    fi
++fi
++
++if [ "$needs_rebuild" -eq 1 ]; then
++    echo "⚠ 检测到 dual_arm_carry_task 源码更新（或未安装二进制），自动执行增量编译..."
++    (
++        cd "$WORKSPACE_DIR"
++        colcon build --packages-select dual_arm_carry_task --event-handlers console_direct+
++    )
++    source "${WORKSPACE_DIR}/install/setup.bash"
++    echo "✓ dual_arm_carry_task 已重编译并重新加载环境"
++else
++    echo "✓ dual_arm_carry_task 二进制为最新，无需重编译"
++fi
++echo ""
++
++# 0.6 防呆：franka_moveit_config 的 launch/config 若更新，自动重编译并同步 install
++echo "[0.6/4] 检查 franka_moveit_config 是否需要重编译..."
++MOVEIT_INSTALL_LAUNCH="${WORKSPACE_DIR}/install/franka_moveit_config/share/franka_moveit_config/launch/sim_dual_moveit.launch.py"
++MOVEIT_SRC_DIR="${WORKSPACE_DIR}/src/multipanda_ros2/franka_moveit_config"
++
++needs_moveit_rebuild=0
++if [ ! -f "$MOVEIT_INSTALL_LAUNCH" ]; then
++    needs_moveit_rebuild=1
++else
++    if find "${MOVEIT_SRC_DIR}/launch" "${MOVEIT_SRC_DIR}/config" "${MOVEIT_SRC_DIR}/srdf" \
++        -type f \( -name "*.py" -o -name "*.yaml" -o -name "*.yml" -o -name "*.srdf" -o -name "*.xacro" -o -name "CMakeLists.txt" -o -name "package.xml" \) \
++        -newer "$MOVEIT_INSTALL_LAUNCH" | head -1 | grep -q .; then
++        needs_moveit_rebuild=1
++    fi
++fi
++
++if [ "$needs_moveit_rebuild" -eq 1 ]; then
++    echo "⚠ 检测到 franka_moveit_config 源码更新（launch/config/srdf），自动执行增量编译..."
++    (
++        cd "$WORKSPACE_DIR"
++        colcon build --packages-select franka_moveit_config --event-handlers console_direct+
++    )
++    source "${WORKSPACE_DIR}/install/setup.bash"
++    echo "✓ franka_moveit_config 已重编译并重新加载环境"
++else
++    echo "✓ franka_moveit_config 安装文件为最新，无需重编译"
++fi
++echo ""
++
+ # 1. 清理旧进程
+ echo "[1/4] 清理旧进程..."
+ cleanup_processes
+@@ -468,6 +565,92 @@ echo ""
+ echo "✓ MoveIt2 和 MuJoCo 已启动（关键节点检测通过）"
+ echo ""
+ 
++if [ "$ADAPTIVE_COMPLIANCE_ENABLED" = "true" ]; then
++    echo "[3.5/4] 检查自适应阻抗服务可用性..."
++    RESOLVED_ADAPTIVE_SERVICE="$(resolve_adaptive_impedance_service "$ADAPTIVE_IMPEDANCE_SERVICE" || true)"
++
++    if [ -z "$RESOLVED_ADAPTIVE_SERVICE" ]; then
++        MMC_SPAWNER_LOG="${LOG_DIR}/sim_multi_mode_spawner_${TIMESTAMP}.log"
++        echo "⚠ 未检测到阻抗参数服务，尝试加载 sim_multi_mode_controller..."
++        if timeout 30s ros2 run controller_manager spawner sim_multi_mode_controller \
++            --controller-manager-timeout 20 --service-call-timeout 20 > "$MMC_SPAWNER_LOG" 2>&1; then
++            sleep 1
++            RESOLVED_ADAPTIVE_SERVICE="$(resolve_adaptive_impedance_service "$ADAPTIVE_IMPEDANCE_SERVICE" || true)"
++            if [ -n "$RESOLVED_ADAPTIVE_SERVICE" ]; then
++                echo "✓ sim_multi_mode_controller 加载成功，并检测到阻抗参数服务"
++            else
++                echo "⚠ sim_multi_mode_controller 已加载，但仍未发现阻抗参数服务"
++                echo "  spawner日志: $MMC_SPAWNER_LOG"
++            fi
++        else
++            echo "⚠ sim_multi_mode_controller 加载失败，无法启用自适应阻抗服务"
++            echo "  spawner日志: $MMC_SPAWNER_LOG"
++            tail -20 "$MMC_SPAWNER_LOG" 2>/dev/null || true
++        fi
++    fi
++
++    if [ -z "$RESOLVED_ADAPTIVE_SERVICE" ]; then
++        CONTROLLER_SNAPSHOT=""
++        for _ in 1 2 3; do
++            CONTROLLER_SNAPSHOT="$(timeout 4s ros2 control list_controllers 2>/dev/null || true)"
++            if [ -n "$CONTROLLER_SNAPSHOT" ]; then
++                break
++            fi
++            sleep 1
++        done
++        MMC_INACTIVE=0
++        TRAJ_ACTIVE=0
++
++        if echo "$CONTROLLER_SNAPSHOT" | grep -Eq 'sim_multi_mode_controller[[:space:]].*inactive'; then
++            MMC_INACTIVE=1
++        fi
++        if echo "$CONTROLLER_SNAPSHOT" | grep -Eq 'dual_panda_arm_controller[[:space:]].*active'; then
++            TRAJ_ACTIVE=1
++        fi
++
++        if [ "$MMC_INACTIVE" -eq 1 ] && [ "$TRAJ_ACTIVE" -eq 1 ]; then
++            echo "⚠ 诊断: sim_multi_mode_controller 已加载但未激活，dual_panda_arm_controller 仍在 active。"
++            echo "⚠ 根因: MuJoCo 硬件层禁止在未先停掉位置控制器时直接切到 effort 控制模式。"
++            echo "  手动切换参考: ros2 control switch_controllers --deactivate dual_panda_arm_controller --activate sim_multi_mode_controller"
++
++            if [[ "$ADAPTIVE_MMC_FORCE_SWITCH" == "1" || "$ADAPTIVE_MMC_FORCE_SWITCH" == "true" || "$ADAPTIVE_MMC_FORCE_SWITCH" == "yes" ]]; then
++                echo "⚠ ADAPTIVE_MMC_FORCE_SWITCH 已开启，尝试强制切换到 sim_multi_mode_controller..."
++                if timeout 20s ros2 control switch_controllers --deactivate dual_panda_arm_controller --activate sim_multi_mode_controller; then
++                    sleep 1
++                    RESOLVED_ADAPTIVE_SERVICE="$(resolve_adaptive_impedance_service "$ADAPTIVE_IMPEDANCE_SERVICE" || true)"
++                    if [ -n "$RESOLVED_ADAPTIVE_SERVICE" ]; then
++                        echo "✓ 强制切换成功，自适应阻抗服务已上线: ${RESOLVED_ADAPTIVE_SERVICE}"
++                        echo "⚠ 注意: dual_panda_arm_controller 已被停用，MoveIt 轨迹执行可能失败。"
++                    fi
++                else
++                    echo "⚠ 强制切换失败，保持降级策略"
++                fi
++            fi
++        fi
++    fi
++
++    if [ -n "$RESOLVED_ADAPTIVE_SERVICE" ]; then
++        ADAPTIVE_IMPEDANCE_SERVICE="$RESOLVED_ADAPTIVE_SERVICE"
++        echo "✓ 自适应阻抗服务已就绪: ${ADAPTIVE_IMPEDANCE_SERVICE}"
++    else
++        if [ "$ADAPTIVE_IMPEDANCE_SERVICE" = "auto" ]; then
++            echo "⚠ 未检测到 dual_cartesian_impedance_controller 参数服务"
++        else
++            echo "⚠ 指定的阻抗服务不可用: ${ADAPTIVE_IMPEDANCE_SERVICE}"
++        fi
++        echo "⚠ 已明确降级: 关闭自适应柔顺闭环，避免 mode4 名义启用但实际失效"
++        ADAPTIVE_COMPLIANCE_ENABLED="false"
++        ADAPTIVE_IMPEDANCE_SERVICE="/mj_left_and_mj_right/dual_cartesian_impedance_controller/parameters"
++    fi
++else
++    if [ "$ADAPTIVE_IMPEDANCE_SERVICE" = "auto" ]; then
++        ADAPTIVE_IMPEDANCE_SERVICE="/mj_left_and_mj_right/dual_cartesian_impedance_controller/parameters"
++    fi
++fi
++echo "自适应柔顺最终状态: ${ADAPTIVE_COMPLIANCE_ENABLED}"
++echo "自适应阻抗服务: ${ADAPTIVE_IMPEDANCE_SERVICE}"
++echo ""
++
+ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
+     ENABLE_SENSOR_GUI="${ENABLE_SENSOR_GUI:-false}"
+     ENABLE_EXPERIMENT_RECORDER="${ENABLE_EXPERIMENT_RECORDER:-false}"
+@@ -510,7 +693,7 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
+         adaptive_right_wrench_topic:=/force_torque_sensor_broadcaster_right/wrench \
+         adaptive_task_stage_topic:=/task_stage \
+         adaptive_task_status_topic:=/task_status \
+-        adaptive_impedance_service:=/left_and_right/dual_cartesian_impedance_controller/parameters \
++        adaptive_impedance_service:=${ADAPTIVE_IMPEDANCE_SERVICE} \
+         adaptive_params_topic:=/adaptive_impedance_params \
+         adaptive_update_rate_hz:=20.0 \
+         adaptive_nominal_stiffness:=400.0 \

@@ -99,6 +99,11 @@ def launch_setup(context, *args, **kwargs):
     monitor_enabled = _as_bool(LaunchConfiguration('enable_latency_monitor').perform(context))
     metrics_monitor_enabled = _as_bool(LaunchConfiguration('enable_task_metrics_monitor').perform(context))
     adaptive_supervisor_enabled = _as_bool(LaunchConfiguration('enable_adaptive_compliance_supervisor').perform(context))
+    adaptive_active_stages = [
+        stage.strip().upper()
+        for stage in LaunchConfiguration('adaptive_active_stages').perform(context).split(',')
+        if stage.strip()
+    ]
     nodes = [task_node]
 
     if monitor_enabled:
@@ -171,6 +176,7 @@ def launch_setup(context, *args, **kwargs):
                     'min_translation_stiffness': LaunchConfiguration('adaptive_min_stiffness'),
                     'force_gain': LaunchConfiguration('adaptive_force_gain'),
                     'imbalance_gain': LaunchConfiguration('adaptive_imbalance_gain'),
+                    'active_stages': adaptive_active_stages,
                     'stop_on_done': True,
                     'use_sim_time': True,
                 }
@@ -229,7 +235,7 @@ def generate_launch_description():
 
     enable_rotate_arg = DeclareLaunchArgument(
         'enable_rotate',
-        default_value='false',
+        default_value='true',
         description='是否执行ROTATE阶段 (true/false)'
     )
 
@@ -325,7 +331,7 @@ def generate_launch_description():
 
     metrics_enable_rotate_arg = DeclareLaunchArgument(
         'metrics_enable_rotate',
-        default_value='false',
+        default_value='true',
         description='是否执行旋转阶段（用于DESCEND期望位姿推断）'
     )
 
@@ -385,7 +391,7 @@ def generate_launch_description():
 
     adaptive_impedance_service_arg = DeclareLaunchArgument(
         'adaptive_impedance_service',
-        default_value='/left_and_right/dual_cartesian_impedance_controller/parameters',
+        default_value='/mj_left_and_mj_right/dual_cartesian_impedance_controller/parameters',
         description='自适应柔顺节点阻抗参数服务名'
     )
 
@@ -423,6 +429,12 @@ def generate_launch_description():
         'adaptive_imbalance_gain',
         default_value='8.0',
         description='双臂受力不均衡驱动柔顺增益'
+    )
+
+    adaptive_active_stages_arg = DeclareLaunchArgument(
+        'adaptive_active_stages',
+        default_value='TRANSPORT,ROTATE,DESCEND',
+        description='自适应柔顺生效阶段，逗号分隔'
     )
     
     # 使用 OpaqueFunction 延迟执行以处理 xacro
@@ -472,5 +484,6 @@ def generate_launch_description():
         adaptive_min_stiffness_arg,
         adaptive_force_gain_arg,
         adaptive_imbalance_gain_arg,
+        adaptive_active_stages_arg,
         delayed_task
     ])

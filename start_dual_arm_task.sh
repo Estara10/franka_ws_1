@@ -114,6 +114,41 @@ wait_for_task_terminal_state() {
     return 1
 }
 
+# 解析可用的双臂阻抗参数服务。返回0并输出服务名表示成功。
+resolve_adaptive_impedance_service() {
+    local requested_service="$1"
+    local services
+    local detected
+
+    services=$(timeout 3s ros2 service list 2>/dev/null || true)
+    if [ -z "$services" ]; then
+        return 1
+    fi
+
+    if [ "$requested_service" != "auto" ]; then
+        if echo "$services" | grep -Fxq "$requested_service"; then
+            echo "$requested_service"
+            return 0
+        fi
+        return 2
+    fi
+
+    detected=$(echo "$services" | grep -E '/[[:alnum:]_]+_and_[[:alnum:]_]+/dual_cartesian_impedance_controller/parameters$' | head -1 || true)
+    if [ -z "$detected" ]; then
+        detected=$(echo "$services" | grep -E '/left_and_right/dual_cartesian_impedance_controller/parameters$' | head -1 || true)
+    fi
+    if [ -z "$detected" ]; then
+        detected=$(echo "$services" | grep -E '/.*/dual_cartesian_impedance_controller/parameters$' | head -1 || true)
+    fi
+
+    if [ -n "$detected" ]; then
+        echo "$detected"
+        return 0
+    fi
+
+    return 1
+}
+
 # 捕获 Ctrl+C 信号
 # 注意：必须返回 130（被中断）而不是 0，避免外层批处理脚本误判为“本轮成功”并继续下一轮。
 trap 'echo ""; echo "检测到 Ctrl+C，正在停止所有进程..."; cleanup_processes; exit 130' INT TERM
@@ -196,10 +231,10 @@ else
     echo "  [模式 A] 经典固态搬运 (作为基础对照与保底)"
     echo "========================================"
     echo "请选择内部的测试子模式:"
-    echo "  1) rigid             - 刚性对照模式 (无导纳柔顺, 无CHOMP)"
-    echo "  2) compliant         - 柔顺控制模式 (强导纳柔顺, 无CHOMP)"
-    echo "  3) chomp_only        - 仅限优化模式 (无导纳柔顺, 强CHOMP顺滑)"
-    echo "  4) compliant_chomp   - 全功能模式   (强导纳柔顺 + 强CHOMP顺滑) [默认]"
+    echo "  1) rigid             - 刚性对照模式 (无柔顺, 无CHOMP)"
+    echo "  2) compliant         - 柔顺控制模式 (内部柔顺, 无CHOMP)"
+    echo "  3) chomp_only        - 仅限优化模式 (无柔顺, CHOMP顺滑)"
+    echo "  4) compliant_chomp   - 组合优化模式 (内部柔顺 + CHOMP顺滑) [默认]"
     read -p "请输入模式编号 [默认: 4]: " MODE_SELECTION
 
     case "$MODE_SELECTION" in
@@ -215,18 +250,80 @@ echo ""
 echo "✅ 最终设定的运行配置: ===[ 大模式: ${TASK_MAIN_MODE} | 核心策略: ${CONTROL_MODE} ]==="
 echo ""
 
-# 自适应柔顺闭环开关：默认随模式自动启停，可用环境变量覆盖
+APPROACH_HEIGHT="0.28"
+GRASP_HEIGHT="0.13"
+LIFT_HEIGHT="0.40"
+
+# MuJoCo 硬件层内部柔顺开关：用于保证四模式对比真实隔离
+#   ENABLE_INTERNAL_COMPLIANCE=auto|true|false
+ENABLE_INTERNAL_COMPLIANCE="${ENABLE_INTERNAL_COMPLIANCE:-auto}"
+if [[ "$ENABLE_INTERNAL_COMPLIANCE" == "auto" ]]; then
+    case "$CONTROL_MODE" in
+        rigid|chomp_only)
+            INTERNAL_COMPLIANCE_ENABLED="false"
+            ;;
+        *)
+            INTERNAL_COMPLIANCE_ENABLED="true"
+            ;;
+    esac
+else
+    if [[ "$ENABLE_INTERNAL_COMPLIANCE" == "1" || "$ENABLE_INTERNAL_COMPLIANCE" == "true" || "$ENABLE_INTERNAL_COMPLIANCE" == "yes" ]]; then
+        INTERNAL_COMPLIANCE_ENABLED="true"
+    else
+        INTERNAL_COMPLIANCE_ENABLED="false"
+    fi
+fi
+export MJ_INTERNAL_COMPLIANCE_ENABLED="${INTERNAL_COMPLIANCE_ENABLED}"
+
+MJ_INTERNAL_COMPLIANCE_STRESS_THRESHOLD="2.0"
+MJ_INTERNAL_COMPLIANCE_K_GAIN="0.08"
+MJ_INTERNAL_COMPLIANCE_D_GAIN="0.15"
+MJ_INTERNAL_COMPLIANCE_MIN_K="0.45"
+MJ_INTERNAL_COMPLIANCE_MAX_D="1.80"
+
+ADAPTIVE_NOMINAL_STIFFNESS="400.0"
+ADAPTIVE_MIN_STIFFNESS="180.0"
+ADAPTIVE_FORCE_GAIN="1.6"
+ADAPTIVE_IMBALANCE_GAIN="6.0"
+ADAPTIVE_ACTIVE_STAGES="TRANSPORT,ROTATE,DESCEND"
+
+case "$CONTROL_MODE" in
+    compliant_chomp)
+        MJ_INTERNAL_COMPLIANCE_STRESS_THRESHOLD="3.0"
+        MJ_INTERNAL_COMPLIANCE_K_GAIN="0.03"
+        MJ_INTERNAL_COMPLIANCE_D_GAIN="0.06"
+        MJ_INTERNAL_COMPLIANCE_MIN_K="0.72"
+        MJ_INTERNAL_COMPLIANCE_MAX_D="1.20"
+        ADAPTIVE_NOMINAL_STIFFNESS="420.0"
+        ADAPTIVE_MIN_STIFFNESS="300.0"
+        ADAPTIVE_FORCE_GAIN="0.7"
+        ADAPTIVE_IMBALANCE_GAIN="2.0"
+        ADAPTIVE_ACTIVE_STAGES="DESCEND"
+        ;;
+    rigid|chomp_only)
+        ADAPTIVE_NOMINAL_STIFFNESS="400.0"
+        ADAPTIVE_MIN_STIFFNESS="400.0"
+        ADAPTIVE_FORCE_GAIN="0.0"
+        ADAPTIVE_IMBALANCE_GAIN="0.0"
+        ADAPTIVE_ACTIVE_STAGES="DESCEND"
+        ;;
+esac
+
+export MJ_INTERNAL_COMPLIANCE_STRESS_THRESHOLD
+export MJ_INTERNAL_COMPLIANCE_K_GAIN
+export MJ_INTERNAL_COMPLIANCE_D_GAIN
+export MJ_INTERNAL_COMPLIANCE_MIN_K
+export MJ_INTERNAL_COMPLIANCE_MAX_D
+
+# 自适应柔顺闭环开关：
+#   在当前经典搬运流程中，MoveIt 依赖 dual_panda_arm_controller（位置轨迹控制），
+#   而 adaptive supervisor 依赖 sim_multi_mode_controller/dual_cartesian_impedance_controller。
+#   这两套控制器无法同时处于 active，因此 auto 策略默认关闭，避免 mode4 出现“名义启用，实际冲突”的假配置。
+#   如需研究多模态阻抗链路，可显式设 ENABLE_ADAPTIVE_COMPLIANCE=true 手动测试。
 #   ENABLE_ADAPTIVE_COMPLIANCE=auto|true|false
 ENABLE_ADAPTIVE_COMPLIANCE="${ENABLE_ADAPTIVE_COMPLIANCE:-auto}"
 if [[ "$ENABLE_ADAPTIVE_COMPLIANCE" == "auto" ]]; then
-    case "$CONTROL_MODE" in
-        rigid|chomp_only)
-            ADAPTIVE_COMPLIANCE_ENABLED="false"
-            ;;
-        *)
-            ADAPTIVE_COMPLIANCE_ENABLED="true"
-            ;;
-    esac
+    ADAPTIVE_COMPLIANCE_ENABLED="false"
 else
     if [[ "$ENABLE_ADAPTIVE_COMPLIANCE" == "1" || "$ENABLE_ADAPTIVE_COMPLIANCE" == "true" || "$ENABLE_ADAPTIVE_COMPLIANCE" == "yes" ]]; then
         ADAPTIVE_COMPLIANCE_ENABLED="true"
@@ -234,10 +331,20 @@ else
         ADAPTIVE_COMPLIANCE_ENABLED="false"
     fi
 fi
+ADAPTIVE_IMPEDANCE_SERVICE="${ADAPTIVE_IMPEDANCE_SERVICE:-auto}"
+ADAPTIVE_MMC_FORCE_SWITCH="${ADAPTIVE_MMC_FORCE_SWITCH:-false}"
+echo "MuJoCo内部柔顺: ${INTERNAL_COMPLIANCE_ENABLED} (ENABLE_INTERNAL_COMPLIANCE=${ENABLE_INTERNAL_COMPLIANCE})"
+echo "内部柔顺参数: threshold=${MJ_INTERNAL_COMPLIANCE_STRESS_THRESHOLD} K_gain=${MJ_INTERNAL_COMPLIANCE_K_GAIN} D_gain=${MJ_INTERNAL_COMPLIANCE_D_GAIN} min_K=${MJ_INTERNAL_COMPLIANCE_MIN_K} max_D=${MJ_INTERNAL_COMPLIANCE_MAX_D}"
 echo "自适应柔顺闭环: ${ADAPTIVE_COMPLIANCE_ENABLED} (ENABLE_ADAPTIVE_COMPLIANCE=${ENABLE_ADAPTIVE_COMPLIANCE})"
+if [[ "$ENABLE_ADAPTIVE_COMPLIANCE" == "auto" ]]; then
+    echo "自适应柔顺说明: 经典搬运流程默认关闭外部MMC阻抗监督，避免与MoveIt轨迹控制冲突"
+fi
+echo "自适应阻抗服务策略: ${ADAPTIVE_IMPEDANCE_SERVICE}"
+echo "自适应MMC强制切换: ${ADAPTIVE_MMC_FORCE_SWITCH}"
+echo "监督式柔顺参数: nominal=${ADAPTIVE_NOMINAL_STIFFNESS} min=${ADAPTIVE_MIN_STIFFNESS} force_gain=${ADAPTIVE_FORCE_GAIN} imbalance_gain=${ADAPTIVE_IMBALANCE_GAIN} stages=${ADAPTIVE_ACTIVE_STAGES}"
 
-# 旋转阶段开关（默认禁用）。可通过环境变量覆盖：ENABLE_ROTATE=true ./start_dual_arm_task.sh
-ENABLE_ROTATE="${ENABLE_ROTATE:-false}"
+# 旋转阶段开关（默认启用）。可通过环境变量覆盖：ENABLE_ROTATE=false ./start_dual_arm_task.sh
+ENABLE_ROTATE="${ENABLE_ROTATE:-true}"
 echo "旋转阶段开关: ${ENABLE_ROTATE}"
 
 echo "日志目录: $LOG_DIR"
@@ -252,6 +359,84 @@ echo ""
 echo "[0/4] 加载ROS2工作空间环境..."
 source "${WORKSPACE_DIR}/install/setup.bash"
 echo "✓ 环境已加载"
+echo ""
+
+# 0.5 防呆：若源码比 install 二进制新，自动重编译，避免“改了代码但仍跑旧版本”
+echo "[0.5/4] 检查 dual_arm_carry_task / franka_hardware 是否需要重编译..."
+TASK_NODE_BIN="${WORKSPACE_DIR}/install/dual_arm_carry_task/lib/dual_arm_carry_task/dual_arm_carry_task_node"
+TASK_SRC_DIR="${WORKSPACE_DIR}/src/multipanda_ros2/dual_arm_carry_task"
+FRANKA_HW_BIN="${WORKSPACE_DIR}/install/franka_hardware/lib/libfranka_mj_hardware.so"
+FRANKA_HW_SRC_DIR="${WORKSPACE_DIR}/src/multipanda_ros2/franka_hardware"
+
+needs_rebuild=0
+if [ ! -f "$TASK_NODE_BIN" ]; then
+    needs_rebuild=1
+else
+    if find "${TASK_SRC_DIR}/src" "${TASK_SRC_DIR}/include" "${TASK_SRC_DIR}/launch" \
+        -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" -o -name "*.py" -o -name "CMakeLists.txt" -o -name "package.xml" \) \
+        -newer "$TASK_NODE_BIN" | head -1 | grep -q .; then
+        needs_rebuild=1
+    fi
+fi
+
+needs_hw_rebuild=0
+if [ ! -f "$FRANKA_HW_BIN" ]; then
+    needs_hw_rebuild=1
+else
+    if find "${FRANKA_HW_SRC_DIR}/src" "${FRANKA_HW_SRC_DIR}/include" \
+        -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" -o -name "CMakeLists.txt" -o -name "package.xml" \) \
+        -newer "$FRANKA_HW_BIN" | head -1 | grep -q .; then
+        needs_hw_rebuild=1
+    fi
+fi
+
+if [ "$needs_rebuild" -eq 1 ] || [ "$needs_hw_rebuild" -eq 1 ]; then
+    BUILD_PACKAGES=""
+    if [ "$needs_hw_rebuild" -eq 1 ]; then
+        BUILD_PACKAGES="${BUILD_PACKAGES} franka_hardware"
+    fi
+    if [ "$needs_rebuild" -eq 1 ]; then
+        BUILD_PACKAGES="${BUILD_PACKAGES} dual_arm_carry_task"
+    fi
+    echo "⚠ 检测到源码更新，自动执行增量编译:${BUILD_PACKAGES}"
+    (
+        cd "$WORKSPACE_DIR"
+        colcon build --packages-select ${BUILD_PACKAGES} --event-handlers console_direct+
+    )
+    source "${WORKSPACE_DIR}/install/setup.bash"
+    echo "✓ 相关包已重编译并重新加载环境"
+else
+    echo "✓ dual_arm_carry_task / franka_hardware 二进制为最新，无需重编译"
+fi
+echo ""
+
+# 0.6 防呆：franka_moveit_config 的 launch/config 若更新，自动重编译并同步 install
+echo "[0.6/4] 检查 franka_moveit_config 是否需要重编译..."
+MOVEIT_INSTALL_LAUNCH="${WORKSPACE_DIR}/install/franka_moveit_config/share/franka_moveit_config/launch/sim_dual_moveit.launch.py"
+MOVEIT_SRC_DIR="${WORKSPACE_DIR}/src/multipanda_ros2/franka_moveit_config"
+
+needs_moveit_rebuild=0
+if [ ! -f "$MOVEIT_INSTALL_LAUNCH" ]; then
+    needs_moveit_rebuild=1
+else
+    if find "${MOVEIT_SRC_DIR}/launch" "${MOVEIT_SRC_DIR}/config" "${MOVEIT_SRC_DIR}/srdf" \
+        -type f \( -name "*.py" -o -name "*.yaml" -o -name "*.yml" -o -name "*.srdf" -o -name "*.xacro" -o -name "CMakeLists.txt" -o -name "package.xml" \) \
+        -newer "$MOVEIT_INSTALL_LAUNCH" | head -1 | grep -q .; then
+        needs_moveit_rebuild=1
+    fi
+fi
+
+if [ "$needs_moveit_rebuild" -eq 1 ]; then
+    echo "⚠ 检测到 franka_moveit_config 源码更新（launch/config/srdf），自动执行增量编译..."
+    (
+        cd "$WORKSPACE_DIR"
+        colcon build --packages-select franka_moveit_config --event-handlers console_direct+
+    )
+    source "${WORKSPACE_DIR}/install/setup.bash"
+    echo "✓ franka_moveit_config 已重编译并重新加载环境"
+else
+    echo "✓ franka_moveit_config 安装文件为最新，无需重编译"
+fi
 echo ""
 
 # 1. 清理旧进程
@@ -468,6 +653,92 @@ echo ""
 echo "✓ MoveIt2 和 MuJoCo 已启动（关键节点检测通过）"
 echo ""
 
+if [ "$ADAPTIVE_COMPLIANCE_ENABLED" = "true" ]; then
+    echo "[3.5/4] 检查自适应阻抗服务可用性..."
+    RESOLVED_ADAPTIVE_SERVICE="$(resolve_adaptive_impedance_service "$ADAPTIVE_IMPEDANCE_SERVICE" || true)"
+
+    if [ -z "$RESOLVED_ADAPTIVE_SERVICE" ]; then
+        MMC_SPAWNER_LOG="${LOG_DIR}/sim_multi_mode_spawner_${TIMESTAMP}.log"
+        echo "⚠ 未检测到阻抗参数服务，尝试加载 sim_multi_mode_controller..."
+        if timeout 30s ros2 run controller_manager spawner sim_multi_mode_controller \
+            --controller-manager-timeout 20 --service-call-timeout 20 > "$MMC_SPAWNER_LOG" 2>&1; then
+            sleep 1
+            RESOLVED_ADAPTIVE_SERVICE="$(resolve_adaptive_impedance_service "$ADAPTIVE_IMPEDANCE_SERVICE" || true)"
+            if [ -n "$RESOLVED_ADAPTIVE_SERVICE" ]; then
+                echo "✓ sim_multi_mode_controller 加载成功，并检测到阻抗参数服务"
+            else
+                echo "⚠ sim_multi_mode_controller 已加载，但仍未发现阻抗参数服务"
+                echo "  spawner日志: $MMC_SPAWNER_LOG"
+            fi
+        else
+            echo "⚠ sim_multi_mode_controller 加载失败，无法启用自适应阻抗服务"
+            echo "  spawner日志: $MMC_SPAWNER_LOG"
+            tail -20 "$MMC_SPAWNER_LOG" 2>/dev/null || true
+        fi
+    fi
+
+    if [ -z "$RESOLVED_ADAPTIVE_SERVICE" ]; then
+        CONTROLLER_SNAPSHOT=""
+        for _ in 1 2 3; do
+            CONTROLLER_SNAPSHOT="$(timeout 4s ros2 control list_controllers 2>/dev/null || true)"
+            if [ -n "$CONTROLLER_SNAPSHOT" ]; then
+                break
+            fi
+            sleep 1
+        done
+        MMC_INACTIVE=0
+        TRAJ_ACTIVE=0
+
+        if echo "$CONTROLLER_SNAPSHOT" | grep -Eq 'sim_multi_mode_controller[[:space:]].*inactive'; then
+            MMC_INACTIVE=1
+        fi
+        if echo "$CONTROLLER_SNAPSHOT" | grep -Eq 'dual_panda_arm_controller[[:space:]].*active'; then
+            TRAJ_ACTIVE=1
+        fi
+
+        if [ "$MMC_INACTIVE" -eq 1 ] && [ "$TRAJ_ACTIVE" -eq 1 ]; then
+            echo "⚠ 诊断: sim_multi_mode_controller 已加载但未激活，dual_panda_arm_controller 仍在 active。"
+            echo "⚠ 根因: MuJoCo 硬件层禁止在未先停掉位置控制器时直接切到 effort 控制模式。"
+            echo "  手动切换参考: ros2 control switch_controllers --deactivate dual_panda_arm_controller --activate sim_multi_mode_controller"
+
+            if [[ "$ADAPTIVE_MMC_FORCE_SWITCH" == "1" || "$ADAPTIVE_MMC_FORCE_SWITCH" == "true" || "$ADAPTIVE_MMC_FORCE_SWITCH" == "yes" ]]; then
+                echo "⚠ ADAPTIVE_MMC_FORCE_SWITCH 已开启，尝试强制切换到 sim_multi_mode_controller..."
+                if timeout 20s ros2 control switch_controllers --deactivate dual_panda_arm_controller --activate sim_multi_mode_controller; then
+                    sleep 1
+                    RESOLVED_ADAPTIVE_SERVICE="$(resolve_adaptive_impedance_service "$ADAPTIVE_IMPEDANCE_SERVICE" || true)"
+                    if [ -n "$RESOLVED_ADAPTIVE_SERVICE" ]; then
+                        echo "✓ 强制切换成功，自适应阻抗服务已上线: ${RESOLVED_ADAPTIVE_SERVICE}"
+                        echo "⚠ 注意: dual_panda_arm_controller 已被停用，MoveIt 轨迹执行可能失败。"
+                    fi
+                else
+                    echo "⚠ 强制切换失败，保持降级策略"
+                fi
+            fi
+        fi
+    fi
+
+    if [ -n "$RESOLVED_ADAPTIVE_SERVICE" ]; then
+        ADAPTIVE_IMPEDANCE_SERVICE="$RESOLVED_ADAPTIVE_SERVICE"
+        echo "✓ 自适应阻抗服务已就绪: ${ADAPTIVE_IMPEDANCE_SERVICE}"
+    else
+        if [ "$ADAPTIVE_IMPEDANCE_SERVICE" = "auto" ]; then
+            echo "⚠ 未检测到 dual_cartesian_impedance_controller 参数服务"
+        else
+            echo "⚠ 指定的阻抗服务不可用: ${ADAPTIVE_IMPEDANCE_SERVICE}"
+        fi
+        echo "⚠ 已明确降级: 关闭自适应柔顺闭环，避免 mode4 名义启用但实际失效"
+        ADAPTIVE_COMPLIANCE_ENABLED="false"
+        ADAPTIVE_IMPEDANCE_SERVICE="/mj_left_and_mj_right/dual_cartesian_impedance_controller/parameters"
+    fi
+else
+    if [ "$ADAPTIVE_IMPEDANCE_SERVICE" = "auto" ]; then
+        ADAPTIVE_IMPEDANCE_SERVICE="/mj_left_and_mj_right/dual_cartesian_impedance_controller/parameters"
+    fi
+fi
+echo "自适应柔顺最终状态: ${ADAPTIVE_COMPLIANCE_ENABLED}"
+echo "自适应阻抗服务: ${ADAPTIVE_IMPEDANCE_SERVICE}"
+echo ""
+
 if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     ENABLE_SENSOR_GUI="${ENABLE_SENSOR_GUI:-false}"
     ENABLE_EXPERIMENT_RECORDER="${ENABLE_EXPERIMENT_RECORDER:-false}"
@@ -481,9 +752,9 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
 
     ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
         control_mode:=${CONTROL_MODE} \
-        approach_height:=0.28 \
-        grasp_height:=0.13 \
-        lift_height:=0.40 \
+        approach_height:=${APPROACH_HEIGHT} \
+        grasp_height:=${GRASP_HEIGHT} \
+        lift_height:=${LIFT_HEIGHT} \
         enable_rotate:=${ENABLE_ROTATE} \
         enable_latency_monitor:=true \
         latency_topic:=/joint_states \
@@ -501,7 +772,7 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
         metrics_sync_target_mm:=5.0 \
         metrics_ee_target_mm:=2.0 \
         metrics_enable_rotate:=${ENABLE_ROTATE} \
-        metrics_descend_place_z:=0.0 \
+        metrics_descend_place_z:=${GRASP_HEIGHT} \
         metrics_descend_shift_x:=999.0 \
         metrics_result_dir:=${RESULT_REPORT_DIR} \
         metrics_result_prefix:=task_metrics_${TIMESTAMP}_${CONTROL_MODE} \
@@ -510,13 +781,14 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
         adaptive_right_wrench_topic:=/force_torque_sensor_broadcaster_right/wrench \
         adaptive_task_stage_topic:=/task_stage \
         adaptive_task_status_topic:=/task_status \
-        adaptive_impedance_service:=/left_and_right/dual_cartesian_impedance_controller/parameters \
+        adaptive_impedance_service:=${ADAPTIVE_IMPEDANCE_SERVICE} \
         adaptive_params_topic:=/adaptive_impedance_params \
         adaptive_update_rate_hz:=20.0 \
-        adaptive_nominal_stiffness:=400.0 \
-        adaptive_min_stiffness:=150.0 \
-        adaptive_force_gain:=2.0 \
-        adaptive_imbalance_gain:=8.0 > "$TASK_LOG" 2>&1 &
+        adaptive_nominal_stiffness:=${ADAPTIVE_NOMINAL_STIFFNESS} \
+        adaptive_min_stiffness:=${ADAPTIVE_MIN_STIFFNESS} \
+        adaptive_force_gain:=${ADAPTIVE_FORCE_GAIN} \
+        adaptive_imbalance_gain:=${ADAPTIVE_IMBALANCE_GAIN} \
+        adaptive_active_stages:=${ADAPTIVE_ACTIVE_STAGES} > "$TASK_LOG" 2>&1 &
     TASK_PID=$!
     echo "进程 PID: $TASK_PID"
     echo $TASK_PID >> "$PID_FILE"

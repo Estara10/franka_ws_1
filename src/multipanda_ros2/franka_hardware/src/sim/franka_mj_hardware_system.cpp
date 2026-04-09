@@ -16,7 +16,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <exception>
+#include <string>
 #include <thread>
 
 #include <franka/exception.h>
@@ -356,12 +358,53 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
   static int loop_cnt = 0;
   static double current_K_scale = 1.0;
   static double current_D_scale = 1.0;
+  static const bool internal_adaptive_enabled = []() {
+    const char* raw = std::getenv("MJ_INTERNAL_COMPLIANCE_ENABLED");
+    if (raw == nullptr) {
+      return true;
+    }
+    std::string value(raw);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+      return static_cast<char>(std::tolower(c));
+    });
+    return !(value == "0" || value == "false" || value == "off" || value == "no");
+  }();
+  static const double internal_stress_threshold = []() {
+    const char* raw = std::getenv("MJ_INTERNAL_COMPLIANCE_STRESS_THRESHOLD");
+    return raw ? std::max(0.0, std::atof(raw)) : 2.0;
+  }();
+  static const double internal_k_gain = []() {
+    const char* raw = std::getenv("MJ_INTERNAL_COMPLIANCE_K_GAIN");
+    return raw ? std::max(0.0, std::atof(raw)) : 0.08;
+  }();
+  static const double internal_d_gain = []() {
+    const char* raw = std::getenv("MJ_INTERNAL_COMPLIANCE_D_GAIN");
+    return raw ? std::max(0.0, std::atof(raw)) : 0.15;
+  }();
+  static const double internal_min_k = []() {
+    const char* raw = std::getenv("MJ_INTERNAL_COMPLIANCE_MIN_K");
+    return raw ? std::clamp(std::atof(raw), 0.05, 1.0) : 0.10;
+  }();
+  static const double internal_max_d = []() {
+    const char* raw = std::getenv("MJ_INTERNAL_COMPLIANCE_MAX_D");
+    return raw ? std::max(1.0, std::atof(raw)) : 2.5;
+  }();
+  static bool adaptive_mode_logged = false;
+
+  if (!adaptive_mode_logged) {
+    RCLCPP_INFO(getLogger(),
+                "MuJoCo internal compliance: %s | threshold=%.2f K_gain=%.3f D_gain=%.3f min_K=%.2f max_D=%.2f",
+                internal_adaptive_enabled ? "enabled" : "disabled",
+                internal_stress_threshold, internal_k_gain, internal_d_gain,
+                internal_min_k, internal_max_d);
+    adaptive_mode_logged = true;
+  }
 
   // 获取左右臂的FT传感器ID
   int l_force_id = mj_name2id(m_, mjOBJ_SENSOR, "mj_left_hand_ft_sensor_force");
   int r_force_id = mj_name2id(m_, mjOBJ_SENSOR, "mj_right_hand_ft_sensor_force");
 
-  if (l_force_id >= 0 && r_force_id >= 0) {
+  if (internal_adaptive_enabled && l_force_id >= 0 && r_force_id >= 0) {
       int l_adr = m_->sensor_adr[l_force_id];
       int r_adr = m_->sensor_adr[r_force_id];
       double ly = d_->sensordata[l_adr + 1]; 
@@ -371,9 +414,10 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
 
       double target_K = 1.0;
       double target_D = 1.0;
-      if (internal_stress > 2.0) {
-          target_K = std::max(0.1, 1.0 - 0.08 * (internal_stress - 2.0));
-          target_D = std::min(2.5, 1.0 + 0.15 * (internal_stress - 2.0));
+      if (internal_stress > internal_stress_threshold) {
+          const double stress_over = internal_stress - internal_stress_threshold;
+          target_K = std::max(internal_min_k, 1.0 - internal_k_gain * stress_over);
+          target_D = std::min(internal_max_d, 1.0 + internal_d_gain * stress_over);
       }
 
       current_K_scale = 0.95 * current_K_scale + 0.05 * target_K;
@@ -385,8 +429,17 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
           msg.data.push_back(current_D_scale * 100.0);
           adaptive_pub_->publish(msg);
       }
-      loop_cnt++;
+  } else {
+      current_K_scale = 1.0;
+      current_D_scale = 1.0;
+      if (loop_cnt % 10 == 0 && adaptive_pub_) {
+          std_msgs::msg::Float64MultiArray msg;
+          msg.data.push_back(100.0);
+          msg.data.push_back(100.0);
+          adaptive_pub_->publish(msg);
+      }
   }
+  loop_cnt++;
   // -----------------------------------------------------------------
   for(auto& arm_container_pair: arms_){
     auto &arm = arm_container_pair.second;

@@ -1,0 +1,11 @@
+mode,label,source_csv,duration_s,active_ratio,stress_mean_active,stress_p95_active,stress_over_thr_ratio_active,accel_mean_active,accel_p95_active,asymmetry_mean_active,composite_score,improve_vs_rigid_pct
+rigid,Rigid,experiment_results/data/experiment_rigid_20260409_141657.csv,40.805848,0.588235,0.625232,1.353963,0.004167,6.877634,22.321639,2.589739,1.239363,0.000
+compliant,Compliant,experiment_results/data/experiment_compliant_20260409_141820.csv,41.906736,0.588305,0.560002,1.387945,0.000000,4.097993,18.647697,2.968416,1.029244,16.954
+chomp_only,CHOMP-only,experiment_results/data/experiment_chomp_only_20260409_141937.csv,42.804641,0.608645,0.557646,1.242627,0.001919,6.236847,20.653503,2.645802,1.172842,5.367
+compliant_chomp,Compliant+CHOMP,experiment_results/data/experiment_compliant_chomp_20260409_142630.csv,42.406400,0.603774,0.602094,1.296332,0.000000,6.217841,21.400179,2.609412,1.182503,4.588
+
+ranking,mode,score
+1,compliant,1.029244
+2,chomp_only,1.172842
+3,compliant_chomp,1.182503
+4,rigid,1.239363

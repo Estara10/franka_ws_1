@@ -43,6 +43,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<std::string>("left_arm_group", "mj_left_arm");
         this->declare_parameter<std::string>("right_arm_group", "mj_right_arm");
         this->declare_parameter<std::string>("dual_arm_group", "dual_panda");
+        this->declare_parameter<std::string>("control_mode", "compliant_chomp");
         this->declare_parameter<double>("approach_height", 0.28);
         this->declare_parameter<double>("grasp_height", 0.13);
         this->declare_parameter<double>("lift_height", 0.40);  // 增加到40cm，便于后续运动规划
@@ -51,6 +52,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         
         left_arm_group_ = this->get_parameter("left_arm_group").as_string();
         right_arm_group_ = this->get_parameter("right_arm_group").as_string();
+        control_mode_ = this->get_parameter("control_mode").as_string();
         task_stage_pub_ = this->create_publisher<std_msgs::msg::String>("/task_stage", 20);
         task_status_pub_ = this->create_publisher<std_msgs::msg::String>("/task_status", 10);
         dual_arm_group_ = this->get_parameter("dual_arm_group").as_string();
@@ -72,6 +74,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         RCLCPP_INFO(this->get_logger(), "  左臂组: %s", left_arm_group_.c_str());
         RCLCPP_INFO(this->get_logger(), "  右臂组: %s", right_arm_group_.c_str());
         RCLCPP_INFO(this->get_logger(), "  双臂组: %s", dual_arm_group_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  控制模式: %s", control_mode_.c_str());
         RCLCPP_INFO(this->get_logger(), "  旋转阶段: %s", enable_rotate_ ? "启用" : "禁用（直接放置）");
     }
     

@@ -61,11 +61,16 @@ public:
     std::string left_arm_group_;
     std::string right_arm_group_;
     std::string dual_arm_group_;
+    std::string control_mode_;
     double approach_height_;
     double grasp_height_;
     double lift_height_;
     bool enable_rotate_;
     double gripper_close_pos_;
+    double place_release_hand_z_ref_ {0.0};
+    bool place_release_hand_z_ref_valid_ {false};
+    double rod_center_ground_z_ {0.02};
+    double rod_half_height_ {0.02};
     
     std::vector<double> initial_left_joints_;
     std::vector<double> initial_right_joints_;

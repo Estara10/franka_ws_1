@@ -13,6 +13,9 @@ controller_manager:
     dual_panda_arm_controller:
       type: joint_trajectory_controller/JointTrajectoryController
 
+    sim_multi_mode_controller:
+      type: multi_mode_controller/MultiModeController
+
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
@@ -49,6 +52,25 @@ dual_panda_arm_controller:
     constraints:
       stopped_velocity_tolerance: 0.01
       goal_time: 0.0
+
+sim_multi_mode_controller:
+  ros__parameters:
+    arm_count: 2
+    arm_1:
+      arm_id: mj_left
+    arm_2:
+      arm_id: mj_right
+    controllers:
+      - dual_cartesian_impedance_controller
+    resources:
+      dual_cartesian_impedance_controller:
+        - mj_left&mj_right
+    start_controllers:
+      names:
+        - dual_cartesian_impedance_controller
+      resources:
+        dual_cartesian_impedance_controller:
+          - mj_left&mj_right
 
 force_torque_sensor_broadcaster_left:
   ros__parameters:

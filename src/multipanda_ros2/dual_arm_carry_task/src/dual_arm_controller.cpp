@@ -5,10 +5,120 @@
 #else
 #define DUAL_ARM_HAS_RUCKIG 0
 #endif
+#include <cctype>
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
 #include "dual_arm_carry_task/gripper_controller.hpp"
 
 namespace {
+constexpr double kReleaseHeightTolerance = 0.004;
+constexpr double kReleaseCorrectionVelScale = 0.08;
+constexpr double kReleaseCorrectionAccScale = 0.05;
+
+struct MotionModeProfile
+{
+    double transport_vel_scale {1.0};
+    double transport_acc_scale {1.0};
+    double transport_waypoint_scale {1.0};
+
+    double rotate_vel_scale {1.0};
+    double rotate_acc_scale {1.0};
+    double rotate_waypoint_scale {1.0};
+
+    double descend_vel_scale {1.0};
+    double descend_acc_scale {1.0};
+    double descend_waypoint_scale {1.0};
+
+    double place_vel_scale {1.0};
+    double place_acc_scale {1.0};
+    double place_waypoint_scale {1.0};
+};
+
+std::string normalizeControlMode(std::string mode)
+{
+    std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return mode;
+}
+
+double clampScale(double value, double lo, double hi)
+{
+    return std::clamp(value, lo, hi);
+}
+
+int scaledWaypointCount(int base, double scale, int min_count)
+{
+    return std::max(min_count, static_cast<int>(std::round(static_cast<double>(base) * scale)));
+}
+
+MotionModeProfile getMotionModeProfile(const std::string& raw_mode)
+{
+    MotionModeProfile p;
+    const std::string mode = normalizeControlMode(raw_mode);
+
+    if (mode == "compliant") {
+        p.transport_vel_scale = 0.90;
+        p.transport_acc_scale = 0.82;
+        p.transport_waypoint_scale = 1.10;
+
+        p.rotate_vel_scale = 0.88;
+        p.rotate_acc_scale = 0.80;
+        p.rotate_waypoint_scale = 1.15;
+
+        p.descend_vel_scale = 0.88;
+        p.descend_acc_scale = 0.80;
+        p.descend_waypoint_scale = 1.10;
+
+        p.place_vel_scale = 0.90;
+        p.place_acc_scale = 0.82;
+        p.place_waypoint_scale = 1.10;
+        return p;
+    }
+
+    if (mode == "chomp_only") {
+        p.transport_vel_scale = 0.84;
+        p.transport_acc_scale = 0.74;
+        p.transport_waypoint_scale = 1.20;
+
+        p.rotate_vel_scale = 0.80;
+        p.rotate_acc_scale = 0.72;
+        p.rotate_waypoint_scale = 1.25;
+
+        p.descend_vel_scale = 0.82;
+        p.descend_acc_scale = 0.72;
+        p.descend_waypoint_scale = 1.20;
+
+        p.place_vel_scale = 0.84;
+        p.place_acc_scale = 0.74;
+        p.place_waypoint_scale = 1.20;
+        return p;
+    }
+
+    if (mode == "compliant_chomp") {
+        // Mode4 以 CHOMP-only 的平滑骨架为主，只保留轻量柔顺余量，
+        // 避免“过密航点 + 过软控制”叠加后在旋转/放置阶段引入跟踪抖动。
+        p.transport_vel_scale = 0.86;
+        p.transport_acc_scale = 0.76;
+        p.transport_waypoint_scale = 1.08;
+
+        p.rotate_vel_scale = 0.80;
+        p.rotate_acc_scale = 0.70;
+        p.rotate_waypoint_scale = 1.10;
+
+        p.descend_vel_scale = 0.80;
+        p.descend_acc_scale = 0.70;
+        p.descend_waypoint_scale = 1.12;
+
+        p.place_vel_scale = 0.82;
+        p.place_acc_scale = 0.72;
+        p.place_waypoint_scale = 1.10;
+        return p;
+    }
+
+    // rigid 或未知模式均回退到基线剖面。
+    return p;
+}
+
 bool parameterizeAndSmoothTrajectory(robot_trajectory::RobotTrajectory& traj,
                                      double vel_scale,
                                      double acc_scale,
@@ -781,6 +891,15 @@ void DualArmController::executeGrasp()
             
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ 垂直介入完成");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+            const auto grounded_left_pose = ctx_->left_arm_->getCurrentPose();
+            const auto grounded_right_pose = ctx_->right_arm_->getCurrentPose();
+            ctx_->place_release_hand_z_ref_ =
+                0.5 * (grounded_left_pose.pose.position.z + grounded_right_pose.pose.position.z);
+            ctx_->place_release_hand_z_ref_valid_ = true;
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [GRASP] 已记录放置接地参考高度: hand_z=%.3f",
+                        ctx_->place_release_hand_z_ref_);
             
             // ========== Step 2: 碰撞免除同步 ==========
             RCLCPP_INFO(ctx_->get_logger(), "  [GRASP] Step 2: 更新世界ACM允许夹取碰撞");
@@ -1014,23 +1133,35 @@ void DualArmController::executeTransport()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: TRANSPORT] 平移物体...");
         try {
+            const auto mode_profile = getMotionModeProfile(ctx_->control_mode_);
+
             auto left_start_pose = ctx_->left_arm_->getCurrentPose().pose;
             auto right_start_pose = ctx_->right_arm_->getCurrentPose().pose;
             const double transport_z = 0.5 * (left_start_pose.position.z + right_start_pose.position.z);
             const bool near_ground_transport = (transport_z <= ctx_->grasp_height_ + 0.10);
 
             // 低高度时增加航点密度并降低速度，加速度，避免“一卡一卡”的段间停顿。
-            const int num_waypoints = near_ground_transport ? 28 : 16;
-            const double vel_scale = near_ground_transport ? 0.20 : 0.35;
-            const double acc_scale = near_ground_transport ? 0.14 : 0.28;
+            const int base_waypoints = near_ground_transport ? 28 : 16;
+            const int num_waypoints = scaledWaypointCount(
+                base_waypoints, mode_profile.transport_waypoint_scale, 12);
+            const double vel_scale = clampScale(
+                (near_ground_transport ? 0.20 : 0.35) * mode_profile.transport_vel_scale,
+                0.05, 0.40);
+            const double acc_scale = clampScale(
+                (near_ground_transport ? 0.14 : 0.28) * mode_profile.transport_acc_scale,
+                0.04, 0.35);
             const double ik_timeout = near_ground_transport ? 0.15 : 0.10;
 
-            const double total_dx = 0.20;
-            const double total_dy = 0.10;
+            // 旋转场景下若平移过远，右臂在ROTATE中段（约20°附近）更容易出现IK无解。
+            // 这里对启用旋转的工况使用更保守的平移终点，优先保证旋转可达性与稳定性。
+            const double total_dx = ctx_->enable_rotate_ ? 0.12 : 0.20;
+            const double total_dy = ctx_->enable_rotate_ ? 0.06 : 0.10;
 
             RCLCPP_INFO(ctx_->get_logger(),
-                        "  [TRANSPORT] 连续轨迹参数: z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
-                        transport_z, near_ground_transport ? "true" : "false", num_waypoints, vel_scale, acc_scale);
+                        "  [TRANSPORT] 模式=%s, z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f, dx=%.3f, dy=%.3f",
+                        ctx_->control_mode_.c_str(),
+                        transport_z, near_ground_transport ? "true" : "false", num_waypoints,
+                        vel_scale, acc_scale, total_dx, total_dy);
 
             auto robot_model = ctx_->dual_arm_->getRobotModel();
             auto current_state = ctx_->dual_arm_->getCurrentState();
@@ -1104,13 +1235,15 @@ void DualArmController::executeTransport()
 
 void DualArmController::executeRotate()
     {
-        RCLCPP_INFO(ctx_->get_logger(), "[状态: ROTATE] 旋转物体方向（Y轴→X轴）...");
-        RCLCPP_INFO(ctx_->get_logger(), "  策略: 分段执行(3×30°) + 密集航点(1°/步) + TOTG（无段间刷新）");
-        RCLCPP_INFO(ctx_->get_logger(), "  [原理] 分段执行: 每30°重新获取实际关节状态，补偿跟踪误差");
+        RCLCPP_INFO(ctx_->get_logger(), "[状态: ROTATE] 旋转物体方向（Y轴→45°）...");
+        RCLCPP_INFO(ctx_->get_logger(), "  策略: 分段执行 + 密集航点 + TOTG（无段间刷新）");
+        RCLCPP_INFO(ctx_->get_logger(), "  [原理] 分段执行: 每15°重新获取实际关节状态，补偿跟踪误差");
         RCLCPP_INFO(ctx_->get_logger(), "  [原理] 不刷新夹爪: simGripperGrasp保持at(0)=0(最大夹持力)，段间刷新会触发simGripperMove导致松手");
         RCLCPP_INFO(ctx_->get_logger(), "  [原理] Joint7偏置: 引导手腕关节主动承担Z轴旋转，避免中段/根部关节漂移翻转");
         
         try {
+            const auto mode_profile = getMotionModeProfile(ctx_->control_mode_);
+
             // ===== Phase 1: 计算固定几何参数（整个旋转过程使用同一参考基准） =====
             ctx_->dual_arm_->setStartStateToCurrentState();
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1144,10 +1277,17 @@ void DualArmController::executeRotate()
             
             // ===== Phase 2: 分段参数 =====
             const int num_segments = 3;
-            const int wp_per_seg = 30;        // 每段30个航点 → 每步1°（加密提升双臂协调性）
+            const int wp_per_seg = scaledWaypointCount(15, mode_profile.rotate_waypoint_scale, 12);
             const int total_wp = num_segments * wp_per_seg;
-            const double total_angle = M_PI / 2.0;
+            const double total_angle = M_PI / 4.0;
             const double step_angle_deg = std::abs(total_angle) * 180.0 / M_PI / total_wp;  // 每步角度(度)
+
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [ROTATE] 模式=%s, 航点密度缩放=%.2f, 速度缩放=%.2f, 加速度缩放=%.2f",
+                        ctx_->control_mode_.c_str(),
+                        mode_profile.rotate_waypoint_scale,
+                        mode_profile.rotate_vel_scale,
+                        mode_profile.rotate_acc_scale);
             
             auto robot_model = ctx_->dual_arm_->getRobotModel();
             auto left_jmg = robot_model->getJointModelGroup(ctx_->left_arm_group_);
@@ -1365,8 +1505,8 @@ void DualArmController::executeRotate()
                 
                 // ----- TOTG时间参数化 -----
                 trajectory_processing::TimeOptimalTrajectoryGeneration totg;
-                double vel_scale = 0.06;
-                double acc_scale = 0.06;
+                double vel_scale = clampScale(0.06 * mode_profile.rotate_vel_scale, 0.025, 0.10);
+                double acc_scale = clampScale(0.06 * mode_profile.rotate_acc_scale, 0.025, 0.10);
                 bool time_ok = totg.computeTimeStamps(*traj, vel_scale, acc_scale);
                 RCLCPP_INFO(ctx_->get_logger(), "    TOTG缩放: vel=%.4f, acc=%.4f", vel_scale, acc_scale);
                 
@@ -1435,13 +1575,17 @@ void DualArmController::executeDescend()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: DESCEND] 下降准 备放置...");
         try {
+            const auto mode_profile = getMotionModeProfile(ctx_->control_mode_);
+
             ctx_->dual_arm_->setStartStateToCurrentState();
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
             auto left_current = ctx_->left_arm_->getCurrentPose();
             auto right_current = ctx_->right_arm_->getCurrentPose();
 
-            double place_z = ctx_->enable_rotate_ ? (ctx_->grasp_height_ + 0.02) : ctx_->grasp_height_;
+            const double place_z = ctx_->place_release_hand_z_ref_valid_
+                                       ? ctx_->place_release_hand_z_ref_
+                                       : ctx_->grasp_height_;
             double descend_shift_x = ctx_->enable_rotate_ ? -0.10 : 0.0;
 
             geometry_msgs::msg::Pose left_start = left_current.pose;
@@ -1456,13 +1600,20 @@ void DualArmController::executeDescend()
             const double descend_dist = std::max(std::abs(left_start.position.z - place_z),
                                                  std::abs(right_start.position.z - place_z));
             const bool near_ground = (place_z <= ctx_->grasp_height_ + 0.02);
-            const int num_waypoints = near_ground ? 30 : 22;
-            const double vel_scale = near_ground ? 0.10 : 0.16;
-            const double acc_scale = near_ground ? 0.06 : 0.10;
+            const int base_waypoints = near_ground ? 30 : 22;
+            const int num_waypoints = scaledWaypointCount(
+                base_waypoints, mode_profile.descend_waypoint_scale, 14);
+            const double vel_scale = clampScale(
+                (near_ground ? 0.10 : 0.16) * mode_profile.descend_vel_scale,
+                0.04, 0.22);
+            const double acc_scale = clampScale(
+                (near_ground ? 0.06 : 0.10) * mode_profile.descend_acc_scale,
+                0.03, 0.16);
             const double ik_timeout = near_ground ? 0.16 : 0.12;
 
             RCLCPP_INFO(ctx_->get_logger(),
-                        "  [DESCEND] 连续下降参数: dz=%.3f, place_z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
+                        "  [DESCEND] 模式=%s, dz=%.3f, place_z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
+                        ctx_->control_mode_.c_str(),
                         descend_dist, place_z, near_ground ? "true" : "false", num_waypoints, vel_scale, acc_scale);
 
             auto robot_model = ctx_->dual_arm_->getRobotModel();
@@ -1539,6 +1690,108 @@ void DualArmController::executePlace()
         RCLCPP_INFO(ctx_->get_logger(), "[状态: PLACE] 放置物体（GRASP逆操作）...");
         
         try {
+            const auto mode_profile = getMotionModeProfile(ctx_->control_mode_);
+            const double target_release_hand_z = ctx_->place_release_hand_z_ref_valid_
+                                                     ? ctx_->place_release_hand_z_ref_
+                                                     : ctx_->grasp_height_;
+
+            auto settle_release_height = [&]() -> bool {
+                const auto left_pose = ctx_->left_arm_->getCurrentPose().pose;
+                const auto right_pose = ctx_->right_arm_->getCurrentPose().pose;
+                const double current_release_hand_z =
+                    0.5 * (left_pose.position.z + right_pose.position.z);
+                const double release_height_error = current_release_hand_z - target_release_hand_z;
+
+                if (release_height_error <= kReleaseHeightTolerance) {
+                    RCLCPP_INFO(ctx_->get_logger(),
+                                "  [PLACE] 当前放置高度满足松爪条件: current_z=%.3f, target_z=%.3f",
+                                current_release_hand_z, target_release_hand_z);
+                    return true;
+                }
+
+                RCLCPP_WARN(ctx_->get_logger(),
+                            "  [PLACE] 松爪前检测到离地偏高 %.3f m，执行补偿下降",
+                            release_height_error);
+
+                auto robot_model = ctx_->dual_arm_->getRobotModel();
+                auto current_state = ctx_->dual_arm_->getCurrentState();
+                auto traj = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, ctx_->dual_arm_group_);
+                traj->addSuffixWayPoint(*current_state, 0.0);
+
+                const moveit::core::JointModelGroup* left_jmg =
+                    current_state->getJointModelGroup(ctx_->left_arm_group_);
+                const moveit::core::JointModelGroup* right_jmg =
+                    current_state->getJointModelGroup(ctx_->right_arm_group_);
+                auto seed_state = std::make_shared<moveit::core::RobotState>(*current_state);
+
+                constexpr int kCorrectionWaypoints = 12;
+                auto smoothstep5 = [](double s) {
+                    return s * s * s * (10.0 - 15.0 * s + 6.0 * s * s);
+                };
+
+                for (int i = 1; i <= kCorrectionWaypoints; ++i) {
+                    const double t = static_cast<double>(i) / static_cast<double>(kCorrectionWaypoints);
+                    const double s = smoothstep5(t);
+
+                    geometry_msgs::msg::Pose left_target = left_pose;
+                    geometry_msgs::msg::Pose right_target = right_pose;
+                    left_target.position.z = left_pose.position.z - release_height_error * s;
+                    right_target.position.z = right_pose.position.z - release_height_error * s;
+
+                    auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
+                    bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.12);
+                    bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.12);
+
+                    if (!left_ik || !right_ik) {
+                        left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.5);
+                        right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.5);
+                    }
+
+                    if (!left_ik || !right_ik) {
+                        RCLCPP_ERROR(ctx_->get_logger(),
+                                     "  ✗ [PLACE] 松爪前补偿下降 IK失败 Left=%s Right=%s",
+                                     left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                        return false;
+                    }
+
+                    waypoint_state->update();
+                    traj->addSuffixWayPoint(*waypoint_state, 0.0);
+                    *seed_state = *waypoint_state;
+                }
+
+                if (!parameterizeAndSmoothTrajectory(*traj,
+                                                     kReleaseCorrectionVelScale,
+                                                     kReleaseCorrectionAccScale,
+                                                     ctx_->get_logger(),
+                                                     "PLACE_RELEASE_ALIGN")) {
+                    return false;
+                }
+
+                moveit::planning_interface::MoveGroupInterface::Plan plan;
+                traj->getRobotTrajectoryMsg(plan.trajectory_);
+                plan.planning_time_ = 0.0;
+
+                if (ctx_->dual_arm_->execute(plan) != moveit::core::MoveItErrorCode::SUCCESS) {
+                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [PLACE] 松爪前补偿下降执行失败");
+                    return false;
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                const auto corrected_left = ctx_->left_arm_->getCurrentPose().pose;
+                const auto corrected_right = ctx_->right_arm_->getCurrentPose().pose;
+                const double corrected_release_hand_z =
+                    0.5 * (corrected_left.position.z + corrected_right.position.z);
+                RCLCPP_INFO(ctx_->get_logger(),
+                            "  ✓ [PLACE] 补偿下降完成: corrected_z=%.3f, target_z=%.3f",
+                            corrected_release_hand_z, target_release_hand_z);
+                return true;
+            };
+
+            if (!settle_release_height()) {
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
             // ========== Step A: 去激活MuJoCo weld约束 + 打开夹爪释放物体 ==========
             RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step A: 去激活weld约束并打开夹爪释放物体");
             
@@ -1583,13 +1836,20 @@ void DualArmController::executePlace()
             const double retreat_start_z = 0.5 * (left_start_pose.position.z + right_start_pose.position.z);
             const bool near_ground_retreat = retreat_start_z <= ctx_->grasp_height_ + 0.08;
 
-            const int num_waypoints = near_ground_retreat ? 26 : 16;
-            const double vel_scale = near_ground_retreat ? 0.18 : 0.28;
-            const double acc_scale = near_ground_retreat ? 0.12 : 0.22;
+            const int base_waypoints = near_ground_retreat ? 26 : 16;
+            const int num_waypoints = scaledWaypointCount(
+                base_waypoints, mode_profile.place_waypoint_scale, 12);
+            const double vel_scale = clampScale(
+                (near_ground_retreat ? 0.18 : 0.28) * mode_profile.place_vel_scale,
+                0.06, 0.32);
+            const double acc_scale = clampScale(
+                (near_ground_retreat ? 0.12 : 0.22) * mode_profile.place_acc_scale,
+                0.04, 0.26);
             const double ik_timeout = near_ground_retreat ? 0.15 : 0.10;
 
             RCLCPP_INFO(ctx_->get_logger(),
-                        "  [PLACE] 连续撤离参数: z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
+                        "  [PLACE] 模式=%s, z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f",
+                        ctx_->control_mode_.c_str(),
                         retreat_start_z, near_ground_retreat ? "true" : "false", num_waypoints, vel_scale, acc_scale);
 
             geometry_msgs::msg::Pose left_goal = left_start_pose;
@@ -1687,8 +1947,8 @@ void DualArmController::detachAndReplaceObject()
         double rod_center_y = (left_current.pose.position.y + right_current.pose.position.y) / 2.0;
         double rod_center_z = 0.02;  // 放置到地面（与初始高度相同）
         
-        RCLCPP_INFO(ctx_->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向沿%s轴",
-                rod_center_x, rod_center_y, rod_center_z, ctx_->enable_rotate_ ? "X" : "Y");
+        RCLCPP_INFO(ctx_->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向 Rz=%s",
+            rod_center_x, rod_center_y, rod_center_z, ctx_->enable_rotate_ ? "45°" : "0°");
         
         // ========== 步骤1: 解除附着 ==========
         // 修复：之前只是发了REMOVE消息到话题，但由于ROS 2 MoveIt架构中话题处理的延迟或覆盖，
@@ -1701,7 +1961,7 @@ void DualArmController::detachAndReplaceObject()
         // 为了绝对安全，额外从 MoveGroupInterface 中显式调用
         ctx_->dual_arm_->detachObject("aluminum_rod");
         
-        // ========== 步骤2: 重新添加为世界碰撞物体（沿X轴方向）==========
+        // ========== 步骤2: 重新添加为世界碰撞物体（旋转后姿态）==========
         moveit_msgs::msg::CollisionObject collision_object;
         collision_object.header.frame_id = "base_link";
         collision_object.id = "aluminum_rod";
@@ -1716,7 +1976,7 @@ void DualArmController::detachAndReplaceObject()
         rod_pose.position.z = rod_center_z;
         
         tf2::Quaternion q_rod;
-        q_rod.setRPY(0, 0, ctx_->enable_rotate_ ? M_PI / 2.0 : 0.0);
+        q_rod.setRPY(0, 0, ctx_->enable_rotate_ ? M_PI / 4.0 : 0.0);
         rod_pose.orientation = tf2::toMsg(q_rod);
         
         collision_object.primitives.push_back(primitive);
@@ -1727,8 +1987,8 @@ void DualArmController::detachAndReplaceObject()
         moveit::planning_interface::PlanningSceneInterface psi;
         psi.applyCollisionObject(collision_object);
         
-        RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（沿%s轴方向）",
-                ctx_->enable_rotate_ ? "X" : "Y");
+        RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（Rz=%s）",
+            ctx_->enable_rotate_ ? "45°" : "0°");
         std::this_thread::sleep_for(300ms);
         
         // ========== 步骤3: 验证结果 ==========
@@ -1782,4 +2042,3 @@ void DualArmController::executeRetreat()
             ctx_->current_state_ = TaskState::ERROR;
         }
 }
-

@@ -51,6 +51,8 @@ public:
     this->declare_parameter<double>("damping_update_epsilon", 0.02);
     this->declare_parameter<double>("min_service_interval_sec", 0.20);
     this->declare_parameter<double>("max_refresh_interval_sec", 1.0);
+    this->declare_parameter<double>("service_startup_wait_sec", 2.0);
+    this->declare_parameter<double>("service_recheck_interval_sec", 2.0);
 
     this->declare_parameter<bool>("stop_on_done", true);
 
@@ -81,6 +83,8 @@ public:
     damping_update_epsilon_ = this->get_parameter("damping_update_epsilon").as_double();
     min_service_interval_sec_ = this->get_parameter("min_service_interval_sec").as_double();
     max_refresh_interval_sec_ = this->get_parameter("max_refresh_interval_sec").as_double();
+    service_startup_wait_sec_ = this->get_parameter("service_startup_wait_sec").as_double();
+    service_recheck_interval_sec_ = this->get_parameter("service_recheck_interval_sec").as_double();
     stop_on_done_ = this->get_parameter("stop_on_done").as_bool();
 
     if (update_rate_hz_ <= 0.0) {
@@ -100,8 +104,14 @@ public:
       std::clamp(nominal_damping_ratio_, min_damping_ratio_, max_damping_ratio_);
     min_service_interval_sec_ = std::max(0.01, min_service_interval_sec_);
     max_refresh_interval_sec_ = std::max(min_service_interval_sec_, max_refresh_interval_sec_);
+    service_startup_wait_sec_ = std::max(0.0, service_startup_wait_sec_);
+    service_recheck_interval_sec_ = std::max(0.2, service_recheck_interval_sec_);
 
-    for (auto stage : this->get_parameter("active_stages").as_string_array()) {
+    // NOTE:
+    // get_parameter(...).as_string_array() returns a reference to data owned by
+    // a temporary Parameter object. Iterating it directly can dangle and crash.
+    const auto active_stages_param = this->get_parameter("active_stages").as_string_array();
+    for (auto stage : active_stages_param) {
       std::transform(stage.begin(), stage.end(), stage.begin(), [](unsigned char c) {
         return static_cast<char>(std::toupper(c));
       });
@@ -130,6 +140,11 @@ public:
       adaptive_params_topic_, 10);
 
     impedance_client_ = this->create_client<SetCartesianImpedance>(impedance_service_);
+
+    const auto startup_wait_ms = static_cast<int>(std::round(service_startup_wait_sec_ * 1000.0));
+    if (!impedance_client_->wait_for_service(std::chrono::milliseconds(std::max(startup_wait_ms, 0)))) {
+      enter_degraded_mode("service_unavailable_at_startup");
+    }
 
     last_command_time_ = this->now();
     last_sent_stiffness_ = nominal_translation_stiffness_;
@@ -228,6 +243,12 @@ private:
       return;
     }
 
+    if (degraded_due_to_service_) {
+      try_recover_from_degraded_mode();
+      publish_adaptive_status(nominal_translation_stiffness_, nominal_damping_ratio_, false);
+      return;
+    }
+
     if (!is_active_stage()) {
       maybe_send_nominal(false);
       publish_adaptive_status(nominal_translation_stiffness_, nominal_damping_ratio_, false);
@@ -294,9 +315,7 @@ private:
       return;
     }
     if (!impedance_client_->service_is_ready()) {
-      RCLCPP_WARN_THROTTLE(
-        this->get_logger(), *this->get_clock(), 2000,
-        "Impedance service not ready: %s", impedance_service_.c_str());
+      enter_degraded_mode("service_became_unavailable");
       return;
     }
 
@@ -325,6 +344,50 @@ private:
           (std::abs(last_sent_stiffness_ - nominal_translation_stiffness_) >= stiffness_update_epsilon_) ||
           (std::abs(last_sent_damping_ - nominal_damping_ratio_) >= damping_update_epsilon_);
       });
+  }
+
+  void enter_degraded_mode(const char * reason)
+  {
+    if (degraded_due_to_service_) {
+      return;
+    }
+    degraded_due_to_service_ = true;
+    request_in_flight_ = false;
+    adaptive_applied_ = false;
+    degraded_reason_ = reason ? reason : "unknown";
+    last_service_recheck_time_ = this->now();
+
+    RCLCPP_ERROR(
+      this->get_logger(),
+      "Adaptive impedance degraded (%s): service unavailable [%s]. "
+      "Supervisor enters passive mode and will periodically probe for recovery.",
+      degraded_reason_.c_str(), impedance_service_.c_str());
+  }
+
+  void try_recover_from_degraded_mode()
+  {
+    const rclcpp::Time now = this->now();
+    const double since_last_probe = (now - last_service_recheck_time_).seconds();
+    if (since_last_probe < service_recheck_interval_sec_) {
+      return;
+    }
+
+    last_service_recheck_time_ = now;
+    if (!impedance_client_->service_is_ready()) {
+      RCLCPP_WARN_THROTTLE(
+        this->get_logger(), *this->get_clock(), 5000,
+        "Adaptive impedance still degraded: waiting for service [%s]",
+        impedance_service_.c_str());
+      return;
+    }
+
+    degraded_due_to_service_ = false;
+    degraded_reason_.clear();
+    last_command_time_ = now;
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Adaptive impedance service recovered: [%s]. Supervisor resumes active adaptation.",
+      impedance_service_.c_str());
   }
 
   void publish_adaptive_status(double stiffness, double damping, bool active)
@@ -368,6 +431,8 @@ private:
   double damping_update_epsilon_ {0.02};
   double min_service_interval_sec_ {0.20};
   double max_refresh_interval_sec_ {1.0};
+  double service_startup_wait_sec_ {2.0};
+  double service_recheck_interval_sec_ {2.0};
   bool stop_on_done_ {true};
 
   std::unordered_set<std::string> active_stages_;
@@ -377,6 +442,7 @@ private:
   bool task_finished_ {false};
   bool request_in_flight_ {false};
   bool adaptive_applied_ {false};
+  bool degraded_due_to_service_ {false};
 
   double filtered_left_force_z_ {0.0};
   double filtered_right_force_z_ {0.0};
@@ -384,7 +450,9 @@ private:
   double last_sent_damping_ {0.8};
 
   std::string current_stage_ {"INIT"};
+  std::string degraded_reason_;
   rclcpp::Time last_command_time_;
+  rclcpp::Time last_service_recheck_time_ {0, 0, RCL_ROS_TIME};
 
   rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr left_wrench_sub_;
   rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr right_wrench_sub_;
