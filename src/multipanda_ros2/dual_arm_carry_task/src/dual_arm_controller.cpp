@@ -1236,8 +1236,8 @@ void DualArmController::executeTransport()
 void DualArmController::executeRotate()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: ROTATE] 旋转物体方向（Y轴→45°）...");
-        RCLCPP_INFO(ctx_->get_logger(), "  策略: 分段执行 + 密集航点 + TOTG（无段间刷新）");
-        RCLCPP_INFO(ctx_->get_logger(), "  [原理] 分段执行: 每15°重新获取实际关节状态，补偿跟踪误差");
+        RCLCPP_INFO(ctx_->get_logger(), "  策略: 单段连续轨迹 + 密集航点 + TOTG（消除段间停顿）");
+        RCLCPP_INFO(ctx_->get_logger(), "  [原理] 单段轨迹: TOTG生成全局平滑速度剖面，无中间归零停顿");
         RCLCPP_INFO(ctx_->get_logger(), "  [原理] 不刷新夹爪: simGripperGrasp保持at(0)=0(最大夹持力)，段间刷新会触发simGripperMove导致松手");
         RCLCPP_INFO(ctx_->get_logger(), "  [原理] Joint7偏置: 引导手腕关节主动承担Z轴旋转，避免中段/根部关节漂移翻转");
         
@@ -1275,9 +1275,9 @@ void DualArmController::executeRotate()
             geometry_msgs::msg::Pose left_start_pose = left_current.pose;
             geometry_msgs::msg::Pose right_start_pose = right_current.pose;
             
-            // ===== Phase 2: 分段参数 =====
-            const int num_segments = 3;
-            const int wp_per_seg = scaledWaypointCount(15, mode_profile.rotate_waypoint_scale, 12);
+            // ===== Phase 2: 单段连续航点参数（消除段间停顿） =====
+            const int num_segments = 1;
+            const int wp_per_seg = scaledWaypointCount(45, mode_profile.rotate_waypoint_scale, 36);
             const int total_wp = num_segments * wp_per_seg;
             const double total_angle = M_PI / 4.0;
             const double step_angle_deg = std::abs(total_angle) * 180.0 / M_PI / total_wp;  // 每步角度(度)
