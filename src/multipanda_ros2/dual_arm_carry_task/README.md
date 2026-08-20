@@ -1,123 +1,123 @@
-# 双臂协作搬运任务
+# dual_arm_carry_task
 
-## 功能概述
+当前双 Franka 协作搬运任务包。公共项目架构、柔顺定义和开发阶段见仓库根目录
+[`docs/PROJECT_GUIDE.md`](../../../docs/PROJECT_GUIDE.md)。
 
-本包实现 Franka 双臂协作搬运任务，已包含多阶段状态机、控制模式分支、任务阶段发布与量化评估链路。
+## 节点与职责
 
-当前主任务状态机如下：
+- `dual_arm_carry_task_node`：任务参数、状态机和运动执行。
+- `communication_latency_monitor_node`：基于带时间戳消息的通信延迟统计。
+- `task_metrics_monitor_node`：双臂同步代理量、能量代理量和末端误差统计。
+- `adaptive_compliance_supervisor_node`：外部笛卡尔阻抗参数监督器，默认关闭。
 
-1. INIT
-2. APPROACH
-3. GRASP
-4. LIFT
-5. TRANSPORT
-6. ROTATE（可选）
-7. DESCEND
-8. PLACE
-9. RETREAT
-10. DONE / ERROR
+核心源文件：
 
-**当前代码采用了 MVC 组件化架构**，核心定义见 `include/dual_arm_carry_task/carry_task_context.hpp` 文件中的 `TaskState` 枚举，具体行为实现在 `src/dual_arm_controller.cpp` 和 `src/gripper_controller.cpp`。
+- `src/carry_task_state_machine.cpp`
+- `src/dual_arm_controller.cpp`
+- `src/gripper_controller.cpp`
+- `src/adaptive_compliance_supervisor.cpp`
 
-## 快速启动
+状态机：
 
-### 推荐方式：一键脚本
+```text
+INIT → APPROACH → GRASP → WAITING_PHYSICS → LIFT → TRANSPORT
+     → ROTATE → DESCEND → PLACE → RETREAT → DONE / ERROR
+```
+
+## 构建
 
 在仓库根目录执行：
+
+```bash
+colcon build --packages-select dual_arm_carry_task franka_hardware franka_moveit_config
+source install/setup.bash
+```
+
+## 启动
+
+完整系统推荐由仓库根脚本启动：
 
 ```bash
 ./start_dual_arm_task.sh
 ```
 
-脚本会自动完成：
-
-1. 环境加载与残留进程清理
-2. MoveIt2 + MuJoCo 启动
-3. 任务节点启动
-4. 通信时延监测与任务指标监测（默认启用）
-5. 可选 GUI 采集（ENABLE_SENSOR_GUI=true 时）
-
-### 直接启动任务 launch
+如果 MoveIt、MuJoCo 和控制器已经就绪，可单独启动任务：
 
 ```bash
-source install/setup.bash
 ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py
 ```
 
-## 常用参数
+该 launch 的关键默认值如下：
+
+| 参数 | launch 默认值 | 说明 |
+|---|---:|---|
+| `left_arm_group` | `mj_left_arm` | 左臂 MoveGroup |
+| `right_arm_group` | `mj_right_arm` | 右臂 MoveGroup |
+| `dual_arm_group` | `dual_panda` | 双臂 MoveGroup |
+| `control_mode` | `compliant` | 旧控制模式名 |
+| `enable_rotate` | `true` | 是否执行 ROTATE |
+| `approach_height` | `0.28` | 接近高度，m |
+| `grasp_height` | `0.13` | 抓取高度，m |
+| `lift_height` | `0.40` | 抬升高度，m |
+| `use_vision` | `false` | 实验性模式 B 开关 |
+| `enable_latency_monitor` | `true` | 通信延迟监控 |
+| `enable_task_metrics_monitor` | `true` | 任务指标监控 |
+| `enable_adaptive_compliance_supervisor` | `false` | 外部阻抗参数监督器 |
+
+节点源码本身的 `control_mode` fallback 为 `compliant_chomp`，但正常通过 launch 启动时会收到
+launch 的 `compliant` 默认值；一键脚本会显式传入交互选择。`enable_rotate` 在两处均默认为
+`true`。
+
+示例：
 
 ```bash
 ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
-  control_mode:=compliant_chomp \
-  enable_rotate:=false \
+  control_mode:=compliant \
+  enable_rotate:=true \
   approach_height:=0.28 \
   grasp_height:=0.13 \
   lift_height:=0.40
 ```
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| left_arm_group | mj_left_arm | 左臂 MoveGroup 名称 |
-| right_arm_group | mj_right_arm | 右臂 MoveGroup 名称 |
-| dual_arm_group | dual_panda | 双臂协同组名称 |
-| control_mode | compliant | 控制策略模式（rigid/compliant/chomp_only/compliant_chomp 等） |
-| enable_rotate | false | 是否执行 ROTATE 阶段 |
-| approach_height | 0.28 | 接近高度（m） |
-| grasp_height | 0.13 | 抓取高度（m） |
-| lift_height | 0.40 | 抬升高度（m） |
+## 当前模式边界
 
-## 监测与报告
+现有旧模式名为 `rigid`、`compliant`、`chomp_only` 和 `compliant_chomp`：
 
-默认会输出到专门结果目录 experiment_results：
+- `rigid`：关闭 MuJoCo 硬件层内部柔顺。
+- `compliant`：启用基于内力的自适应关节伺服增益。
+- `chomp_only`、`compliant_chomp`：会选择不同轨迹参数，但核心任务目前没有真正调用 CHOMP。
 
-1. 通信时延报告：experiment_results/reports/comm_latency_*_summary.md / .csv
-2. 任务量化指标报告：experiment_results/reports/task_metrics_*_summary.md / .csv
-3. GUI 采集原始数据：experiment_results/data/experiment_*.csv
-4. 离线分析图：experiment_results/plots/*.png
+外部监督器依赖多模式阻抗控制器，而模式 A 的 MoveIt 执行依赖位置轨迹控制器；二者不能同时
+active。没有完成轨迹桥和安全控制器切换前，不应把监督器开关视作完整柔顺闭环。
 
-若启用 GUI 采集，脚本会自动调用 plot_experiment_results.py 生成图表到 experiment_results/plots。
+## 监控输出
 
-## 包内节点
+启动脚本把正式运行结果写入 `experiment_results`，包括：
 
-`dual_arm_carry_task_node` 主任务节点现已重构为 MVC 架构，其主要源文件包含：
+- 通信延迟摘要与 CSV。
+- 任务指标摘要与 CSV。
+- 可选采集原始数据和绘图。
 
-1. `carry_task_state_machine.cpp`：主任务状态机与节点生命周期管理核心
-2. `dual_arm_controller.cpp`：双臂 MoveIt 运动学规划、轨迹插补及控制逻辑
-3. `gripper_controller.cpp`：双侧 Franka 夹爪 Action Client 同步抓取控制器
+这些指标当前包含代理量：同步误差不是严格的时间同步误差，能量不是标定后的实际能耗，末端
+误差也不是直接测得的杆最终位姿。实验结论必须同时保留指标定义。
 
-其他独立的监测节点包括：
-
-4. communication_latency_monitor.cpp：通信时延统计节点
-5. task_metrics_monitor.cpp：同步误差/能耗代理/末端误差统计节点
-6. adaptive_compliance_supervisor.cpp：主从+自适应阻抗闭环监督节点
-
-## 故障排查
-
-### 规划失败
-
-常见原因：目标超工作空间、碰撞约束、IK 无解。
-
-建议：
-
-1. 先降低目标动作幅度（尤其 TRANSPORT/DESCEND）。
-2. 检查 enable_rotate 与控制模式组合。
-3. 对照任务日志中阶段切换与 MoveIt 报错定位。
-
-### 仿真未就绪
-
-若任务节点启动后无动作，先检查：
+## 调试
 
 ```bash
 ros2 node list
-ros2 service list | grep controller_manager
+ros2 control list_controllers
+ros2 topic echo /task_stage
+ros2 topic echo /task_status
+ros2 topic echo /joint_states --once
 ```
 
-### 报告未生成
+MoveIt 仿真 launch 已包含 MuJoCo，不要重复启动。完整手动顺序见仓库根
+[`MANUAL_STARTUP.md`](../../../MANUAL_STARTUP.md)。
 
-检查 task_status 是否发布 DONE/ERROR，以及 launch 中监测节点开关：
+## 测试现状
 
-1. enable_latency_monitor
-2. enable_task_metrics_monitor
+本包当前只有 ament lint 集成，缺少状态机、轨迹、夹爪并发、PlanningScene 和完整 launch
+回归测试。新增核心行为必须同时补充相应测试，而不能只依赖一次成功日志。
 
 ## 许可证
 

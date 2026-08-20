@@ -5,6 +5,7 @@ log/
 launch_logs/
 .catkin_workspace
 COLCON_IGNORE
+!archive/COLCON_IGNORE
 compile_commands.json
 
 # Python
