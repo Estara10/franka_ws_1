@@ -6,6 +6,10 @@ import os
 from typing import Dict, Tuple
 
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
+
 def read_metric_csv(path: str) -> Dict[str, str]:
     metrics: Dict[str, str] = {}
     with open(path, "r", newline="") as f:
@@ -50,7 +54,7 @@ def write_metric_md(path: str, rows: Tuple[Tuple[str, str], ...], title: str) ->
 
 
 def main() -> None:
-    default_output_dir = os.path.join(os.getcwd(), "experiment_results", "reports")
+    default_output_dir = os.path.join(REPO_ROOT, "experiment_results", "reports")
     parser = argparse.ArgumentParser(description="Compare dual-arm task metrics reports.")
     parser.add_argument("--baseline", required=True, help="Baseline metrics summary csv")
     parser.add_argument("--optimized", required=True, help="Optimized metrics summary csv")

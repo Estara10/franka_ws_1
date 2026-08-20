@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-vision_core.py — 视觉动态检测节点 (Mode B)
+scripts/vision_core.py — 视觉动态检测节点 (Mode B)
 
 订阅 MuJoCo 顶置相机图像，通过红色通道阈值检测杆件的位置和朝向，
 发布 /detected_rod_pose (PoseStamped, frame_id=base_link)。

@@ -11,6 +11,10 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
+
 def has_data_rows(csv_path: str) -> bool:
     try:
         with open(csv_path, 'r') as f:
@@ -56,7 +60,7 @@ def parse_args():
     parser.add_argument(
         "--data-dir",
         default="",
-        help="CSV搜索目录；为空时依次搜索脚本目录下 experiment_data 与当前目录 experiment_data"
+        help="CSV搜索目录；为空时搜索仓库的 experiment_results/data 和 reports"
     )
     parser.add_argument(
         "--output",
@@ -91,15 +95,14 @@ def discover_latest_csv(explicit_data_dir: str) -> str:
             print("  可选：传入 --csv 指定文件，或传入 --data-dir 指定目录。")
             return ""
     else:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
         full_data_dirs = [
-            os.path.join(script_dir, "experiment_results", "data"),
+            os.path.join(REPO_ROOT, "experiment_results", "data"),
             os.path.join(os.getcwd(), "experiment_results", "data"),
-            os.path.join(script_dir, "experiment_data"),
+            os.path.join(REPO_ROOT, "experiment_data"),
             os.path.join(os.getcwd(), "experiment_data"),
         ]
         report_dirs = [
-            os.path.join(script_dir, "experiment_results", "reports"),
+            os.path.join(REPO_ROOT, "experiment_results", "reports"),
             os.path.join(os.getcwd(), "experiment_results", "reports"),
         ]
 
@@ -324,8 +327,7 @@ def main():
     if args.output:
         png_name = args.output
     else:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        plot_dir = args.plot_dir if args.plot_dir else os.path.join(script_dir, "experiment_results", "plots")
+        plot_dir = args.plot_dir if args.plot_dir else os.path.join(REPO_ROOT, "experiment_results", "plots")
         os.makedirs(plot_dir, exist_ok=True)
         csv_root, _ = os.path.splitext(latest_csv)
         png_name = os.path.join(plot_dir, os.path.basename(csv_root) + '.png')

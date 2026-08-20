@@ -76,9 +76,12 @@ ros2 topic echo /joint_states --once
 - `experiment_results/`：本阶段原样保留，包括原始数据、图表和既有报告。
 - `docs/deliverables/`：项目交付物，例如中期检查报告。
 - `archive/`：旧包、历史修补代码、旧文档和运行产物；有 `COLCON_IGNORE` 隔离。
-- `check_environment.sh`、`diagnose.sh`：暂时保留，但仍含旧工作区路径，后续修复前不是权威入口。
-- `plot_*.py`、`compare_task_metrics.py`、`experiment_data_recorder.py`、`sensor_dashboard.py`：
-  实验分析与监控工具，不是状态机运行的必要组件。
+- `check_environment.sh`、`diagnose.sh`：遗留脚本，含旧工作区路径和失效入口；不被当前流程调用，
+  可由用户确认后删除。
+- `scripts/`：实验记录、离线绘图、指标比较、实时面板和模式 B 视觉框架。完整用途和稳定命令见
+  [`scripts/README.md`](scripts/README.md)。
+- `run_latency_benchmark.sh`、`run_task_metrics_benchmark.sh`：会连续启动完整仿真实验的基准脚本，
+  不是普通只读分析命令。
 
 ## 铝杆参数说明
 

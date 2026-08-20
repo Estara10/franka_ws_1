@@ -807,7 +807,7 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     RECORDER_PID=""
     if [ "$ENABLE_EXPERIMENT_RECORDER" = "true" ]; then
         echo "[5/6] 启动实验数据记录器..."
-        EXPERIMENT_DATA_DIR="${RESULT_DATA_DIR}" /usr/bin/python3 "${WORKSPACE_DIR}/experiment_data_recorder.py" "$CONTROL_MODE" > "${LOG_DIR}/experiment_recorder_${TIMESTAMP}.log" 2>&1 &
+        EXPERIMENT_DATA_DIR="${RESULT_DATA_DIR}" /usr/bin/python3 "${WORKSPACE_DIR}/scripts/experiment_data_recorder.py" "$CONTROL_MODE" > "${LOG_DIR}/experiment_recorder_${TIMESTAMP}.log" 2>&1 &
         RECORDER_PID=$!
         echo "进程 PID: $RECORDER_PID"
         echo $RECORDER_PID >> "$PID_FILE"
@@ -822,7 +822,7 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     GUI_PID=""
     if [ "$ENABLE_SENSOR_GUI" = "true" ]; then
         echo "[6/6] 启动传感器可视化与参数调优 GUI..."
-        EXPERIMENT_DATA_DIR="${RESULT_DATA_DIR}" python3 "${WORKSPACE_DIR}/sensor_dashboard.py" "$CONTROL_MODE" > "${LOG_DIR}/sensor_gui_${TIMESTAMP}.log" 2>&1 &
+        EXPERIMENT_DATA_DIR="${RESULT_DATA_DIR}" python3 "${WORKSPACE_DIR}/scripts/sensor_dashboard.py" "$CONTROL_MODE" > "${LOG_DIR}/sensor_gui_${TIMESTAMP}.log" 2>&1 &
         GUI_PID=$!
         echo "进程 PID: $GUI_PID"
         echo $GUI_PID >> "$PID_FILE"
@@ -890,7 +890,7 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
     echo "========================================"
     echo "🎓 任务流程结束，开始读取整周期CSV数据并绘制高精度分析图..."
     echo "========================================"
-    python3 "${WORKSPACE_DIR}/plot_experiment_results.py" \
+    python3 "${WORKSPACE_DIR}/scripts/plot_experiment_results.py" \
         --data-dir "${RESULT_DATA_DIR}" \
         --plot-dir "${RESULT_PLOT_DIR}" || true
 
@@ -936,8 +936,8 @@ else
         ACTUAL_CONTROL_MODE="compliant_chomp"
     fi
 
-    echo "正在拉起自定义顶置相机与视觉处理沙盒(vision_core.py)..."
-    /usr/bin/python3 "${WORKSPACE_DIR}/vision_core.py" > "${LOG_DIR}/vision_core_${TIMESTAMP}.log" 2>&1 &
+    echo "正在拉起自定义顶置相机与视觉处理沙盒(scripts/vision_core.py)..."
+    /usr/bin/python3 "${WORKSPACE_DIR}/scripts/vision_core.py" > "${LOG_DIR}/vision_core_${TIMESTAMP}.log" 2>&1 &
     VISION_PID=$!
     echo $VISION_PID >> "$PID_FILE"
     sleep 2

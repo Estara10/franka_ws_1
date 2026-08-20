@@ -57,7 +57,7 @@ OPTIMIZED_SUMMARY_CSV="$MODE_SUMMARY_CSV"
 
 (
     cd "$WORKSPACE_DIR"
-    python3 compare_task_metrics.py \
+    python3 "${WORKSPACE_DIR}/scripts/compare_task_metrics.py" \
         --baseline "$BASELINE_SUMMARY_CSV" \
         --optimized "$OPTIMIZED_SUMMARY_CSV" \
         --output-dir "$REPORT_DIR" \

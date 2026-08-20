@@ -113,7 +113,7 @@ weld；同时任务把杆作为 AttachedCollisionObject 加入 MoveIt。放置�
   组合碰撞和预抓取路径检查后才接受。
 - B：任务只使用视觉估计位姿，并用仿真真值评价位置和角度误差。
 
-当前 `vision_core.py` 和 `/detected_rod_pose` 只构成框架。它尚无可信的完整成功记录，也没有
+当前 `scripts/vision_core.py` 和 `/detected_rod_pose` 只构成框架。它尚无可信的完整成功记录，也没有
 完成 CameraInfo/TF 标定、角度消歧、稳定窗口和位姿冻结。
 
 ## 已确认的验收方向
@@ -156,8 +156,8 @@ source install/setup.bash
 ```
 
 手动调试见 `MANUAL_STARTUP.md`。一键脚本目前可能自动构建并产生日志；模式 B 还可能修改
-场景源码，因此运行前必须检查 Git 状态。`check_environment.sh` 和 `diagnose.sh` 当前仍有旧路径，
-本阶段保留但标记为待修，不能作为权威入口。
+场景源码，因此运行前必须检查 Git 状态。`check_environment.sh` 和 `diagnose.sh` 是不被主流程调用的
+遗留脚本，仍含旧路径和失效入口，不能作为权威工具；用户可确认后删除。
 
 ## 文档和归档规则
 

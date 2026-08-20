@@ -7,18 +7,24 @@ import statistics
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="统计多次通信实验的延迟平均值（默认最近10次）并输出图表/CSV"
     )
     parser.add_argument(
         "--input-dir",
-        default="experiment_results/reports",
+        default=os.path.join(REPO_ROOT, "experiment_results", "reports"),
         help="通信测试CSV目录",
     )
     parser.add_argument(
         "--output-dir",
-        default="experiment_results/plots",
+        default=os.path.join(REPO_ROOT, "experiment_results", "plots"),
         help="统计图输出目录",
     )
     parser.add_argument(

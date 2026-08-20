@@ -24,11 +24,19 @@ import os
 from std_msgs.msg import String, Float64MultiArray
 from sensor_msgs.msg import JointState
 
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
+
 class SensorDashboard(Node):
     def __init__(self, mode="compliant_chomp"):
         super().__init__('sensor_dashboard')
         self.mode = mode
-        self.output_data_dir = os.getenv("EXPERIMENT_DATA_DIR", "experiment_data")
+        self.output_data_dir = os.getenv(
+            "EXPERIMENT_DATA_DIR",
+            os.path.join(REPO_ROOT, "experiment_results", "data"),
+        )
         os.makedirs(self.output_data_dir, exist_ok=True)
         self.left_wrench = WrenchStamped()
         self.right_wrench = WrenchStamped()

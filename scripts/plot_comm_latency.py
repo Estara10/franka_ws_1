@@ -6,9 +6,14 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
+
 def main():
-    input_dir = 'experiment_results/reports'
-    output_dir = 'experiment_results/plots'
+    input_dir = os.path.join(REPO_ROOT, 'experiment_results', 'reports')
+    output_dir = os.path.join(REPO_ROOT, 'experiment_results', 'plots')
     
     # 确保输出目录存在
     os.makedirs(output_dir, exist_ok=True)

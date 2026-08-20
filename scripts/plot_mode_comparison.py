@@ -20,6 +20,9 @@ MODE_LABEL = {
     "compliant_chomp": "Compliant+CHOMP",
 }
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
 
 def percentile(values: List[float], p: float) -> float:
     if not values:
@@ -139,8 +142,16 @@ def compute_scores(mode_metrics: Dict[str, Dict[str, float]]) -> Dict[str, float
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Four-mode experiment comparison (active-window metrics + composite score)")
-    parser.add_argument("--data-dir", default="experiment_results/data", help="Input experiment CSV directory")
-    parser.add_argument("--plot-dir", default="experiment_results/plots", help="Output plots directory")
+    parser.add_argument(
+        "--data-dir",
+        default=os.path.join(REPO_ROOT, "experiment_results", "data"),
+        help="Input experiment CSV directory",
+    )
+    parser.add_argument(
+        "--plot-dir",
+        default=os.path.join(REPO_ROOT, "experiment_results", "plots"),
+        help="Output plots directory",
+    )
     parser.add_argument("--active-force-threshold", type=float, default=0.3, help="Active-window threshold for |Fy| (N)")
     parser.add_argument("--stress-threshold", type=float, default=5.0, help="Stress threshold (N)")
     parser.add_argument("--output-prefix", default="mode_comparison", help="Output filename prefix")

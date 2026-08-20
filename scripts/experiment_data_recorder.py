@@ -13,6 +13,10 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray, String
 
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
+
 class ExperimentDataRecorder(Node):
     def __init__(self, mode: str, output_data_dir: str, sample_hz: float) -> None:
         super().__init__("experiment_data_recorder")
@@ -168,7 +172,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("mode", nargs="?", default="compliant_chomp", help="control mode label")
     parser.add_argument(
         "--output-data-dir",
-        default=os.getenv("EXPERIMENT_DATA_DIR", "experiment_data"),
+        default=os.getenv(
+            "EXPERIMENT_DATA_DIR",
+            os.path.join(REPO_ROOT, "experiment_results", "data"),
+        ),
         help="directory to write experiment CSV files",
     )
     parser.add_argument("--sample-hz", type=float, default=20.0, help="sampling rate in Hz")
