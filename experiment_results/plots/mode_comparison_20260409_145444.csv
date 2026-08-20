@@ -1,0 +1,11 @@
+mode,label,source_csv,source_task_metrics_summary,failure_rate,ee_terminal_error,sync_p95,energy,composite_score,improve_vs_rigid_pct
+rigid,Rigid,experiment_results/data/experiment_rigid_20260409_141657.csv,experiment_results/reports/task_metrics_20260409_141548_rigid_20260409_141618_summary.csv,0.000000,2.646993,0.141592,303.462988,1.095581,0.000
+compliant,Compliant,experiment_results/data/experiment_compliant_20260409_141820.csv,experiment_results/reports/task_metrics_20260409_141707_compliant_20260409_141740_summary.csv,0.000000,2.313642,0.109894,305.614720,1.002872,8.462
+chomp_only,CHOMP-only,experiment_results/data/experiment_chomp_only_20260409_141937.csv,experiment_results/reports/task_metrics_20260409_141826_chomp_only_20260409_141856_summary.csv,0.000000,2.564529,0.109101,303.953194,1.027433,6.220
+compliant_chomp,Compliant+CHOMP,experiment_results/data/experiment_compliant_chomp_20260409_142630.csv,experiment_results/reports/task_metrics_20260409_142520_compliant_chomp_20260409_142550_summary.csv,0.000000,2.685792,0.110933,305.262121,1.044757,4.639
+
+ranking,mode,score
+1,compliant,1.002872
+2,chomp_only,1.027433
+3,compliant_chomp,1.044757
+4,rigid,1.095581

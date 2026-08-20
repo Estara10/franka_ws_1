@@ -929,24 +929,110 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
 else
     echo "[4/4] 视觉感知与动态搬运模式 (Mode B) 环境就绪..."
     echo "注意: 模式B有独立的研究路线，旧有的大屏绘图仪表盘(GUI)及固定C++工作流任务已被隔离。"
-    
-    # 还可以顺便唤起你刚刚创建的视觉桥接核心
+
+    # ===== 去除 vision_ 前缀并启动 C++ 任务节点 =====
+    ACTUAL_CONTROL_MODE="${CONTROL_MODE#vision_}"
+    if [[ "$ACTUAL_CONTROL_MODE" == "$CONTROL_MODE" ]]; then
+        ACTUAL_CONTROL_MODE="compliant_chomp"
+    fi
+
     echo "正在拉起自定义顶置相机与视觉处理沙盒(vision_core.py)..."
-    python3 "${WORKSPACE_DIR}/vision_core.py" > "${LOG_DIR}/vision_core_${TIMESTAMP}.log" 2>&1 &
+    /usr/bin/python3 "${WORKSPACE_DIR}/vision_core.py" > "${LOG_DIR}/vision_core_${TIMESTAMP}.log" 2>&1 &
     VISION_PID=$!
     echo $VISION_PID >> "$PID_FILE"
+    sleep 2
+
+    # 确保浮点数格式 (用户输入可能是整数如 "90" 导致 ROS 2 param 类型拒绝)
+    _ROD_TARGET_X=$(awk "BEGIN {printf \"%.3f\", ${ROD_TARGET_X:-0.40}}")
+    _ROD_TARGET_Y=$(awk "BEGIN {printf \"%.3f\", ${ROD_TARGET_Y:--0.20}}")
+    _ROD_TARGET_YAW_DEG=$(awk "BEGIN {printf \"%.3f\", ${ROD_TARGET_YAW:-90.0}}")
+
+    echo "正在拉起双臂搬运任务节点（视觉模式）..."
+    TASK_LOG="${LOG_DIR}/dual_arm_task_${TIMESTAMP}.log"
+    echo "任务日志: $TASK_LOG"
+
+    ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
+        use_vision:=true \
+        rod_target_x:=${_ROD_TARGET_X} \
+        rod_target_y:=${_ROD_TARGET_Y} \
+        rod_target_yaw_deg:=${_ROD_TARGET_YAW_DEG} \
+        control_mode:=${ACTUAL_CONTROL_MODE} \
+        approach_height:=${APPROACH_HEIGHT} \
+        grasp_height:=${GRASP_HEIGHT} \
+        lift_height:=${LIFT_HEIGHT} \
+        enable_rotate:=${ENABLE_ROTATE} \
+        enable_latency_monitor:=true \
+        latency_topic:=/joint_states \
+        latency_task_status_topic:=/task_status \
+        latency_target_ms:=100.0 \
+        latency_result_dir:=${RESULT_REPORT_DIR} \
+        latency_result_prefix:=comm_latency_${TIMESTAMP} \
+        enable_task_metrics_monitor:=true \
+        metrics_joint_state_topic:=/joint_states \
+        metrics_task_stage_topic:=/task_stage \
+        metrics_task_status_topic:=/task_status \
+        metrics_base_frame:=base_link \
+        metrics_left_frame:=mj_left_hand \
+        metrics_right_frame:=mj_right_hand \
+        metrics_sync_target_mm:=5.0 \
+        metrics_ee_target_mm:=2.0 \
+        metrics_enable_rotate:=${ENABLE_ROTATE} \
+        metrics_descend_place_z:=${GRASP_HEIGHT} \
+        metrics_descend_shift_x:=999.0 \
+        metrics_result_dir:=${RESULT_REPORT_DIR} \
+        metrics_result_prefix:=task_metrics_${TIMESTAMP}_${ACTUAL_CONTROL_MODE} \
+        enable_adaptive_compliance_supervisor:=${ADAPTIVE_COMPLIANCE_ENABLED} \
+        adaptive_left_wrench_topic:=/force_torque_sensor_broadcaster_left/wrench \
+        adaptive_right_wrench_topic:=/force_torque_sensor_broadcaster_right/wrench \
+        adaptive_task_stage_topic:=/task_stage \
+        adaptive_task_status_topic:=/task_status \
+        adaptive_impedance_service:=${ADAPTIVE_IMPEDANCE_SERVICE} \
+        adaptive_params_topic:=/adaptive_impedance_params \
+        adaptive_update_rate_hz:=20.0 \
+        adaptive_nominal_stiffness:=${ADAPTIVE_NOMINAL_STIFFNESS} \
+        adaptive_min_stiffness:=${ADAPTIVE_MIN_STIFFNESS} \
+        adaptive_force_gain:=${ADAPTIVE_FORCE_GAIN} \
+        adaptive_imbalance_gain:=${ADAPTIVE_IMBALANCE_GAIN} \
+        adaptive_active_stages:=${ADAPTIVE_ACTIVE_STAGES} > "$TASK_LOG" 2>&1 &
+    TASK_PID=$!
+    echo "进程 PID: $TASK_PID"
+    echo $TASK_PID >> "$PID_FILE"
+
+    sleep 3
+    if ! ps -p $TASK_PID > /dev/null; then
+        echo "✗ 任务节点启动失败，请检查日志: $TASK_LOG"
+        exit 1
+    fi
 
     echo ""
     echo "========================================"
-    echo "  ✓ 基础平台(MuJoCo/RViz/MoveIt2) 和 相机节点已挂载"
+    echo "  ✓ Mode B 视觉动态搬运全栈已启动"
     echo "========================================"
     echo "当前启动节点:"
     echo "  • MoveIt2 + MuJoCo: PID $MOVEIT_PID"
-    echo "  • 视觉流桥接节点: PID $VISION_PID"
+    echo "  • 视觉检测节点: PID $VISION_PID"
+    echo "  • 任务节点: PID $TASK_PID"
+    echo "  • 任务日志: $TASK_LOG"
     echo ""
-    echo "  >> 请关注 /overhead_camera/image_raw ROS话题获取实时上帝视角。"
-    echo "  >> C++硬编排节点已挂起，此时可以通过新架构或新节点发布机械臂目标轨迹。"
+    echo "  初始坐标: (${ROD_INIT_X:-0.50}, ${ROD_INIT_Y:-0.00}), yaw=${ROD_INIT_YAW:-0}°"
+    echo "  目标坐标: (${ROD_TARGET_X:-0.40}, ${ROD_TARGET_Y:--0.20}), yaw=${ROD_TARGET_YAW:-90}°"
     echo "========================================"
+    echo ""
+
+    echo "等待任务终态（DONE / ERROR），最长240秒..."
+    wait_for_task_terminal_state "$TASK_LOG" "$TASK_PID" 240
+    TASK_STATE_CODE=$?
+
+    if [ "$TASK_STATE_CODE" -eq 0 ]; then
+        echo "✅ 检测到任务完成状态(DONE)"
+    elif [ "$TASK_STATE_CODE" -eq 2 ]; then
+        echo "❌ 检测到任务失败状态(ERROR)"
+    elif [ "$TASK_STATE_CODE" -eq 3 ]; then
+        echo "❌ 任务节点进程提前退出，请检查日志: $TASK_LOG"
+    else
+        echo "⚠ 240秒内未检测到任务终态，可能仍在执行中"
+    fi
+    echo ""
 fi
 
 echo ""

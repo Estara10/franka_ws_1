@@ -16,6 +16,7 @@
 #include <control_msgs/action/gripper_command.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <std_msgs/msg/bool.hpp>
@@ -71,6 +72,15 @@ public:
     bool place_release_hand_z_ref_valid_ {false};
     double rod_center_ground_z_ {0.02};
     double rod_half_height_ {0.02};
+
+    // Mode B: vision-driven dynamic grasping
+    geometry_msgs::msg::Pose detected_rod_pose_;
+    bool rod_pose_received_ {false};
+    bool use_vision_ {false};
+    double rod_target_x_ {0.40};
+    double rod_target_y_ {-0.20};
+    double rod_target_yaw_rad_ {M_PI / 2.0};
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr rod_pose_sub_;
     
     std::vector<double> initial_left_joints_;
     std::vector<double> initial_right_joints_;

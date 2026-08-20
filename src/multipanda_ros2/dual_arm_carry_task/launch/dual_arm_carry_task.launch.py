@@ -91,6 +91,10 @@ def launch_setup(context, *args, **kwargs):
                 'lift_height': LaunchConfiguration('lift_height'),
                 'enable_rotate': LaunchConfiguration('enable_rotate'),
                 'control_mode': LaunchConfiguration('control_mode'),
+                'use_vision': LaunchConfiguration('use_vision'),
+                'rod_target_x': LaunchConfiguration('rod_target_x'),
+                'rod_target_y': LaunchConfiguration('rod_target_y'),
+                'rod_target_yaw_deg': LaunchConfiguration('rod_target_yaw_deg'),
                 'use_sim_time': True,
             }
         ]
@@ -237,6 +241,30 @@ def generate_launch_description():
         'enable_rotate',
         default_value='true',
         description='是否执行ROTATE阶段 (true/false)'
+    )
+
+    use_vision_arg = DeclareLaunchArgument(
+        'use_vision',
+        default_value='false',
+        description='启用视觉动态抓取模式 (Mode B)'
+    )
+
+    rod_target_x_arg = DeclareLaunchArgument(
+        'rod_target_x',
+        default_value='0.40',
+        description='Mode B 目标放置 X 坐标 (m)'
+    )
+
+    rod_target_y_arg = DeclareLaunchArgument(
+        'rod_target_y',
+        default_value='-0.20',
+        description='Mode B 目标放置 Y 坐标 (m)'
+    )
+
+    rod_target_yaw_deg_arg = DeclareLaunchArgument(
+        'rod_target_yaw_deg',
+        default_value='90.0',
+        description='Mode B 目标放置偏航角 (度)'
     )
 
     enable_latency_monitor_arg = DeclareLaunchArgument(
@@ -452,6 +480,10 @@ def generate_launch_description():
         grasp_height_arg,
         lift_height_arg,
         enable_rotate_arg,
+        use_vision_arg,
+        rod_target_x_arg,
+        rod_target_y_arg,
+        rod_target_yaw_deg_arg,
         enable_latency_monitor_arg,
         latency_topic_arg,
         latency_task_status_topic_arg,

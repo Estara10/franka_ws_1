@@ -49,7 +49,13 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<double>("lift_height", 0.40);  // 增加到40cm，便于后续运动规划
         this->declare_parameter<bool>("enable_rotate", true);   // true=执行ROTATE，false=直接放置不旋转
         this->declare_parameter<double>("gripper_close_position", 0.010);  // 物体宽0.04m，每指目标0.01m vs 实际0.02m → PD误差0.01m产生强力夹持，且不会超过关节下限
-        
+
+        // Mode B: vision-driven dynamic grasping parameters
+        this->declare_parameter<bool>("use_vision", false);
+        this->declare_parameter<double>("rod_target_x", 0.40);
+        this->declare_parameter<double>("rod_target_y", -0.20);
+        this->declare_parameter<double>("rod_target_yaw_deg", 90.0);
+
         left_arm_group_ = this->get_parameter("left_arm_group").as_string();
         right_arm_group_ = this->get_parameter("right_arm_group").as_string();
         control_mode_ = this->get_parameter("control_mode").as_string();
@@ -61,21 +67,46 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         lift_height_ = this->get_parameter("lift_height").as_double();
         enable_rotate_ = this->get_parameter("enable_rotate").as_bool();
         gripper_close_pos_ = this->get_parameter("gripper_close_position").as_double();
-        
+
+        use_vision_ = this->get_parameter("use_vision").as_bool();
+        rod_target_x_ = this->get_parameter("rod_target_x").as_double();
+        rod_target_y_ = this->get_parameter("rod_target_y").as_double();
+        rod_target_yaw_rad_ = this->get_parameter("rod_target_yaw_deg").as_double() * M_PI / 180.0;
+
         // 创建MuJoCo weld约束控制发布器
         weld_pub_ = this->create_publisher<std_msgs::msg::Bool>("/grasp_weld_active", 10);
-        
+
+        // Mode B: subscribe to detected rod pose from vision node
+        if (use_vision_) {
+            rod_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+                "/detected_rod_pose", 10,
+                [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+                    detected_rod_pose_ = msg->pose;
+                    if (!rod_pose_received_) {
+                        rod_pose_received_ = true;
+                        RCLCPP_INFO(this->get_logger(),
+                            "Vision: rod detected at (%.3f, %.3f, %.3f)",
+                            msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
+                    }
+                });
+            RCLCPP_INFO(this->get_logger(), "Vision mode enabled: subscribing to /detected_rod_pose");
+        }
+
         current_state_ = TaskState::INIT;
         publish_stage(task_stage_pub_, current_state_);
         grippers_ = std::make_shared<GripperController>(this);
         arms_ = std::make_shared<DualArmController>(this);
-        
+
         RCLCPP_INFO(this->get_logger(), "\n配置参数:");
         RCLCPP_INFO(this->get_logger(), "  左臂组: %s", left_arm_group_.c_str());
         RCLCPP_INFO(this->get_logger(), "  右臂组: %s", right_arm_group_.c_str());
         RCLCPP_INFO(this->get_logger(), "  双臂组: %s", dual_arm_group_.c_str());
         RCLCPP_INFO(this->get_logger(), "  控制模式: %s", control_mode_.c_str());
         RCLCPP_INFO(this->get_logger(), "  旋转阶段: %s", enable_rotate_ ? "启用" : "禁用（直接放置）");
+        if (use_vision_) {
+            RCLCPP_INFO(this->get_logger(), "  视觉模式: 启用 (目标: %.3f, %.3f, yaw=%.1f°)",
+                        rod_target_x_, rod_target_y_, rod_target_yaw_rad_ * 180.0 / M_PI);
+        }
     }
     
 

@@ -35,6 +35,10 @@ struct MotionModeProfile
 
 std::string normalizeControlMode(std::string mode)
 {
+    // Strip "vision_" prefix for Mode B compatibility (vision_<profile> → <profile>)
+    if (mode.rfind("vision_", 0) == 0) {
+        mode = mode.substr(7);
+    }
     std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
     });
@@ -49,6 +53,13 @@ double clampScale(double value, double lo, double hi)
 int scaledWaypointCount(int base, double scale, int min_count)
 {
     return std::max(min_count, static_cast<int>(std::round(static_cast<double>(base) * scale)));
+}
+
+double extractYawFromQuaternion(const geometry_msgs::msg::Quaternion& q)
+{
+    // Yaw from quaternion (rotation around Z)
+    return std::atan2(2.0 * (q.w * q.z + q.x * q.y),
+                      1.0 - 2.0 * (q.y * q.y + q.z * q.z));
 }
 
 MotionModeProfile getMotionModeProfile(const std::string& raw_mode)
@@ -575,11 +586,16 @@ void DualArmController::publishAluminumRod()
         primitive.dimensions[1] = 0.40;  // Y方向长度 (长轴)
         primitive.dimensions[2] = 0.04;  // Z方向高度
         
-        // 定义铝棒位置 (与MuJoCo中objects.xml一致)
+        // 定义铝棒位置 (与MuJoCo中objects.xml一致，或由视觉动态检测)
         geometry_msgs::msg::Pose box_pose;
         box_pose.orientation.w = 1.0;
-        box_pose.position.x = 0.50;  // 与MuJoCo中的位置一致
-        box_pose.position.y = 0.0;
+        if (ctx_->rod_pose_received_) {
+            box_pose.position.x = ctx_->detected_rod_pose_.position.x;
+            box_pose.position.y = ctx_->detected_rod_pose_.position.y;
+        } else {
+            box_pose.position.x = 0.50;  // 与MuJoCo中的位置一致
+            box_pose.position.y = 0.0;
+        }
         box_pose.position.z = 0.02;  // 物体中心高度 (底部接触地面)
         
         collision_object.primitives.push_back(primitive);
@@ -675,11 +691,32 @@ void DualArmController::publishAluminumRod()
 void DualArmController::executeInit()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: INIT] 初始化...");
-        
+
         try {
+            // Mode B: wait for vision detection before proceeding
+            if (ctx_->use_vision_) {
+                RCLCPP_INFO(ctx_->get_logger(), "  [视觉模式] 等待物体检测...");
+                auto start = ctx_->now();
+                while (rclcpp::ok() && !ctx_->rod_pose_received_) {
+                    if ((ctx_->now() - start).seconds() > 10.0) {
+                        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 视觉超时: 10秒内未检测到物体");
+                        ctx_->current_state_ = TaskState::ERROR;
+                        return;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                double yaw = extractYawFromQuaternion(ctx_->detected_rod_pose_.orientation);
+                RCLCPP_INFO(ctx_->get_logger(),
+                    "  ✓ 物体已检测: pos=(%.3f, %.3f, %.3f) yaw=%.1f°",
+                    ctx_->detected_rod_pose_.position.x,
+                    ctx_->detected_rod_pose_.position.y,
+                    ctx_->detected_rod_pose_.position.z,
+                    yaw * 180.0 / M_PI);
+            }
+
             // 跳过初始位置移动，直接使用当前位置
             RCLCPP_INFO(ctx_->get_logger(), "  使用当前机械臂位置作为起始点");
-            
+
             // 设定RETREAT目标关节位置（Franka标准ready姿态）
             // 注意: MuJoCo启动时关节状态为[0,0,0,-1.571,0,0,0]（默认零位），
             // 此姿态不适合作为RETREAT目标（手臂完全伸直+向前）。
@@ -687,17 +724,17 @@ void DualArmController::executeInit()
             ctx_->initial_left_joints_ = {0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785};
             ctx_->initial_right_joints_ = {0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785};
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ RETREAT目标已设为Franka标准ready姿态");
-            
+
             // 【已禁用】不再手动初始化 ACM，完全依赖 SRDF 的默认碰撞规则
             // ctx_->arms_->initializeCollisionMatrix();
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ 使用 SRDF 默认碰撞矩阵（无需手动初始化）");
-            
+
             // 发布铝棒碰撞物体到 Planning Scene
             ctx_->arms_->publishAluminumRod();
-            
+
             RCLCPP_INFO(ctx_->get_logger(), "✓ 初始化完成，进入接近阶段\n");
             ctx_->current_state_ = TaskState::APPROACH;
-            
+
         } catch (const std::exception& e) {
             RCLCPP_ERROR(ctx_->get_logger(), "INIT 阶段异常: %s", e.what());
             ctx_->current_state_ = TaskState::ERROR;
@@ -709,9 +746,9 @@ void DualArmController::executeApproach()
         RCLCPP_INFO(ctx_->get_logger(), "[状态: APPROACH] 接近物体...");
         
         // ========== 物体与机械臂参数定义 ==========
-        // 物体位置 (从objects.xml: pos="0.5 0.0 0.02", 物体底部接触地面)
-        double obj_x = 0.50;
-        double obj_y = 0.0;
+        // 物体位置 (从视觉检测获取，或回退到 objects.xml 硬编码)
+        double obj_x = ctx_->rod_pose_received_ ? ctx_->detected_rod_pose_.position.x : 0.50;
+        double obj_y = ctx_->rod_pose_received_ ? ctx_->detected_rod_pose_.position.y : 0.0;
         
         // 杆件参数 (长轴在Y方向，横向放置)
            // Y方向半长 20cm
@@ -792,7 +829,7 @@ void DualArmController::executeApproach()
                 RCLCPP_ERROR(ctx_->get_logger(), "    右臂目标: [%.3f, %.3f, %.3f]",
                             right_target.position.x, right_target.position.y, right_target.position.z);
                 RCLCPP_WARN(ctx_->get_logger(), "  ! 目标位姿可能超出工作空间或存在奇异点，跳过此阶段");
-                ctx_->current_state_ = TaskState::DONE;
+                ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
             
@@ -982,15 +1019,19 @@ void DualArmController::attachObject()
             RCLCPP_INFO(ctx_->get_logger(), "    ✓ 从 PlanningScene 获取物体位姿: [%.3f, %.3f, %.3f]",
                        object_world_pose.position.x, object_world_pose.position.y, object_world_pose.position.z);
         } else {
-            // 回退：使用 ctx_->arms_->publishAluminumRod() 中的已知初始位置
-            RCLCPP_WARN(ctx_->get_logger(), "    ! 无法从PlanningScene获取物体，使用已知初始位置");
-            object_world_pose.position.x = 0.50;
-            object_world_pose.position.y = 0.0;
-            object_world_pose.position.z = 0.02;
-            object_world_pose.orientation.w = 1.0;
-            object_world_pose.orientation.x = 0.0;
-            object_world_pose.orientation.y = 0.0;
-            object_world_pose.orientation.z = 0.0;
+            // 回退：使用视觉检测位姿或已知初始位置
+            RCLCPP_WARN(ctx_->get_logger(), "    ! 无法从PlanningScene获取物体，使用回退位姿");
+            if (ctx_->rod_pose_received_) {
+                object_world_pose = ctx_->detected_rod_pose_;
+            } else {
+                object_world_pose.position.x = 0.50;
+                object_world_pose.position.y = 0.0;
+                object_world_pose.position.z = 0.02;
+                object_world_pose.orientation.w = 1.0;
+                object_world_pose.orientation.x = 0.0;
+                object_world_pose.orientation.y = 0.0;
+                object_world_pose.orientation.z = 0.0;
+            }
         }
         
         // 输出夹爪位置用于调试对比（hand 位于手腕处，finger 位于指尖处）
@@ -1154,8 +1195,19 @@ void DualArmController::executeTransport()
 
             // 旋转场景下若平移过远，右臂在ROTATE中段（约20°附近）更容易出现IK无解。
             // 这里对启用旋转的工况使用更保守的平移终点，优先保证旋转可达性与稳定性。
-            const double total_dx = ctx_->enable_rotate_ ? 0.12 : 0.20;
-            const double total_dy = ctx_->enable_rotate_ ? 0.06 : 0.10;
+            double total_dx, total_dy;
+            if (ctx_->rod_pose_received_) {
+                // Mode B: compute deltas from detected pose to target pose
+                total_dx = ctx_->rod_target_x_ - ctx_->detected_rod_pose_.position.x;
+                total_dy = ctx_->rod_target_y_ - ctx_->detected_rod_pose_.position.y;
+                total_dx = std::clamp(total_dx, -0.30, 0.30);
+                total_dy = std::clamp(total_dy, -0.25, 0.25);
+                RCLCPP_INFO(ctx_->get_logger(),
+                            "  [视觉模式] 动态目标偏移: dx=%.3f dy=%.3f (目标→检测)", total_dx, total_dy);
+            } else {
+                total_dx = ctx_->enable_rotate_ ? 0.12 : 0.20;
+                total_dy = ctx_->enable_rotate_ ? 0.06 : 0.10;
+            }
 
             RCLCPP_INFO(ctx_->get_logger(),
                         "  [TRANSPORT] 模式=%s, z=%.3f, near_ground=%s, waypoints=%d, vel=%.2f, acc=%.2f, dx=%.3f, dy=%.3f",
@@ -1279,7 +1331,20 @@ void DualArmController::executeRotate()
             const int num_segments = 1;
             const int wp_per_seg = scaledWaypointCount(45, mode_profile.rotate_waypoint_scale, 36);
             const int total_wp = num_segments * wp_per_seg;
-            const double total_angle = M_PI / 4.0;
+            double total_angle;
+            if (ctx_->rod_pose_received_) {
+                double init_yaw = extractYawFromQuaternion(ctx_->detected_rod_pose_.orientation);
+                total_angle = ctx_->rod_target_yaw_rad_ - init_yaw;
+                // Normalize to [-PI, PI]
+                while (total_angle > M_PI) total_angle -= 2.0 * M_PI;
+                while (total_angle < -M_PI) total_angle += 2.0 * M_PI;
+                RCLCPP_INFO(ctx_->get_logger(),
+                            "  [视觉模式] 动态旋转: init_yaw=%.1f° target_yaw=%.1f° angle=%.1f°",
+                            init_yaw * 180.0 / M_PI, ctx_->rod_target_yaw_rad_ * 180.0 / M_PI,
+                            total_angle * 180.0 / M_PI);
+            } else {
+                total_angle = M_PI / 4.0;
+            }
             const double step_angle_deg = std::abs(total_angle) * 180.0 / M_PI / total_wp;  // 每步角度(度)
 
             RCLCPP_INFO(ctx_->get_logger(),
