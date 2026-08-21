@@ -7,6 +7,7 @@
 #endif
 #include <cctype>
 #include <cmath>
+#include <unordered_map>
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
 #include "dual_arm_carry_task/gripper_controller.hpp"
 
@@ -16,6 +17,10 @@ constexpr double kReleaseCorrectionVelScale = 0.08;
 constexpr double kReleaseCorrectionAccScale = 0.05;
 constexpr double kMaxManualTrajectoryJointStepRad = 0.75;
 constexpr double kMaxManualTrajectoryHandDistanceDrift = 0.02;
+// MoveIt's Ruckig convenience overload uses 1000 rad/s^3 when the model does
+// not provide jerk limits. Keep that fallback explicit and shared by every
+// manually generated phase instead of relying on an undocumented default.
+constexpr double kFallbackJerkLimitRadPerSec3 = 500.0;
 
 struct MotionModeProfile
 {
@@ -146,8 +151,47 @@ bool parameterizeAndSmoothTrajectory(robot_trajectory::RobotTrajectory& traj,
     }
 
 #if DUAL_ARM_HAS_RUCKIG
-    if (trajectory_processing::RuckigSmoothing::applySmoothing(traj, vel_scale, acc_scale)) {
+    std::unordered_map<std::string, double> velocity_limits;
+    std::unordered_map<std::string, double> acceleration_limits;
+    std::unordered_map<std::string, double> jerk_limits;
+    std::size_t fallback_jerk_count = 0;
+
+    // Use the same MoveIt velocity/acceleration bounds as the scaling-factor
+    // overload, while supplying jerk explicitly for every active variable.
+    // This avoids silently falling back to Ruckig's hard-coded 1000 value.
+    if (const auto* group = traj.getGroup(); group != nullptr) {
+        for (const auto* joint : group->getActiveJointModels()) {
+            for (const auto& variable : joint->getVariableNames()) {
+                const auto& bounds = joint->getVariableBounds(variable);
+                const double velocity = bounds.velocity_bounded_ && bounds.max_velocity_ > 0.0
+                                            ? bounds.max_velocity_ * vel_scale
+                                            : 1.0;
+                const double acceleration = bounds.acceleration_bounded_ && bounds.max_acceleration_ > 0.0
+                                                ? bounds.max_acceleration_ * acc_scale
+                                                : 1.0;
+                const double jerk = bounds.jerk_bounded_ && bounds.max_jerk_ > 0.0
+                                        ? bounds.max_jerk_
+                                        : kFallbackJerkLimitRadPerSec3;
+                velocity_limits.emplace(variable, velocity);
+                acceleration_limits.emplace(variable, acceleration);
+                jerk_limits.emplace(variable, jerk);
+                if (!(bounds.jerk_bounded_ && bounds.max_jerk_ > 0.0)) {
+                    ++fallback_jerk_count;
+                }
+            }
+        }
+    }
+
+    const bool smoothing_ok = !velocity_limits.empty() &&
+        trajectory_processing::RuckigSmoothing::applySmoothing(
+            traj, velocity_limits, acceleration_limits, jerk_limits);
+    if (smoothing_ok) {
         RCLCPP_INFO(logger, "  ✓ [%s] 已启用 Ruckig jerk 限制平滑", phase);
+        if (fallback_jerk_count > 0) {
+            RCLCPP_WARN(logger,
+                        "  ! [%s] %zu 个变量未配置 jerk limit，使用显式回退 %.1f rad/s^3",
+                        phase, fallback_jerk_count, kFallbackJerkLimitRadPerSec3);
+        }
     } else {
         RCLCPP_WARN(logger, "  ! [%s] Ruckig 平滑失败，沿用 TOTG 轨迹", phase);
     }

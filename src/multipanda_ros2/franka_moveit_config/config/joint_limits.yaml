@@ -5,6 +5,8 @@
 # Using conservative acceleration limits for simulation stability:
 # - Real Panda max acceleration can reach 15-20 rad/s² for some joints
 # - We use ~60% of real values for smooth MuJoCo simulation
+# Jerk limits are explicit for Ruckig smoothing. They are a conservative
+# simulation value and must be revalidated before any real-hardware use.
 
 default_velocity_scaling_factor: 1.0
 default_acceleration_scaling_factor: 1.0
@@ -16,36 +18,50 @@ joint_limits:
     max_velocity: 2.175
     has_acceleration_limits: true
     max_acceleration: 10.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_left_joint2:
     has_velocity_limits: true
     max_velocity: 2.175
     has_acceleration_limits: true
     max_acceleration: 5.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_left_joint3:
     has_velocity_limits: true
     max_velocity: 2.175
     has_acceleration_limits: true
     max_acceleration: 7.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_left_joint4:
     has_velocity_limits: true
     max_velocity: 2.175
     has_acceleration_limits: true
     max_acceleration: 8.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_left_joint5:
     has_velocity_limits: true
     max_velocity: 2.610
     has_acceleration_limits: true
     max_acceleration: 10.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_left_joint6:
     has_velocity_limits: true
     max_velocity: 2.610
     has_acceleration_limits: true
     max_acceleration: 12.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_left_joint7:
     has_velocity_limits: true
     max_velocity: 2.610
     has_acceleration_limits: true
     max_acceleration: 12.0
+    has_jerk_limits: true
+    max_jerk: 500.0
 
   # === Right arm (mj_right) ===
   mj_right_joint1:
@@ -53,33 +69,47 @@ joint_limits:
     max_velocity: 2.175
     has_acceleration_limits: true
     max_acceleration: 10.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_right_joint2:
     has_velocity_limits: true
     max_velocity: 2.175
     has_acceleration_limits: true
     max_acceleration: 5.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_right_joint3:
     has_velocity_limits: true
     max_velocity: 2.175
     has_acceleration_limits: true
     max_acceleration: 7.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_right_joint4:
     has_velocity_limits: true
     max_velocity: 2.175
     has_acceleration_limits: true
     max_acceleration: 8.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_right_joint5:
     has_velocity_limits: true
     max_velocity: 2.610
     has_acceleration_limits: true
     max_acceleration: 10.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_right_joint6:
     has_velocity_limits: true
     max_velocity: 2.610
     has_acceleration_limits: true
     max_acceleration: 12.0
+    has_jerk_limits: true
+    max_jerk: 500.0
   mj_right_joint7:
     has_velocity_limits: true
     max_velocity: 2.610
     has_acceleration_limits: true
     max_acceleration: 12.0
+    has_jerk_limits: true
+    max_jerk: 500.0
