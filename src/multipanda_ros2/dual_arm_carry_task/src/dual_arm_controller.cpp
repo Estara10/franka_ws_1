@@ -2261,19 +2261,50 @@ bool DualArmController::detachAndReplaceObject()
         double rod_center_y = (left_current.pose.position.y + right_current.pose.position.y) / 2.0;
         double rod_center_z = 0.02;  // 放置到地面（与初始高度相同）
         
-        RCLCPP_INFO(ctx_->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向 Rz=%s",
-            rod_center_x, rod_center_y, rod_center_z, ctx_->enable_rotate_ ? "45°" : "0°");
+        // The rod's local long axis is its Y axis. Infer its world yaw from
+        // the current hand baseline instead of assuming a fixed 45° target.
+        const double hand_dx = right_current.pose.position.x - left_current.pose.position.x;
+        const double hand_dy = right_current.pose.position.y - left_current.pose.position.y;
+        double rod_yaw = std::atan2(hand_dy, hand_dx) + M_PI / 2.0;
+        while (rod_yaw > M_PI) rod_yaw -= 2.0 * M_PI;
+        while (rod_yaw < -M_PI) rod_yaw += 2.0 * M_PI;
+
+        RCLCPP_INFO(ctx_->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向 Rz=%.1f°",
+            rod_center_x, rod_center_y, rod_center_z, rod_yaw * 180.0 / M_PI);
         
         // ========== 步骤1: 解除附着 ==========
         // 修复：之前只是发了REMOVE消息到话题，但由于ROS 2 MoveIt架构中话题处理的延迟或覆盖，
         // 常常无法正确更新 attached_objects，导致MoveIt依然认为物体粘在手上（RETREAT时发生碰撞）。
         // 改用高层API detachObject 会通过 Service 进行可靠同步。
         bool detach_success = ctx_->left_arm_->detachObject("aluminum_rod");
+        if (!detach_success) {
+            // The object is normally attached to mj_left_hand. Only fall back
+            // to the dual-arm interface when the primary detach request fails;
+            // issuing both requests creates a stale second detach and produces
+            // misleading "Attached body not found" errors in MoveIt.
+            detach_success = ctx_->dual_arm_->detachObject("aluminum_rod");
+        }
         RCLCPP_INFO(ctx_->get_logger(), "    ✓ 执行解除附着: %s", detach_success ? "成功" : "失败");
-        std::this_thread::sleep_for(300ms);
-        
-        // 为了绝对安全，额外从 MoveGroupInterface 中显式调用
-        ctx_->dual_arm_->detachObject("aluminum_rod");
+        if (!detach_success) {
+            RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 解除附着请求失败");
+            return false;
+        }
+
+        moveit::planning_interface::PlanningSceneInterface psi;
+        bool attached_body_removed = false;
+        for (int attempt = 0; attempt < 15; ++attempt) {
+            auto attached_objects = psi.getAttachedObjects({"aluminum_rod"});
+            if (attached_objects.count("aluminum_rod") == 0) {
+                attached_body_removed = true;
+                break;
+            }
+            std::this_thread::sleep_for(100ms);
+        }
+        if (!attached_body_removed) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "    ✗ PlanningScene 仍存在 attached aluminum_rod，禁止重新加入世界物体");
+            return false;
+        }
         
         // ========== 步骤2: 重新添加为世界碰撞物体（旋转后姿态）==========
         moveit_msgs::msg::CollisionObject collision_object;
@@ -2290,7 +2321,7 @@ bool DualArmController::detachAndReplaceObject()
         rod_pose.position.z = rod_center_z;
         
         tf2::Quaternion q_rod;
-        q_rod.setRPY(0, 0, ctx_->enable_rotate_ ? M_PI / 4.0 : 0.0);
+        q_rod.setRPY(0, 0, rod_yaw);
         rod_pose.orientation = tf2::toMsg(q_rod);
         
         collision_object.primitives.push_back(primitive);
@@ -2298,15 +2329,14 @@ bool DualArmController::detachAndReplaceObject()
         collision_object.operation = moveit_msgs::msg::CollisionObject::ADD;
         
         // 修复：使用 PlanningSceneInterface 的 Apply 方法强制同步更新世界物体
-        moveit::planning_interface::PlanningSceneInterface psi;
         const bool apply_success = psi.applyCollisionObject(collision_object);
         if (!apply_success) {
             RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 重新添加铝棒为世界碰撞物体失败");
             return false;
         }
         
-        RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（Rz=%s）",
-            ctx_->enable_rotate_ ? "45°" : "0°");
+        RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（Rz=%.1f°）",
+            rod_yaw * 180.0 / M_PI);
         std::this_thread::sleep_for(300ms);
         
         // ========== 步骤3: 验证结果 ==========
