@@ -23,3 +23,10 @@ __pycache__/
 
 # Large test data
 experiment_data/
+
+# Generated experiment run artifacts
+experiment_results/reports/*_samples.csv
+experiment_results/reports/*_sync_samples.csv
+experiment_results/plots/experiment_*.png
+experiment_results/plots/comm_latency_*_samples.png
+MUJOCO_LOG.TXT
