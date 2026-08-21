@@ -325,6 +325,52 @@ bool validateManualTrajectory(const robot_trajectory::RobotTrajectory& traj,
     }
     return true;
 }
+
+struct CoordinatedIkResult
+{
+    bool success {false};
+    bool left_success {false};
+    bool right_success {false};
+};
+
+CoordinatedIkResult solveCoordinatedIk(const moveit::core::RobotState& seed_state,
+                                       moveit::core::RobotState& solved_state,
+                                       const moveit::core::JointModelGroup* left_jmg,
+                                       const moveit::core::JointModelGroup* right_jmg,
+                                       const geometry_msgs::msg::Pose& left_target,
+                                       const geometry_msgs::msg::Pose& right_target,
+                                       double timeout)
+{
+    CoordinatedIkResult result;
+    if (left_jmg == nullptr || right_jmg == nullptr) {
+        return result;
+    }
+
+    auto attempt = [&](double attempt_timeout) {
+        moveit::core::RobotState candidate(seed_state);
+        result.left_success = candidate.setFromIK(left_jmg, left_target, attempt_timeout);
+        result.right_success = result.left_success &&
+            candidate.setFromIK(right_jmg, right_target, attempt_timeout);
+        if (!result.left_success || !result.right_success) {
+            return false;
+        }
+        candidate.update();
+        solved_state = candidate;
+        result.success = true;
+        return true;
+    };
+
+    if (attempt(timeout)) {
+        return result;
+    }
+
+    // Retry from the exact same seed. Never let a failed left/right partial
+    // solve leak into the next attempt or into the caller's trajectory.
+    if (timeout < 0.5) {
+        attempt(0.5);
+    }
+    return result;
+}
 }
 
 void DualArmController::initialize()
@@ -1451,18 +1497,16 @@ void DualArmController::executeTransport()
                 right_target.position.y += total_dy * s;
 
                 auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
-                bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, ik_timeout);
-                bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, ik_timeout);
+                const auto ik_result = solveCoordinatedIk(
+                    *seed_state, *waypoint_state, left_jmg, right_jmg,
+                    left_target, right_target, ik_timeout);
 
-                if (!left_ik || !right_ik) {
-                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.5);
-                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.5);
-                }
-
-                if (!left_ik || !right_ik) {
+                if (!ik_result.success) {
                     RCLCPP_ERROR(ctx_->get_logger(),
                                  "  ✗ [TRANSPORT] 连续轨迹航点 %d/%d IK失败 Left=%s Right=%s",
-                                 i, num_waypoints, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                                 i, num_waypoints,
+                                 ik_result.left_success ? "OK" : "FAIL",
+                                 ik_result.right_success ? "OK" : "FAIL");
                     ctx_->current_state_ = TaskState::ERROR;
                     return;
                 }
@@ -1930,18 +1974,16 @@ void DualArmController::executeDescend()
                 right_target.position.z = right_start.position.z + (right_goal.position.z - right_start.position.z) * s;
 
                 auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
-                bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, ik_timeout);
-                bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, ik_timeout);
+                const auto ik_result = solveCoordinatedIk(
+                    *seed_state, *waypoint_state, left_jmg, right_jmg,
+                    left_target, right_target, ik_timeout);
 
-                if (!left_ik || !right_ik) {
-                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.5);
-                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.5);
-                }
-
-                if (!left_ik || !right_ik) {
+                if (!ik_result.success) {
                     RCLCPP_ERROR(ctx_->get_logger(),
                                  "  ✗ [DESCEND] 连续轨迹航点 %d/%d IK失败 Left=%s Right=%s",
-                                 i, num_waypoints, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                                 i, num_waypoints,
+                                 ik_result.left_success ? "OK" : "FAIL",
+                                 ik_result.right_success ? "OK" : "FAIL");
                     ctx_->current_state_ = TaskState::ERROR;
                     return;
                 }
