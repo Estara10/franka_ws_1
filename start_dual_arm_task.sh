@@ -45,42 +45,129 @@ cleanup_processes() {
 
 # 检查 MoveIt + MuJoCo 栈是否真正就绪（不仅 launch 进程存活）
 wait_for_sim_stack_ready() {
-    local timeout_sec="${1:-12}"
-    local elapsed=0
+    local timeout_sec="${1:-60}"
+    local log_file="${2:-}"
+    local consecutive_ready=0
+    local deadline
+    local next_status_time
+    deadline=$(($(date +%s) + timeout_sec))
+    next_status_time=0
 
-    while [ "$elapsed" -lt "$timeout_sec" ]; do
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+            if grep -q "spin_some() called while already spinning" "$log_file" 2>/dev/null || \
+               grep -q "\[mujoco_node-[0-9]\+\]: process has died" "$log_file" 2>/dev/null; then
+                echo "  ✗ 检测到 mujoco_node 已崩溃"
+                return 2
+            fi
+        fi
+
         local nodes
         local services
-        nodes=$(timeout 2s ros2 node list 2>/dev/null || true)
-        services=$(timeout 2s ros2 service list 2>/dev/null || true)
+        local controllers
+        local actions
+        nodes=$(timeout 1s ros2 node list 2>/dev/null || true)
+        services=$(timeout 1s ros2 service list 2>/dev/null || true)
+        controllers=$(timeout 2s ros2 control list_controllers 2>/dev/null || true)
+        actions=$(timeout 1s ros2 action list 2>/dev/null || true)
 
         # 关键判据：
         # 1) move_group 已就绪
-        # 2) MuJoCo 主节点或 ros2_control 子节点存在
-        # 3) controller_manager 服务可用（比节点名更稳定）
+        # 2) MuJoCo 主节点或 ros2_control 插件节点存在
+        # 3) controller_manager 服务可用
+        # 4) MoveIt 轨迹控制器、joint_state_broadcaster 和力传感器 broadcaster 均 active
+        # 5) 左右夹爪 action server 已出现
         local has_move_group=0
         local has_mujoco=0
         local has_controller_service=0
+        local has_arm_controller=0
+        local has_joint_state_broadcaster=0
+        local has_ft_left=0
+        local has_ft_right=0
+        local has_left_gripper_action=0
+        local has_right_gripper_action=0
 
         if echo "$nodes" | grep -q "/move_group"; then
             has_move_group=1
         fi
         if echo "$nodes" | grep -q "/mujoco_node" || \
+           echo "$nodes" | grep -q "/mujoco_server" || \
            echo "$nodes" | grep -q "/mujoco_ros2_control"; then
             has_mujoco=1
         fi
         if echo "$services" | grep -q "/controller_manager/list_controllers"; then
             has_controller_service=1
         fi
+        if echo "$controllers" | grep -Eq "^dual_panda_arm_controller[[:space:]].*[[:space:]]active"; then
+            has_arm_controller=1
+        fi
+        if echo "$controllers" | grep -Eq "^joint_state_broadcaster[[:space:]].*[[:space:]]active"; then
+            has_joint_state_broadcaster=1
+        fi
+        if echo "$controllers" | grep -Eq "^force_torque_sensor_broadcaster_left[[:space:]].*[[:space:]]active"; then
+            has_ft_left=1
+        fi
+        if echo "$controllers" | grep -Eq "^force_torque_sensor_broadcaster_right[[:space:]].*[[:space:]]active"; then
+            has_ft_right=1
+        fi
+        if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+            if [ "$has_arm_controller" -eq 0 ] && grep -q "Configured and activated .*dual_panda_arm_controller" "$log_file" 2>/dev/null; then
+                has_arm_controller=1
+            fi
+            if [ "$has_arm_controller" -eq 0 ] && grep -q "Controller 'dual_panda_arm_controller' can not be configured from 'active' state" "$log_file" 2>/dev/null; then
+                has_arm_controller=1
+            fi
+            if [ "$has_joint_state_broadcaster" -eq 0 ] && grep -q "Configured and activated .*joint_state_broadcaster" "$log_file" 2>/dev/null; then
+                has_joint_state_broadcaster=1
+            fi
+            if [ "$has_joint_state_broadcaster" -eq 0 ] && grep -q "Controller 'joint_state_broadcaster' can not be configured from 'active' state" "$log_file" 2>/dev/null; then
+                has_joint_state_broadcaster=1
+            fi
+            if [ "$has_ft_left" -eq 0 ] && grep -q "Configured and activated .*force_torque_sensor_broadcaster_left" "$log_file" 2>/dev/null; then
+                has_ft_left=1
+            fi
+            if [ "$has_ft_left" -eq 0 ] && grep -q "Controller 'force_torque_sensor_broadcaster_left' can not be configured from 'active' state" "$log_file" 2>/dev/null; then
+                has_ft_left=1
+            fi
+            if [ "$has_ft_right" -eq 0 ] && grep -q "Configured and activated .*force_torque_sensor_broadcaster_right" "$log_file" 2>/dev/null; then
+                has_ft_right=1
+            fi
+            if [ "$has_ft_right" -eq 0 ] && grep -q "Controller 'force_torque_sensor_broadcaster_right' can not be configured from 'active' state" "$log_file" 2>/dev/null; then
+                has_ft_right=1
+            fi
+        fi
+        if echo "$actions" | grep -Fxq "/mj_left_gripper_sim_node/gripper_action"; then
+            has_left_gripper_action=1
+        fi
+        if echo "$actions" | grep -Fxq "/mj_right_gripper_sim_node/gripper_action"; then
+            has_right_gripper_action=1
+        fi
 
         if [ "$has_move_group" -eq 1 ] && \
            [ "$has_mujoco" -eq 1 ] && \
-           [ "$has_controller_service" -eq 1 ]; then
-            return 0
+           [ "$has_controller_service" -eq 1 ] && \
+           [ "$has_arm_controller" -eq 1 ] && \
+           [ "$has_joint_state_broadcaster" -eq 1 ] && \
+           [ "$has_ft_left" -eq 1 ] && \
+           [ "$has_ft_right" -eq 1 ] && \
+           [ "$has_left_gripper_action" -eq 1 ] && \
+           [ "$has_right_gripper_action" -eq 1 ]; then
+            consecutive_ready=$((consecutive_ready + 1))
+            if [ "$consecutive_ready" -ge 3 ]; then
+                return 0
+            fi
+        else
+            consecutive_ready=0
+        fi
+
+        local now
+        now=$(date +%s)
+        if [ "$now" -ge "$next_status_time" ]; then
+            echo "  等待栈就绪: move_group=${has_move_group} mujoco=${has_mujoco} controller_mgr=${has_controller_service} arm=${has_arm_controller} js=${has_joint_state_broadcaster} ft=(${has_ft_left},${has_ft_right}) gripper=(${has_left_gripper_action},${has_right_gripper_action})"
+            next_status_time=$((now + 5))
         fi
 
         sleep 1
-        elapsed=$((elapsed + 1))
     done
 
     return 1
@@ -567,17 +654,18 @@ for attempt in $(seq 1 $MAX_SIM_RETRIES); do
             source "${WORKSPACE_DIR}/install/setup.bash"
             continue
         fi
+        cleanup_processes
         exit 1
     fi
 
     # 再检查关键栈（防止 mujoco_node 崩溃但 launch 仍存活）
-    echo "正在检查关键栈就绪状态（move_group + mujoco + controller_manager service）..."
-    if wait_for_sim_stack_ready 12; then
+    echo "正在检查关键栈就绪状态（move_group + mujoco + controllers active + gripper actions）..."
+    if wait_for_sim_stack_ready "${SIM_STACK_READY_TIMEOUT:-75}" "$MOVEIT_LOG"; then
         SIM_READY=1
         break
     fi
 
-    echo "✗ 关键栈未就绪（/move_group + /mujoco_node(or /mujoco_ros2_control) + /controller_manager/list_controllers）"
+    echo "✗ 关键栈未就绪（/move_group + /mujoco_node + active controllers + gripper action servers）"
     if grep -q "spin_some() called while already spinning" "$MOVEIT_LOG" 2>/dev/null; then
         echo "  检测到 MuJoCo 启动期崩溃: spin_some() called while already spinning"
     fi
@@ -596,6 +684,7 @@ if [ "$SIM_READY" -ne 1 ]; then
     echo "✗ MoveIt2/MuJoCo 启动失败（已重试 ${MAX_SIM_RETRIES} 次）"
     echo "请检查日志: $MOVEIT_LOG"
     tail -40 "$MOVEIT_LOG"
+    cleanup_processes
     exit 1
 fi
 
@@ -745,7 +834,14 @@ if [[ "$TASK_MAIN_MODE" == "A" ]]; then
 
     # 4. 启动任务节点
     echo "[4/5] 启动双臂搬运任务节点 ($CONTROL_MODE 模式)..."
-    sleep 5
+    echo "启动任务前最终确认控制器和夹爪 action server..."
+    if ! wait_for_sim_stack_ready 20 "$MOVEIT_LOG"; then
+        echo "✗ 任务启动前接口状态失效，停止启动任务节点"
+        echo "最后40行 MoveIt/MuJoCo 日志:"
+        tail -40 "$MOVEIT_LOG" 2>/dev/null || true
+        cleanup_processes
+        exit 1
+    fi
 
     TASK_LOG="${LOG_DIR}/dual_arm_task_${TIMESTAMP}.log"
     echo "日志: $TASK_LOG"
@@ -948,6 +1044,15 @@ else
     _ROD_TARGET_YAW_DEG=$(awk "BEGIN {printf \"%.3f\", ${ROD_TARGET_YAW:-90.0}}")
 
     echo "正在拉起双臂搬运任务节点（视觉模式）..."
+    echo "启动任务前最终确认控制器和夹爪 action server..."
+    if ! wait_for_sim_stack_ready 20 "$MOVEIT_LOG"; then
+        echo "✗ 任务启动前接口状态失效，停止启动任务节点"
+        echo "最后40行 MoveIt/MuJoCo 日志:"
+        tail -40 "$MOVEIT_LOG" 2>/dev/null || true
+        cleanup_processes
+        exit 1
+    fi
+
     TASK_LOG="${LOG_DIR}/dual_arm_task_${TIMESTAMP}.log"
     echo "任务日志: $TASK_LOG"
 
