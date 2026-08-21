@@ -6,6 +6,7 @@
 #define DUAL_ARM_HAS_RUCKIG 0
 #endif
 #include <cctype>
+#include <cmath>
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
 #include "dual_arm_carry_task/gripper_controller.hpp"
 
@@ -13,6 +14,8 @@ namespace {
 constexpr double kReleaseHeightTolerance = 0.004;
 constexpr double kReleaseCorrectionVelScale = 0.08;
 constexpr double kReleaseCorrectionAccScale = 0.05;
+constexpr double kMaxManualTrajectoryJointStepRad = 0.75;
+constexpr double kMaxManualTrajectoryHandDistanceDrift = 0.02;
 
 struct MotionModeProfile
 {
@@ -152,6 +155,130 @@ bool parameterizeAndSmoothTrajectory(robot_trajectory::RobotTrajectory& traj,
     RCLCPP_INFO(logger, "  ! [%s] 当前环境无 Ruckig，沿用 TOTG 轨迹", phase);
 #endif
 
+    return true;
+}
+
+double wrappedAbsJointDelta(double a, double b)
+{
+    double diff = std::abs(a - b);
+    if (diff > M_PI) {
+        diff = 2.0 * M_PI - diff;
+    }
+    return diff;
+}
+
+bool validateManualTrajectory(const robot_trajectory::RobotTrajectory& traj,
+                              const moveit::core::RobotModelConstPtr& robot_model,
+                              const std::string& group_name,
+                              const rclcpp::Logger& logger,
+                              const char* phase,
+                              bool enforce_hand_distance = true)
+{
+    const auto* jmg = robot_model ? robot_model->getJointModelGroup(group_name) : nullptr;
+    if (jmg == nullptr) {
+        RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 找不到规划组 %s",
+                     phase, group_name.c_str());
+        return false;
+    }
+
+    if (traj.getWayPointCount() < 2) {
+        RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点数量不足 (%zu)",
+                     phase, traj.getWayPointCount());
+        return false;
+    }
+
+    if (!robot_model->hasLinkModel("mj_left_hand") ||
+        !robot_model->hasLinkModel("mj_right_hand")) {
+        RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 找不到左右夹爪 link", phase);
+        return false;
+    }
+
+    planning_scene::PlanningScene validation_scene(robot_model);
+    collision_detection::AllowedCollisionMatrix acm =
+        validation_scene.getAllowedCollisionMatrix();
+    collision_detection::CollisionRequest collision_request;
+    collision_request.group_name = group_name;
+    collision_request.contacts = false;
+
+    std::vector<double> previous_positions;
+    double reference_hand_distance = 0.0;
+
+    for (std::size_t i = 0; i < traj.getWayPointCount(); ++i) {
+        const auto& state = traj.getWayPoint(i);
+
+        if (!state.satisfiesBounds(jmg, 1e-4)) {
+            RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 超出关节限位",
+                         phase, i);
+            return false;
+        }
+
+        collision_detection::CollisionResult collision_result;
+        validation_scene.checkSelfCollision(collision_request, collision_result, state, acm);
+        if (collision_result.collision) {
+            RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 存在自碰撞",
+                         phase, i);
+            return false;
+        }
+
+        std::vector<double> positions;
+        state.copyJointGroupPositions(jmg, positions);
+        for (const double position : positions) {
+            if (!std::isfinite(position)) {
+                RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 含非有限关节值",
+                             phase, i);
+                return false;
+            }
+        }
+
+        if (!previous_positions.empty()) {
+            double max_step = 0.0;
+            const std::size_t count = std::min(previous_positions.size(), positions.size());
+            for (std::size_t j = 0; j < count; ++j) {
+                max_step = std::max(max_step, wrappedAbsJointDelta(positions[j], previous_positions[j]));
+            }
+            if (max_step > kMaxManualTrajectoryJointStepRad) {
+                RCLCPP_ERROR(logger,
+                             "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 关节跳变 %.1f° 超过阈值 %.1f°",
+                             phase, i, max_step * 180.0 / M_PI,
+                             kMaxManualTrajectoryJointStepRad * 180.0 / M_PI);
+                return false;
+            }
+        }
+        previous_positions = positions;
+
+        if (enforce_hand_distance) {
+            const auto& left_tf = state.getGlobalLinkTransform("mj_left_hand");
+            const auto& right_tf = state.getGlobalLinkTransform("mj_right_hand");
+            const double hand_distance = (left_tf.translation() - right_tf.translation()).norm();
+            if (!std::isfinite(hand_distance)) {
+                RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 夹爪距离非有限",
+                             phase, i);
+                return false;
+            }
+            if (i == 0) {
+                reference_hand_distance = hand_distance;
+            } else {
+                const double drift = std::abs(hand_distance - reference_hand_distance);
+                if (drift > kMaxManualTrajectoryHandDistanceDrift) {
+                    RCLCPP_ERROR(logger,
+                                 "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 左右夹爪距离漂移 %.1f mm 超过阈值 %.1f mm",
+                                 phase, i, drift * 1000.0,
+                                 kMaxManualTrajectoryHandDistanceDrift * 1000.0);
+                    return false;
+                }
+            }
+        }
+    }
+
+    if (enforce_hand_distance) {
+        RCLCPP_INFO(logger,
+                    "  ✓ [%s] 手工轨迹校验通过: %zu航点，关节限位/自碰撞/跳变/夹爪距离已检查",
+                    phase, traj.getWayPointCount());
+    } else {
+        RCLCPP_INFO(logger,
+                    "  ✓ [%s] 手工轨迹校验通过: %zu航点，关节限位/自碰撞/跳变已检查",
+                    phase, traj.getWayPointCount());
+    }
     return true;
 }
 }
@@ -1307,6 +1434,12 @@ void DualArmController::executeTransport()
                 return;
             }
 
+            if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                          ctx_->get_logger(), "TRANSPORT")) {
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
             moveit::planning_interface::MoveGroupInterface::Plan plan;
             traj->getRobotTrajectoryMsg(plan.trajectory_);
             plan.planning_time_ = 0.0;
@@ -1624,6 +1757,12 @@ void DualArmController::executeRotate()
                 
                 RCLCPP_INFO(ctx_->get_logger(), "    TOTG: 时长=%.2fs, 轨迹点=%zu",
                             traj->getDuration(), traj->getWayPointCount());
+
+                if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                              ctx_->get_logger(), "ROTATE")) {
+                    ctx_->current_state_ = TaskState::ERROR;
+                    return;
+                }
                 
                 // ----- 构建Plan并执行（不走OMPL） -----
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
@@ -1774,6 +1913,12 @@ void DualArmController::executeDescend()
                 return;
             }
 
+            if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                          ctx_->get_logger(), "DESCEND")) {
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
             moveit::planning_interface::MoveGroupInterface::Plan plan;
             traj->getRobotTrajectoryMsg(plan.trajectory_);
             plan.planning_time_ = 0.0;
@@ -1870,6 +2015,11 @@ void DualArmController::executePlace()
                                                      kReleaseCorrectionAccScale,
                                                      ctx_->get_logger(),
                                                      "PLACE_RELEASE_ALIGN")) {
+                    return false;
+                }
+
+                if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                              ctx_->get_logger(), "PLACE_RELEASE_ALIGN")) {
                     return false;
                 }
 
@@ -2021,6 +2171,12 @@ void DualArmController::executePlace()
 
             if (!parameterizeAndSmoothTrajectory(*traj, vel_scale, acc_scale,
                                                  ctx_->get_logger(), "PLACE")) {
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
+            if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                          ctx_->get_logger(), "PLACE", false)) {
                 ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
