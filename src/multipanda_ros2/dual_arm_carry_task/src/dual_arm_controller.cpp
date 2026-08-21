@@ -972,8 +972,18 @@ void DualArmController::executeGrasp()
                 RCLCPP_INFO(ctx_->get_logger(), "  [MuJoCo] Weld约束已激活（铝棒刚性绑定到双手）");
             }
             
-            // 附着物体到机器人
-            ctx_->arms_->attachObject();
+            // 附着物体到机器人。附着失败时必须回滚 weld，避免仿真已抓住但
+            // PlanningScene 未附着，后续规划基于错误物体状态继续执行。
+            if (!ctx_->arms_->attachObject()) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ Object attach failed, rolling back weld and aborting");
+                if (ctx_->weld_pub_) {
+                    auto weld_msg = std_msgs::msg::Bool();
+                    weld_msg.data = false;
+                    ctx_->weld_pub_->publish(weld_msg);
+                }
+                ctx_->setCurrentState(TaskState::ERROR);
+                return;
+            }
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ Object attached to robot");
             
             RCLCPP_INFO(ctx_->get_logger(), "  [等待] 异步等待物理引擎稳定中（1.5秒）...");
@@ -1002,7 +1012,7 @@ void DualArmController::executeGrasp()
         }
     }
 
-void DualArmController::attachObject()
+bool DualArmController::attachObject()
     {
         using namespace std::chrono_literals;
         
@@ -1122,21 +1132,31 @@ void DualArmController::attachObject()
         RCLCPP_INFO(ctx_->get_logger(), "    独立物体数量: %zu (期望=0)", objects.size());
         RCLCPP_INFO(ctx_->get_logger(), "    附着物体数量: %zu (期望=1)", attached_objects.size());
         
-        if (objects.size() > 0) {
-            RCLCPP_WARN(ctx_->get_logger(), "    ! 仍有独立物体（可能是Goal State显示，可忽略）");
+        const bool world_has_rod = objects.count("aluminum_rod") > 0;
+        const bool attached_has_rod = attached_objects.count("aluminum_rod") > 0;
+
+        if (world_has_rod) {
+            RCLCPP_WARN(ctx_->get_logger(), "    ! aluminum_rod 仍作为独立物体存在");
         } else {
             RCLCPP_INFO(ctx_->get_logger(), "    ✓ 独立物体已移除");
         }
         
-        if (attached_objects.size() == 1) {
+        if (attached_has_rod) {
             RCLCPP_INFO(ctx_->get_logger(), "    ✓ 附着物体已确认");
         } else {
-            RCLCPP_WARN(ctx_->get_logger(), "    ! 附着物体验证异常");
+            RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 附着物体验证失败：未找到 aluminum_rod");
+            return false;
+        }
+
+        if (world_has_rod) {
+            RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 附着状态不一致：aluminum_rod 同时存在于世界物体中");
+            return false;
         }
         
         RCLCPP_INFO(ctx_->get_logger(), "  ✓ 附着流程完成");
         RCLCPP_INFO(ctx_->get_logger(), "    原理: 从PlanningScene获取物体真实位姿 + base_link全局坐标系");
         RCLCPP_INFO(ctx_->get_logger(), "    期望: 物体在地面原位附着（Z≈0.02），LIFT时随手臂抬升");
+        return true;
     }
 
 void DualArmController::executeLift()
@@ -1903,7 +1923,11 @@ void DualArmController::executePlace()
             
             // ========== Step B: 解除附着并重新添加为世界碰撞物体 ==========
             RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step B: 解除物体附着，重新添加为世界碰撞物体");
-            ctx_->arms_->detachAndReplaceObject();
+            if (!ctx_->arms_->detachAndReplaceObject()) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 解除附着或重建世界物体失败，停止放置流程");
+                ctx_->setCurrentState(TaskState::ERROR);
+                return;
+            }
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ 物体已放置");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             
@@ -2021,7 +2045,7 @@ void DualArmController::executePlace()
         }
     }
 
-void DualArmController::detachAndReplaceObject()
+bool DualArmController::detachAndReplaceObject()
     {
         using namespace std::chrono_literals;
         
@@ -2075,7 +2099,11 @@ void DualArmController::detachAndReplaceObject()
         
         // 修复：使用 PlanningSceneInterface 的 Apply 方法强制同步更新世界物体
         moveit::planning_interface::PlanningSceneInterface psi;
-        psi.applyCollisionObject(collision_object);
+        const bool apply_success = psi.applyCollisionObject(collision_object);
+        if (!apply_success) {
+            RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 重新添加铝棒为世界碰撞物体失败");
+            return false;
+        }
         
         RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（Rz=%s）",
             ctx_->enable_rotate_ ? "45°" : "0°");
@@ -2087,8 +2115,20 @@ void DualArmController::detachAndReplaceObject()
         
         RCLCPP_INFO(ctx_->get_logger(), "    世界物体: %zu (期望≥1), 附着物体: %zu (期望=0)",
                     objects.size(), attached_objects.size());
+
+        const bool world_has_rod = objects.count("aluminum_rod") > 0;
+        const bool attached_has_rod = attached_objects.count("aluminum_rod") > 0;
+
+        if (!world_has_rod || attached_has_rod) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "    ✗ 放置后场景状态不一致: world_has_rod=%s attached_has_rod=%s",
+                         world_has_rod ? "true" : "false",
+                         attached_has_rod ? "true" : "false");
+            return false;
+        }
         
         RCLCPP_INFO(ctx_->get_logger(), "    ✓ 解除附着并重新放置完成");
+        return true;
     }
 
 void DualArmController::executeRetreat()

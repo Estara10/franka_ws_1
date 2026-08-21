@@ -13,12 +13,12 @@ public:
     void executeInit();
     void executeApproach();
     void executeGrasp();
-    void attachObject();
+    bool attachObject();
     void executeLift();
     void executeTransport();
     void executeRotate();
     void executeDescend();
     void executePlace();
-    void detachAndReplaceObject();
+    bool detachAndReplaceObject();
     void executeRetreat();
 };
