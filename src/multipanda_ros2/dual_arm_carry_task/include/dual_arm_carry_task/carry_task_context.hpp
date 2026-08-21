@@ -30,6 +30,8 @@
 #include <chrono>
 #include <set>
 #include <map>
+#include <atomic>
+#include <mutex>
 
 enum class TaskState {
     INIT,
@@ -53,7 +55,7 @@ class DualArmCarryTask : public rclcpp::Node {
 public:
     DualArmCarryTask();
     
-    TaskState current_state_;
+    std::atomic<TaskState> current_state_;
     
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> left_arm_;
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> right_arm_;
@@ -94,4 +96,40 @@ public:
     std::shared_ptr<DualArmController> arms_;
     
     void executeTask();
+
+    TaskState getCurrentState() const
+    {
+        return current_state_.load(std::memory_order_acquire);
+    }
+
+    void setCurrentState(TaskState state)
+    {
+        current_state_.store(state, std::memory_order_release);
+    }
+
+    void setDetectedRodPose(const geometry_msgs::msg::Pose& pose)
+    {
+        std::lock_guard<std::mutex> lock(rod_pose_mutex_);
+        detected_rod_pose_ = pose;
+        rod_pose_received_ = true;
+    }
+
+    bool getDetectedRodPose(geometry_msgs::msg::Pose& pose) const
+    {
+        std::lock_guard<std::mutex> lock(rod_pose_mutex_);
+        if (!rod_pose_received_) {
+            return false;
+        }
+        pose = detected_rod_pose_;
+        return true;
+    }
+
+    bool hasDetectedRodPose() const
+    {
+        std::lock_guard<std::mutex> lock(rod_pose_mutex_);
+        return rod_pose_received_;
+    }
+
+private:
+    mutable std::mutex rod_pose_mutex_;
 };

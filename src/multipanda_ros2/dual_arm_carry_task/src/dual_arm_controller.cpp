@@ -589,9 +589,10 @@ void DualArmController::publishAluminumRod()
         // 定义铝棒位置 (与MuJoCo中objects.xml一致，或由视觉动态检测)
         geometry_msgs::msg::Pose box_pose;
         box_pose.orientation.w = 1.0;
-        if (ctx_->rod_pose_received_) {
-            box_pose.position.x = ctx_->detected_rod_pose_.position.x;
-            box_pose.position.y = ctx_->detected_rod_pose_.position.y;
+        geometry_msgs::msg::Pose detected_pose;
+        if (ctx_->getDetectedRodPose(detected_pose)) {
+            box_pose.position.x = detected_pose.position.x;
+            box_pose.position.y = detected_pose.position.y;
         } else {
             box_pose.position.x = 0.50;  // 与MuJoCo中的位置一致
             box_pose.position.y = 0.0;
@@ -697,7 +698,8 @@ void DualArmController::executeInit()
             if (ctx_->use_vision_) {
                 RCLCPP_INFO(ctx_->get_logger(), "  [视觉模式] 等待物体检测...");
                 auto start = ctx_->now();
-                while (rclcpp::ok() && !ctx_->rod_pose_received_) {
+                geometry_msgs::msg::Pose detected_pose;
+                while (rclcpp::ok() && !ctx_->getDetectedRodPose(detected_pose)) {
                     if ((ctx_->now() - start).seconds() > 10.0) {
                         RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 视觉超时: 10秒内未检测到物体");
                         ctx_->current_state_ = TaskState::ERROR;
@@ -705,12 +707,12 @@ void DualArmController::executeInit()
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
-                double yaw = extractYawFromQuaternion(ctx_->detected_rod_pose_.orientation);
+                double yaw = extractYawFromQuaternion(detected_pose.orientation);
                 RCLCPP_INFO(ctx_->get_logger(),
                     "  ✓ 物体已检测: pos=(%.3f, %.3f, %.3f) yaw=%.1f°",
-                    ctx_->detected_rod_pose_.position.x,
-                    ctx_->detected_rod_pose_.position.y,
-                    ctx_->detected_rod_pose_.position.z,
+                    detected_pose.position.x,
+                    detected_pose.position.y,
+                    detected_pose.position.z,
                     yaw * 180.0 / M_PI);
             }
 
@@ -747,8 +749,10 @@ void DualArmController::executeApproach()
         
         // ========== 物体与机械臂参数定义 ==========
         // 物体位置 (从视觉检测获取，或回退到 objects.xml 硬编码)
-        double obj_x = ctx_->rod_pose_received_ ? ctx_->detected_rod_pose_.position.x : 0.50;
-        double obj_y = ctx_->rod_pose_received_ ? ctx_->detected_rod_pose_.position.y : 0.0;
+        geometry_msgs::msg::Pose detected_pose;
+        const bool has_detected_pose = ctx_->getDetectedRodPose(detected_pose);
+        double obj_x = has_detected_pose ? detected_pose.position.x : 0.50;
+        double obj_y = has_detected_pose ? detected_pose.position.y : 0.0;
         
         // 杆件参数 (长轴在Y方向，横向放置)
            // Y方向半长 20cm
@@ -769,7 +773,11 @@ void DualArmController::executeApproach()
         try {
             // ========== 提前打开夹爪 ==========
             RCLCPP_INFO(ctx_->get_logger(), "  ★ [同步动作] 提前满幅打开夹爪...");
-            ctx_->grippers_->controlDualGrippers(0.04);
+            if (!ctx_->grippers_->controlDualGrippers(0.04)) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 预打开夹爪失败，停止任务");
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
             
             // ========== 左臂目标位姿 (全局姿态预解算) ==========
             geometry_msgs::msg::Pose left_target;
@@ -947,7 +955,11 @@ void DualArmController::executeGrasp()
             RCLCPP_INFO(ctx_->get_logger(), "  [GRASP] Step 3: Closing grippers and attaching object");
             
             // 闭合夹爪
-            ctx_->grippers_->controlDualGrippers(ctx_->gripper_close_pos_);   // 同步闭合
+            if (!ctx_->grippers_->controlDualGrippers(ctx_->gripper_close_pos_)) {   // 同步闭合
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 夹爪闭合失败，禁止激活 weld 和附着物体");
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ Grippers closed");
             
             // 关键：非阻塞式等待MuJoCo物理引擎完全稳定
@@ -971,8 +983,14 @@ void DualArmController::executeGrasp()
             ctx_->wait_timer_ = ctx_->create_wall_timer(
                 std::chrono::milliseconds(1500),
                 [this]() {
+                    if (ctx_->getCurrentState() != TaskState::WAITING_PHYSICS) {
+                        if (ctx_->wait_timer_) {
+                            ctx_->wait_timer_->cancel();
+                        }
+                        return;
+                    }
                     RCLCPP_INFO(ctx_->get_logger(), "  [Timer Triggered] ✓ Physics stabilized, entering LIFT");
-                    ctx_->current_state_ = TaskState::LIFT;
+                    ctx_->setCurrentState(TaskState::LIFT);
                     if (ctx_->wait_timer_) {
                         ctx_->wait_timer_->cancel();
                     }
@@ -1021,8 +1039,9 @@ void DualArmController::attachObject()
         } else {
             // 回退：使用视觉检测位姿或已知初始位置
             RCLCPP_WARN(ctx_->get_logger(), "    ! 无法从PlanningScene获取物体，使用回退位姿");
-            if (ctx_->rod_pose_received_) {
-                object_world_pose = ctx_->detected_rod_pose_;
+            geometry_msgs::msg::Pose detected_pose;
+            if (ctx_->getDetectedRodPose(detected_pose)) {
+                object_world_pose = detected_pose;
             } else {
                 object_world_pose.position.x = 0.50;
                 object_world_pose.position.y = 0.0;
@@ -1196,10 +1215,11 @@ void DualArmController::executeTransport()
             // 旋转场景下若平移过远，右臂在ROTATE中段（约20°附近）更容易出现IK无解。
             // 这里对启用旋转的工况使用更保守的平移终点，优先保证旋转可达性与稳定性。
             double total_dx, total_dy;
-            if (ctx_->rod_pose_received_) {
+            geometry_msgs::msg::Pose detected_pose;
+            if (ctx_->getDetectedRodPose(detected_pose)) {
                 // Mode B: compute deltas from detected pose to target pose
-                total_dx = ctx_->rod_target_x_ - ctx_->detected_rod_pose_.position.x;
-                total_dy = ctx_->rod_target_y_ - ctx_->detected_rod_pose_.position.y;
+                total_dx = ctx_->rod_target_x_ - detected_pose.position.x;
+                total_dy = ctx_->rod_target_y_ - detected_pose.position.y;
                 total_dx = std::clamp(total_dx, -0.30, 0.30);
                 total_dy = std::clamp(total_dy, -0.25, 0.25);
                 RCLCPP_INFO(ctx_->get_logger(),
@@ -1332,8 +1352,9 @@ void DualArmController::executeRotate()
             const int wp_per_seg = scaledWaypointCount(45, mode_profile.rotate_waypoint_scale, 36);
             const int total_wp = num_segments * wp_per_seg;
             double total_angle;
-            if (ctx_->rod_pose_received_) {
-                double init_yaw = extractYawFromQuaternion(ctx_->detected_rod_pose_.orientation);
+            geometry_msgs::msg::Pose detected_pose;
+            if (ctx_->getDetectedRodPose(detected_pose)) {
+                double init_yaw = extractYawFromQuaternion(detected_pose.orientation);
                 total_angle = ctx_->rod_target_yaw_rad_ - init_yaw;
                 // Normalize to [-PI, PI]
                 while (total_angle > M_PI) total_angle -= 2.0 * M_PI;
@@ -1857,10 +1878,17 @@ void DualArmController::executePlace()
                 return;
             }
 
-            // ========== Step A: 去激活MuJoCo weld约束 + 打开夹爪释放物体 ==========
-            RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step A: 去激活weld约束并打开夹爪释放物体");
+            // ========== Step A: 打开夹爪 + 去激活MuJoCo weld约束释放物体 ==========
+            RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step A: 打开夹爪并去激活weld约束释放物体");
             
-            // 先去激活weld，再开夹爪，让物体自然落下
+            if (!ctx_->grippers_->controlDualGrippers(0.04)) {         // 完全同步打开
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 夹爪打开失败，保持 weld/attach 状态并停止放置流程");
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+            RCLCPP_INFO(ctx_->get_logger(), "  ✓ 夹爪已同步打开");
+
+            // 夹爪确认打开后再解除 weld，避免开爪失败时物体状态被误报为已释放。
             {
                 auto weld_msg = std_msgs::msg::Bool();
                 weld_msg.data = false;
@@ -1868,9 +1896,6 @@ void DualArmController::executePlace()
                 RCLCPP_INFO(ctx_->get_logger(), "  [MuJoCo] Weld约束已去激活");
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
-            
-            ctx_->grippers_->controlDualGrippers(0.04);         // 完全同步打开
-            RCLCPP_INFO(ctx_->get_logger(), "  ✓ 夹爪已同步打开");
             
             // 等待物理引擎稳定（杆件落地）
             RCLCPP_INFO(ctx_->get_logger(), "  [等待] 物理引擎稳定中（1.5秒）...");

@@ -81,9 +81,9 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             rod_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
                 "/detected_rod_pose", 10,
                 [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-                    detected_rod_pose_ = msg->pose;
-                    if (!rod_pose_received_) {
-                        rod_pose_received_ = true;
+                    const bool first_detection = !hasDetectedRodPose();
+                    setDetectedRodPose(msg->pose);
+                    if (first_detection) {
                         RCLCPP_INFO(this->get_logger(),
                             "Vision: rod detected at (%.3f, %.3f, %.3f)",
                             msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
@@ -92,8 +92,8 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             RCLCPP_INFO(this->get_logger(), "Vision mode enabled: subscribing to /detected_rod_pose");
         }
 
-        current_state_ = TaskState::INIT;
-        publish_stage(task_stage_pub_, current_state_);
+        setCurrentState(TaskState::INIT);
+        publish_stage(task_stage_pub_, getCurrentState());
         grippers_ = std::make_shared<GripperController>(this);
         arms_ = std::make_shared<DualArmController>(this);
 
@@ -117,16 +117,21 @@ void DualArmCarryTask::executeTask()
         RCLCPP_INFO(get_logger(), "    开始执行双臂协作搬运任务");
         RCLCPP_INFO(get_logger(), "========================================\n");
         
-        TaskState last_published_state = current_state_;
+        TaskState last_published_state = getCurrentState();
         publish_stage(task_stage_pub_, last_published_state);
 
-        while (rclcpp::ok() && current_state_ != TaskState::DONE && current_state_ != TaskState::ERROR) {
-            if (current_state_ != last_published_state) {
-                publish_stage(task_stage_pub_, current_state_);
-                last_published_state = current_state_;
+        while (rclcpp::ok()) {
+            const TaskState state = getCurrentState();
+            if (state == TaskState::DONE || state == TaskState::ERROR) {
+                break;
             }
 
-            switch (current_state_) {
+            if (state != last_published_state) {
+                publish_stage(task_stage_pub_, state);
+                last_published_state = state;
+            }
+
+            switch (state) {
                 case TaskState::INIT:
                     arms_->executeInit();
                     break;
@@ -164,7 +169,8 @@ void DualArmCarryTask::executeTask()
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
         
-        if (current_state_ == TaskState::DONE) {
+        const TaskState final_state = getCurrentState();
+        if (final_state == TaskState::DONE) {
             publish_stage(task_stage_pub_, TaskState::DONE);
             RCLCPP_INFO(get_logger(), "\n========================================");
             RCLCPP_INFO(get_logger(), "    ✓ 任务完成！");
@@ -174,7 +180,7 @@ void DualArmCarryTask::executeTask()
             RCLCPP_INFO(get_logger(), "已发布任务完成状态(DONE)。");
 
             RCLCPP_INFO(get_logger(), "========================================\n");
-        } else if (current_state_ == TaskState::ERROR) {
+        } else if (final_state == TaskState::ERROR) {
             publish_stage(task_stage_pub_, TaskState::ERROR);
             RCLCPP_ERROR(get_logger(), "\n========================================");
             RCLCPP_ERROR(get_logger(), "    ✗ 任务失败！");
