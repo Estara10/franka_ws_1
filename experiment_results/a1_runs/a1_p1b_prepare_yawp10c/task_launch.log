@@ -1,0 +1,57 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-11-20-47-39-137688-Estara-327812
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [327902]
+[dual_arm_carry_task_node-1] [INFO] [1791722864.640189744] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644057178] [dual_arm_carry_task]: A1 truth mode enabled: subscribing to /a1_rod_pose_truth (expected_run_id=a1_p1b_prepare_yawp10c)
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644131436] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644137762] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644142684] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644147127] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644151313] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644155728] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644160166] [dual_arm_carry_task]:   杆位姿来源: a1_truth
+[dual_arm_carry_task_node-1] [INFO] [1791722864.644167677] [dual_arm_carry_task]:   准备模式(prepare_only): 启用（本轮 A1 不运动）
+[dual_arm_carry_task_node-1] [INFO] [1791722864.654380215] [dual_arm_carry_task]:   A1 真值已冻结: run_id=a1_p1b_prepare_yawp10c frame=world pos=(0.480000, 0.030000, 0.020654)
+[dual_arm_carry_task_node-1] [INFO] [1791722866.644378549] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791722866.655912005] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.01 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791722866.656000123] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791722866.700272531] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791722866.700315154] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791722866.720412858] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734469174] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734505823] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734522594] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734528442] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734534100] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734542443] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734551792] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734575490] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734583526] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734590596] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734598855] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734607184] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734615591] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734640956] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734648208] [dual_arm_carry_task]:   [A1] MoveIt 规划坐标系: base_link
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734658441] [dual_arm_carry_task]:   [A1] 冻结真值: run_id=a1_p1b_prepare_yawp10c frame=world pos=(0.480000, 0.030000, 0.020654) size=(0.040, 0.400, 0.040) mass=0.640000 kg
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734691101] [dual_arm_carry_task]:   [A1] 冻结真值 yaw=10.0000° (长轴为杆局部 Y 轴)
+[dual_arm_carry_task_node-1] [INFO] [1791722866.734702355] [dual_arm_carry_task]:   [A1] 坐标处理: world 与 base_link 数值等价（SRDF 固定 virtual_joint + URDF/MuJoCo 基座位置一致），按显式单位变换处理
+[dual_arm_carry_task_node-1] [INFO] [1791722866.763307288] [dual_arm_carry_task]:   [A1] 读回原始值: object_frame='base_link' primitives=1 pose=(0.480000, 0.030000, 0.020654) quat=(0.000000, -0.000000, 0.087156, 0.996195) dims=(0.0400, 0.4000, 0.0400)
+[dual_arm_carry_task_node-1] [INFO] [1791722866.763373207] [dual_arm_carry_task]:   [A1] 写入请求值: object_frame='base_link' pose=(0.480000, 0.030000, 0.020654) quat=(0.000000, -0.000000, 0.087156, 0.996195)
+[dual_arm_carry_task_node-1] [INFO] [1791722866.763391150] [dual_arm_carry_task]:   [A1] 场景读回核对: Δpos=0.0000 mm, Δangle=0.0000°, Δsize=0.000e+00 m (容差 1.0 mm / 0.5° / 1e-06 m)
+[dual_arm_carry_task_node-1] [INFO] [1791722866.778262549] [dual_arm_carry_task]: ✓ [A1] 准备完成(PREPARED): 真值已冻结且规划场景已同步确认，未执行任何搬运运动
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791722866.978405047] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791722866.978464254] [dual_arm_carry_task]:     ✓ 准备完成（PREPARED）—— 未执行任何搬运运动
+[dual_arm_carry_task_node-1] [INFO] [1791722866.978481084] [dual_arm_carry_task]: 已发布准备完成状态(PREPARED)，不是任务 DONE。
+[dual_arm_carry_task_node-1] [INFO] [1791722866.978490736] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791722866.978500556] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791722866.978510650] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[dual_arm_carry_task_node-1] [INFO] [1791722867.892617830] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 327902]

@@ -95,6 +95,11 @@ def launch_setup(context, *args, **kwargs):
                 'rod_target_x': LaunchConfiguration('rod_target_x'),
                 'rod_target_y': LaunchConfiguration('rod_target_y'),
                 'rod_target_yaw_deg': LaunchConfiguration('rod_target_yaw_deg'),
+                'rod_pose_source': LaunchConfiguration('rod_pose_source'),
+                'expected_run_id': LaunchConfiguration('expected_run_id'),
+                'prepare_only': LaunchConfiguration('prepare_only'),
+                'a1_truth_topic': LaunchConfiguration('a1_truth_topic'),
+                'a1_truth_timeout_sec': LaunchConfiguration('a1_truth_timeout_sec'),
                 'use_sim_time': True,
             }
         ]
@@ -265,6 +270,37 @@ def generate_launch_description():
         'rod_target_yaw_deg',
         default_value='90.0',
         description='Mode B 目标放置偏航角 (度)'
+    )
+
+    # --- A1 P1b: rod pose source (defaults preserve the original A0 entry) ---
+    rod_pose_source_arg = DeclareLaunchArgument(
+        'rod_pose_source',
+        default_value='static',
+        description='杆位姿来源: static(A0 固定) / vision(原视觉入口) / a1_truth(A1 真值, 仅准备)'
+    )
+
+    expected_run_id_arg = DeclareLaunchArgument(
+        'expected_run_id',
+        default_value='',
+        description='A1 真值要求的 run_id；rod_pose_source=a1_truth 时必填且必须匹配'
+    )
+
+    prepare_only_arg = DeclareLaunchArgument(
+        'prepare_only',
+        default_value='false',
+        description='真值冻结 + 场景同步后停在 PREPARED，不进入运动（本轮 A1 强制为 true）'
+    )
+
+    a1_truth_topic_arg = DeclareLaunchArgument(
+        'a1_truth_topic',
+        default_value='/a1_rod_pose_truth',
+        description='A1 真值话题（与 /detected_rod_pose 分离）'
+    )
+
+    a1_truth_timeout_sec_arg = DeclareLaunchArgument(
+        'a1_truth_timeout_sec',
+        default_value='20.0',
+        description='等待有效 A1 真值的超时（秒），超时即失败且不回退硬编码位姿'
     )
 
     enable_latency_monitor_arg = DeclareLaunchArgument(
@@ -484,6 +520,11 @@ def generate_launch_description():
         rod_target_x_arg,
         rod_target_y_arg,
         rod_target_yaw_deg_arg,
+        rod_pose_source_arg,
+        expected_run_id_arg,
+        prepare_only_arg,
+        a1_truth_topic_arg,
+        a1_truth_timeout_sec_arg,
         enable_latency_monitor_arg,
         latency_topic_arg,
         latency_task_status_topic_arg,

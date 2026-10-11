@@ -1,0 +1,12 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p1b_prepare_yawp10",
+  "mode": "prepare",
+  "task_state": "ERROR",
+  "truth_topic": "/a1_rod_pose_truth",
+  "expected_run_id": "a1_p1b_prepare_yawp10",
+  "ros_domain_id": "77",
+  "truth_published": true,
+  "manifest_present": true,
+  "task_log": "task_launch.log"
+}

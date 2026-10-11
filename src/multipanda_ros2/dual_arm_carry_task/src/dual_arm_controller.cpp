@@ -933,6 +933,16 @@ void DualArmController::executeInit()
                     yaw * 180.0 / M_PI);
             }
 
+            // A1 P1b: prepare-only path. Frozen truth -> planning scene sync.
+            // This returns before any of the static-path scene construction
+            // below, and before APPROACH, so no motion can be reached.
+            if (ctx_->usesA1Truth()) {
+                if (!prepareFromA1Truth()) {
+                    return;  // reason already logged; state set to ERROR
+                }
+                return;  // PREPARED, no motion
+            }
+
             // 跳过初始位置移动，直接使用当前位置
             RCLCPP_INFO(ctx_->get_logger(), "  使用当前机械臂位置作为起始点");
 
@@ -958,6 +968,231 @@ void DualArmController::executeInit()
             RCLCPP_ERROR(ctx_->get_logger(), "INIT 阶段异常: %s", e.what());
             ctx_->current_state_ = TaskState::ERROR;
         }
+    }
+
+/**
+ * @brief A1 P1b: freeze the truth reference and synchronise the planning scene.
+ *
+ * Reached from INIT only when rod_pose_source == a1_truth. It never moves the
+ * robot: on success the FSM goes to PREPARED and the caller returns immediately,
+ * so APPROACH/GRASP are not reachable from here.
+ */
+bool DualArmController::prepareFromA1Truth()
+    {
+        using namespace std::chrono_literals;
+
+        // 1. This round A1 is preparation only. Refuse at the entry of the call
+        //    chain rather than truncating after motion has started.
+        if (!ctx_->prepare_only_) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "  ✗ [A1] rod_pose_source=a1_truth 需要 prepare_only=true；本轮不开启 A1 运动");
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+
+        // 2. Coordinate frames. The planning frame is read from MoveIt; the
+        //    mapping onto the truth frame is decided by documented source
+        //    evidence, not by assuming a TF chain exists.
+        const std::string planning_frame = ctx_->dual_arm_->getPlanningFrame();
+        RCLCPP_INFO(ctx_->get_logger(), "  [A1] MoveIt 规划坐标系: %s", planning_frame.c_str());
+
+        // 3. Bounded wait (steady clock) for the truth reference to freeze.
+        const double timeout_sec = ctx_->a1_truth_timeout_sec_;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                  std::chrono::duration<double>(timeout_sec));
+        while (rclcpp::ok() && !ctx_->a1_truth_latch_.frozen()) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "  ✗ [A1] E_TRUTH_TIMEOUT: %.1f 秒内未收到有效真值 (topic=%s, "
+                             "expected_run_id=%s)",
+                             timeout_sec, ctx_->a1_truth_topic_.c_str(),
+                             ctx_->expected_run_id_.empty() ? "<UNSET>"
+                                                            : ctx_->expected_run_id_.c_str());
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "    不回退到硬编码 A0 位姿，也不复用视觉检测缓存；停止准备");
+                if (!ctx_->a1_truth_latch_.last_rejection_code().empty()) {
+                    RCLCPP_ERROR(ctx_->get_logger(), "    最近一次被拒原因: %s",
+                                 ctx_->a1_truth_latch_.last_rejection_code().c_str());
+                }
+                ctx_->setCurrentState(TaskState::ERROR);
+                return false;
+            }
+            std::this_thread::sleep_for(50ms);
+        }
+        if (!rclcpp::ok()) {
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+
+        a1t::TruthPayload truth;
+        if (!ctx_->getFrozenRodTruth(truth)) {
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [A1] 真值 latch 状态异常");
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 冻结真值: run_id=%s frame=%s pos=(%.6f, %.6f, %.6f) size=(%.3f, %.3f, %.3f) mass=%.6f kg",
+                    truth.run_id.c_str(), truth.frame_id.c_str(),
+                    truth.position.x, truth.position.y, truth.position.z,
+                    truth.size.x, truth.size.y, truth.size.z, truth.mass_kg);
+        const double truth_yaw = extractYawFromQuaternion(
+            tf2::toMsg(tf2::Quaternion(truth.orientation.x, truth.orientation.y,
+                                       truth.orientation.z, truth.orientation.w)));
+        RCLCPP_INFO(ctx_->get_logger(), "  [A1] 冻结真值 yaw=%.4f° (长轴为杆局部 Y 轴)",
+                    truth_yaw * 180.0 / M_PI);
+
+        const a1t::FrameMapping mapping =
+            a1t::resolveFrameMapping(truth.frame_id, planning_frame);
+        if (mapping == a1t::FrameMapping::UNSUPPORTED) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "  ✗ [A1] E_TRUTH_FRAME_UNSUPPORTED: 真值 frame '%s' 与规划坐标系 '%s' "
+                         "之间没有源码依据的变换",
+                         truth.frame_id.c_str(), planning_frame.c_str());
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 坐标处理: %s",
+                    mapping == a1t::FrameMapping::SAME_FRAME
+                        ? "同名坐标系，位姿直通"
+                        : "world 与 base_link 数值等价（SRDF 固定 virtual_joint + URDF/MuJoCo "
+                          "基座位置一致），按显式单位变换处理");
+
+        // 4. Synchronise the world object from the frozen truth.
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = truth.position.x;
+        pose.position.y = truth.position.y;
+        pose.position.z = truth.position.z;
+        pose.orientation.x = truth.orientation.x;
+        pose.orientation.y = truth.orientation.y;
+        pose.orientation.z = truth.orientation.z;
+        pose.orientation.w = truth.orientation.w;
+        geometry_msgs::msg::Vector3 size;
+        size.x = truth.size.x;
+        size.y = truth.size.y;
+        size.z = truth.size.z;
+
+        std::string reason;
+        if (!syncAluminumRodFromTruth(pose, size, planning_frame, reason)) {
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [A1] 规划场景同步失败: %s", reason.c_str());
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "✓ [A1] 准备完成(PREPARED): 真值已冻结且规划场景已同步确认，未执行任何搬运运动\n");
+        ctx_->setCurrentState(TaskState::PREPARED);
+        return true;
+    }
+
+/**
+ * @brief Writes the rod world object from the frozen truth and verifies it.
+ *
+ * Uses the synchronous, bool-returning apply so a failure cannot be reported as
+ * success, then reads the object back and compares position, orientation
+ * (q/-q equivalent) and size. The ACM/SRDF are deliberately not touched.
+ */
+bool DualArmController::syncAluminumRodFromTruth(const geometry_msgs::msg::Pose& pose,
+                                                const geometry_msgs::msg::Vector3& size,
+                                                const std::string& planning_frame,
+                                                std::string& reason)
+    {
+        moveit_msgs::msg::CollisionObject collision_object;
+        collision_object.header.frame_id = planning_frame;
+        collision_object.id = "aluminum_rod";
+
+        shape_msgs::msg::SolidPrimitive primitive;
+        primitive.type = primitive.BOX;
+        primitive.dimensions = {size.x, size.y, size.z};
+
+        collision_object.primitives.push_back(primitive);
+        collision_object.primitive_poses.push_back(pose);
+        collision_object.operation = moveit_msgs::msg::CollisionObject::ADD;
+
+        moveit::planning_interface::PlanningSceneInterface psi;
+        if (!psi.applyCollisionObject(collision_object)) {
+            reason = "E_SCENE_APPLY_FAILED: /apply_planning_scene 返回失败";
+            return false;
+        }
+
+        // Read back and verify. A topic-only publish would not prove anything.
+        const auto objects = psi.getObjects(std::vector<std::string>{"aluminum_rod"});
+        const auto it = objects.find("aluminum_rod");
+        if (it == objects.end()) {
+            reason = "E_SCENE_READBACK_MISSING: 读回时未找到 aluminum_rod";
+            return false;
+        }
+        if (it->second.primitive_poses.empty() || it->second.primitives.empty()) {
+            reason = "E_SCENE_READBACK_MISSING: aluminum_rod 缺少 primitive 或 pose";
+            return false;
+        }
+        if (it->second.primitives[0].dimensions.size() < 3) {
+            reason = "E_SCENE_READBACK_MISSING: aluminum_rod 尺寸字段不完整";
+            return false;
+        }
+
+        // Compose the object frame pose with the primitive pose. MoveIt may
+        // express the placement in either: it returns the primitive pose
+        // relative to the object pose, so reading only `primitive_poses[0]`
+        // yields identity when the placement was stored on the object. The
+        // composition below is correct for both conventions.
+        tf2::Transform object_tf;
+        tf2::Transform primitive_tf;
+        tf2::fromMsg(it->second.pose, object_tf);
+        tf2::fromMsg(it->second.primitive_poses[0], primitive_tf);
+        geometry_msgs::msg::Pose actual_pose;
+        tf2::toMsg(object_tf * primitive_tf, actual_pose);
+        const auto& actual_dims = it->second.primitives[0].dimensions;
+
+        // Raw read-back, logged so a mismatch can be diagnosed from the record
+        // rather than guessed at.
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 读回原始值: object_frame='%s' primitives=%zu pose=(%.6f, %.6f, %.6f) "
+                    "quat=(%.6f, %.6f, %.6f, %.6f) dims=(%.4f, %.4f, %.4f)",
+                    it->second.header.frame_id.c_str(), it->second.primitives.size(),
+                    actual_pose.position.x, actual_pose.position.y, actual_pose.position.z,
+                    actual_pose.orientation.x, actual_pose.orientation.y,
+                    actual_pose.orientation.z, actual_pose.orientation.w,
+                    actual_dims[0], actual_dims[1], actual_dims[2]);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 写入请求值: object_frame='%s' pose=(%.6f, %.6f, %.6f) "
+                    "quat=(%.6f, %.6f, %.6f, %.6f)",
+                    collision_object.header.frame_id.c_str(), pose.position.x, pose.position.y,
+                    pose.position.z, pose.orientation.x, pose.orientation.y, pose.orientation.z,
+                    pose.orientation.w);
+
+        a1t::TruthPayload expected;
+        expected.position = {pose.position.x, pose.position.y, pose.position.z};
+        expected.orientation = {pose.orientation.x, pose.orientation.y, pose.orientation.z,
+                                pose.orientation.w};
+        expected.size = {size.x, size.y, size.z};
+
+        const a1t::Vec3 actual_position = {actual_pose.position.x, actual_pose.position.y,
+                                           actual_pose.position.z};
+        const a1t::Quat actual_orientation = {actual_pose.orientation.x, actual_pose.orientation.y,
+                                              actual_pose.orientation.z, actual_pose.orientation.w};
+        const a1t::Vec3 actual_size = {actual_dims[0], actual_dims[1], actual_dims[2]};
+
+        const double pos_tol_m = 0.001;                        // 1 mm
+        const double angle_tol_rad = 0.5 * M_PI / 180.0;       // 0.5 deg
+        const double size_tol_m = 1e-6;
+        const a1t::SceneCheck check = a1t::verifySceneReadback(
+            expected, actual_position, actual_orientation, actual_size, pos_tol_m, angle_tol_rad,
+            size_tol_m);
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 场景读回核对: Δpos=%.4f mm, Δangle=%.4f°, Δsize=%.3e m (容差 %.1f mm / %.1f° / %.0e m)",
+                    check.pos_err_m * 1000.0, check.angle_err_rad * 180.0 / M_PI,
+                    check.size_err_m, pos_tol_m * 1000.0, angle_tol_rad * 180.0 / M_PI, size_tol_m);
+
+        if (!check.ok) {
+            reason = check.reason_code + ": " + check.detail;
+            return false;
+        }
+        reason = "ok";
+        return true;
     }
 
 void DualArmController::executeApproach()

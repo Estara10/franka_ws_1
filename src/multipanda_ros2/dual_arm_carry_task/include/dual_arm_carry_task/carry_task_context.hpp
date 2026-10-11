@@ -25,6 +25,8 @@
 #include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 #include <moveit/robot_trajectory/robot_trajectory.h>
 #include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
+#include <dual_arm_a1_msgs/msg/rod_pose_truth.hpp>
+#include "dual_arm_carry_task/a1_truth.hpp"
 #include <memory>
 #include <thread>
 #include <chrono>
@@ -44,9 +46,18 @@ enum class TaskState {
     DESCEND,     // 下降准备放置
     PLACE,       // 放置物体（GRASP逆操作）
     RETREAT,     // 撤退至初始位置
+    PREPARED,    // A1 P1b: 真值已冻结且规划场景已同步确认；仅准备完成
     DONE,
     ERROR
 };
+
+// Where the task takes the rod pose from.
+//   static    : the original fixed A0 pose (default, unchanged behaviour)
+//   vision    : the original /detected_rod_pose input (equivalent to use_vision=true)
+//   a1_truth  : the A1 P1b truth message; preparation only, no motion this round
+inline const char* kRodPoseSourceStatic = "static";
+inline const char* kRodPoseSourceVision = "vision";
+inline const char* kRodPoseSourceA1Truth = "a1_truth";
 
 class GripperController;
 class DualArmController;
@@ -83,6 +94,35 @@ public:
     double rod_target_y_ {-0.20};
     double rod_target_yaw_rad_ {M_PI / 2.0};
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr rod_pose_sub_;
+
+    // A1 P1b: rod pose source selection and the frozen truth reference.
+    // `detected_rod_pose_` above is deliberately NOT reused for truth: its
+    // received flag latches forever and it carries no run identity or validity.
+    std::string rod_pose_source_ {kRodPoseSourceStatic};
+    std::string expected_run_id_;
+    bool prepare_only_ {false};
+    std::string a1_truth_topic_ {"/a1_rod_pose_truth"};
+    double a1_truth_timeout_sec_ {20.0};
+    double rod_truth_size_min_ {0.005};
+    double rod_truth_size_max_ {1.0};
+    a1t::TruthLatch a1_truth_latch_;
+    rclcpp::Subscription<dual_arm_a1_msgs::msg::RodPoseTruth>::SharedPtr a1_truth_sub_;
+
+    // True when this run takes its rod pose from the A1 truth message.
+    bool usesA1Truth() const
+    {
+        return rod_pose_source_ == kRodPoseSourceA1Truth;
+    }
+
+    // Frozen truth reference, valid only when the latch is frozen.
+    bool getFrozenRodTruth(a1t::TruthPayload& out) const
+    {
+        if (!a1_truth_latch_.frozen()) {
+            return false;
+        }
+        out = a1_truth_latch_.value();
+        return true;
+    }
     
     std::vector<double> initial_left_joints_;
     std::vector<double> initial_right_joints_;

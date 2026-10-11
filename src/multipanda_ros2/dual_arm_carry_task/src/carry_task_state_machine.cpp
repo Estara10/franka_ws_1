@@ -17,6 +17,7 @@ const char* to_stage_name(TaskState state)
         case TaskState::DESCEND: return "DESCEND";
         case TaskState::PLACE: return "PLACE";
         case TaskState::RETREAT: return "RETREAT";
+        case TaskState::PREPARED: return "PREPARED";
         case TaskState::DONE: return "DONE";
         case TaskState::ERROR: return "ERROR";
         default: return "UNKNOWN";
@@ -56,6 +57,15 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<double>("rod_target_y", -0.20);
         this->declare_parameter<double>("rod_target_yaw_deg", 90.0);
 
+        // A1 P1b: rod pose source selection
+        this->declare_parameter<std::string>("rod_pose_source", kRodPoseSourceStatic);
+        this->declare_parameter<std::string>("expected_run_id", "");
+        this->declare_parameter<bool>("prepare_only", false);
+        this->declare_parameter<std::string>("a1_truth_topic", "/a1_rod_pose_truth");
+        this->declare_parameter<double>("a1_truth_timeout_sec", 20.0);
+        this->declare_parameter<double>("rod_truth_size_min", 0.005);
+        this->declare_parameter<double>("rod_truth_size_max", 1.0);
+
         left_arm_group_ = this->get_parameter("left_arm_group").as_string();
         right_arm_group_ = this->get_parameter("right_arm_group").as_string();
         control_mode_ = this->get_parameter("control_mode").as_string();
@@ -73,11 +83,44 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         rod_target_y_ = this->get_parameter("rod_target_y").as_double();
         rod_target_yaw_rad_ = this->get_parameter("rod_target_yaw_deg").as_double() * M_PI / 180.0;
 
+        rod_pose_source_ = this->get_parameter("rod_pose_source").as_string();
+        expected_run_id_ = this->get_parameter("expected_run_id").as_string();
+        prepare_only_ = this->get_parameter("prepare_only").as_bool();
+        a1_truth_topic_ = this->get_parameter("a1_truth_topic").as_string();
+        a1_truth_timeout_sec_ = this->get_parameter("a1_truth_timeout_sec").as_double();
+        rod_truth_size_min_ = this->get_parameter("rod_truth_size_min").as_double();
+        rod_truth_size_max_ = this->get_parameter("rod_truth_size_max").as_double();
+
+        // Source resolution. The vision entry keeps working unchanged: leaving
+        // rod_pose_source at its default while use_vision is true means vision.
+        if (use_vision_ && rod_pose_source_ == kRodPoseSourceStatic) {
+            rod_pose_source_ = kRodPoseSourceVision;
+            RCLCPP_INFO(this->get_logger(),
+                        "  rod_pose_source 未显式设置且 use_vision=true -> 按 vision 处理（兼容原视觉入口）");
+        }
+        if (use_vision_ && rod_pose_source_ == kRodPoseSourceA1Truth) {
+            RCLCPP_ERROR(this->get_logger(),
+                         "  ✗ 参数冲突: use_vision=true 与 rod_pose_source=a1_truth 不能同时使用");
+            RCLCPP_ERROR(this->get_logger(),
+                         "    真值输入与视觉输入必须分开，不会静默切换来源");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (rod_pose_source_ != kRodPoseSourceStatic && rod_pose_source_ != kRodPoseSourceVision &&
+            rod_pose_source_ != kRodPoseSourceA1Truth) {
+            RCLCPP_ERROR(this->get_logger(), "  ✗ 未知 rod_pose_source: %s",
+                         rod_pose_source_.c_str());
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+
         // 创建MuJoCo weld约束控制发布器
         weld_pub_ = this->create_publisher<std_msgs::msg::Bool>("/grasp_weld_active", 10);
 
         // Mode B: subscribe to detected rod pose from vision node
-        if (use_vision_) {
+        if (rod_pose_source_ == kRodPoseSourceVision) {
             rod_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
                 "/detected_rod_pose", 10,
                 [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
@@ -92,6 +135,48 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             RCLCPP_INFO(this->get_logger(), "Vision mode enabled: subscribing to /detected_rod_pose");
         }
 
+        // A1 P1b: subscribe to the independent truth channel. transient_local so
+        // a latched pose published before this node started is still delivered;
+        // the callback only offers the payload to the latch, which freezes on
+        // the first valid message and never updates afterwards.
+        if (rod_pose_source_ == kRodPoseSourceA1Truth) {
+            rclcpp::QoS truth_qos(1);
+            truth_qos.transient_local().reliable();
+            a1_truth_sub_ = this->create_subscription<dual_arm_a1_msgs::msg::RodPoseTruth>(
+                a1_truth_topic_, truth_qos,
+                [this](const dual_arm_a1_msgs::msg::RodPoseTruth::SharedPtr msg) {
+                    a1t::TruthPayload payload;
+                    payload.run_id = msg->run_id;
+                    payload.frame_id = msg->header.frame_id;
+                    payload.position = {msg->pose.position.x, msg->pose.position.y,
+                                        msg->pose.position.z};
+                    payload.orientation = {msg->pose.orientation.x, msg->pose.orientation.y,
+                                           msg->pose.orientation.z, msg->pose.orientation.w};
+                    payload.size = {msg->rod_size.x, msg->rod_size.y, msg->rod_size.z};
+                    payload.mass_kg = msg->mass_kg;
+                    payload.has_header_stamp = true;
+                    payload.header_stamp_is_zero =
+                        (msg->header.stamp.sec == 0 && msg->header.stamp.nanosec == 0);
+
+                    const a1t::Verdict v = a1_truth_latch_.offer(payload, expected_run_id_,
+                                                                 rod_truth_size_min_,
+                                                                 rod_truth_size_max_);
+                    if (v.ok) {
+                        RCLCPP_INFO(this->get_logger(),
+                                    "  A1 真值已冻结: run_id=%s frame=%s pos=(%.6f, %.6f, %.6f)",
+                                    payload.run_id.c_str(), payload.frame_id.c_str(),
+                                    payload.position.x, payload.position.y, payload.position.z);
+                    } else {
+                        RCLCPP_WARN(this->get_logger(), "  A1 真值被拒: %s (%s)",
+                                    v.reason_code.c_str(), v.detail.c_str());
+                    }
+                });
+            RCLCPP_INFO(this->get_logger(),
+                        "A1 truth mode enabled: subscribing to %s (expected_run_id=%s)",
+                        a1_truth_topic_.c_str(),
+                        expected_run_id_.empty() ? "<UNSET>" : expected_run_id_.c_str());
+        }
+
         setCurrentState(TaskState::INIT);
         publish_stage(task_stage_pub_, getCurrentState());
         grippers_ = std::make_shared<GripperController>(this);
@@ -103,7 +188,12 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         RCLCPP_INFO(this->get_logger(), "  双臂组: %s", dual_arm_group_.c_str());
         RCLCPP_INFO(this->get_logger(), "  控制模式: %s", control_mode_.c_str());
         RCLCPP_INFO(this->get_logger(), "  旋转阶段: %s", enable_rotate_ ? "启用" : "禁用（直接放置）");
-        if (use_vision_) {
+        RCLCPP_INFO(this->get_logger(), "  杆位姿来源: %s", rod_pose_source_.c_str());
+        if (rod_pose_source_ == kRodPoseSourceA1Truth) {
+            RCLCPP_INFO(this->get_logger(), "  准备模式(prepare_only): %s",
+                        prepare_only_ ? "启用（本轮 A1 不运动）" : "禁用");
+        }
+        if (rod_pose_source_ == kRodPoseSourceVision) {
             RCLCPP_INFO(this->get_logger(), "  视觉模式: 启用 (目标: %.3f, %.3f, yaw=%.1f°)",
                         rod_target_x_, rod_target_y_, rod_target_yaw_rad_ * 180.0 / M_PI);
         }
@@ -122,7 +212,8 @@ void DualArmCarryTask::executeTask()
 
         while (rclcpp::ok()) {
             const TaskState state = getCurrentState();
-            if (state == TaskState::DONE || state == TaskState::ERROR) {
+            if (state == TaskState::DONE || state == TaskState::ERROR ||
+                state == TaskState::PREPARED) {
                 break;
             }
 
@@ -170,7 +261,19 @@ void DualArmCarryTask::executeTask()
         }
         
         const TaskState final_state = getCurrentState();
-        if (final_state == TaskState::DONE) {
+        if (final_state == TaskState::PREPARED) {
+            // A1 P1b: preparation finished. This is deliberately NOT reported as
+            // DONE -- nothing has been carried. It only means the truth input was
+            // frozen and the planning scene was synchronised and verified.
+            publish_stage(task_stage_pub_, TaskState::PREPARED);
+            RCLCPP_INFO(get_logger(), "\n========================================");
+            RCLCPP_INFO(get_logger(), "    ✓ 准备完成（PREPARED）—— 未执行任何搬运运动");
+            std_msgs::msg::String msg;
+            msg.data = "PREPARED";
+            task_status_pub_->publish(msg);
+            RCLCPP_INFO(get_logger(), "已发布准备完成状态(PREPARED)，不是任务 DONE。");
+            RCLCPP_INFO(get_logger(), "========================================\n");
+        } else if (final_state == TaskState::DONE) {
             publish_stage(task_stage_pub_, TaskState::DONE);
             RCLCPP_INFO(get_logger(), "\n========================================");
             RCLCPP_INFO(get_logger(), "    ✓ 任务完成！");

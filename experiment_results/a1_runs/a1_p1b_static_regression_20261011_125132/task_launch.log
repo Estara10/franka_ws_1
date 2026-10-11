@@ -1,0 +1,50 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-11-20-51-36-868974-Estara-333088
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [333228]
+[dual_arm_carry_task_node-1] [INFO] [1791723102.574520882] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791723102.583100974] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791723102.583167303] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791723102.583183452] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791723102.583195963] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791723102.583208106] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791723102.583220354] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1791723102.583232244] [dual_arm_carry_task]:   杆位姿来源: static
+[dual_arm_carry_task_node-1] [INFO] [1791723104.583580000] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791723104.586598960] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.006 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791723104.586625203] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791723104.602880456] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791723104.602921443] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791723104.606428093] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611379533] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611905459] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611929027] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611936908] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611943757] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611949925] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611958652] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611988775] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791723104.611996047] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791723104.612002596] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791723104.612009673] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791723104.612016097] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791723104.612023357] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791723104.612042381] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791723104.612052876] [dual_arm_carry_task]:   使用当前机械臂位置作为起始点
+[dual_arm_carry_task_node-1] [INFO] [1791723104.612067287] [dual_arm_carry_task]:   ✓ RETREAT目标已设为Franka标准ready姿态
+[dual_arm_carry_task_node-1] [INFO] [1791723104.612076864] [dual_arm_carry_task]:   ✓ 使用 SRDF 默认碰撞矩阵（无需手动初始化）
+[dual_arm_carry_task_node-1] [INFO] [1791723104.622468853] [dual_arm_carry_task]:   ✓ 铝棒碰撞物体已添加到 Planning Scene
+[dual_arm_carry_task_node-1] [INFO] [1791723104.644123477] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[dual_arm_carry_task_node-1] [ERROR] [1791723105.133332624] [dual_arm_carry_task]: INIT 阶段异常: could not create client: rcl node's context is invalid, at ./src/rcl/node.c:428
+[dual_arm_carry_task_node-1] [ERROR] [1791723105.333653497] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [ERROR] [1791723105.333684745] [dual_arm_carry_task]:     ✗ 任务失败！
+[dual_arm_carry_task_node-1] [INFO] [1791723105.333690814] [dual_arm_carry_task]: 已发布任务失败状态(ERROR)。
+[dual_arm_carry_task_node-1] [ERROR] [1791723105.333694385] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791723105.333698774] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791723105.333702125] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 333228]

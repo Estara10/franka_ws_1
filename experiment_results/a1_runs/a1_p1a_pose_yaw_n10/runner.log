@@ -1,0 +1,4 @@
+preconditions ok: model_valid=1 load_count=1 model_path=/home/lidio/franka_ws_1/install/franka_description/share/franka_description/mujoco/franka/dual_scene.xml
+baseline rod pose: (0.5, 4.18166e-17, 0.0206537)
+scene_state=SCENE_READY_UNVALIDATED outcome_code=SCENE_READY_UNVALIDATED
+manifest: /home/lidio/franka_ws_1/experiment_results/a1_runs/a1_p1a_pose_yaw_n10/manifest.json

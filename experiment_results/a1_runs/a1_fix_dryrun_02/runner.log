@@ -1,0 +1,8 @@
+dry-run candidates (algorithm=a1-uniform-splitmix64-v1, range=a1-dbg-v1, seed=20261011):
+  [0] x=0.539376 y=0.0235147 z=0.022 yaw_rad=0.0530975
+  [1] x=0.497074 y=-0.0105115 z=0.022 yaw_rad=-0.0580643
+  [2] x=0.487885 y=-0.0282818 z=0.022 yaw_rad=0.12423
+  [3] x=0.53453 y=-0.0300881 z=0.022 yaw_rad=0.192454
+  [4] x=0.49166 y=-0.0269515 z=0.022 yaw_rad=-0.0261704
+selected candidate 0: x=0.539376 y=0.0235147 z=0.022 yaw_rad=0.0530975 quat=(0, 0, 0.0265456, 0.999648)
+manifest: /home/lidio/franka_ws_1/experiment_results/a1_runs/a1_fix_dryrun_02/manifest.json

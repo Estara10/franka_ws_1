@@ -1,0 +1,101 @@
+# A1 P1a scene sampling / application configuration.
+#
+# Loaded with:
+#   ros2 run dual_arm_carry_task a1_scene_runner_node \
+#     --candidate-index N --run-id ID \
+#     --ros-args --params-file <this file>
+#
+# The top-level key must match the node name (`a1_scene_sampling`).
+#
+# Scope: P1a applies a sampled rod pose to the simulation and reads it back
+# after settling. It does NOT validate samples, feed the task, or touch the
+# planning scene. See docs/deliverables/A1_P0_接口核查与实现方案.md §4 / §10.
+#
+# Everything is read at runtime; nothing here changes physics.
+
+a1_scene_sampling:
+  ros__parameters:
+    # The settling criterion requires simulated time.
+    use_sim_time: true
+
+    # --- Versioning -------------------------------------------------------
+    algorithm_version: "a1-uniform-splitmix64-v1"
+    sampling_range_version: "a1-dbg-v1"
+    # The range below has NOT been checked for reachability. Reachability
+    # checking belongs to P2. Do not treat it as a validated workspace.
+    range_is_reachability_verified: false
+    seed: 20261011
+
+    # --- Sampling ranges --------------------------------------------------
+    # Units: metres and degrees. Frame: `world`. The rod's long axis is its
+    # local Y, so a non-zero yaw rotates the whole footprint.
+    x_min: 0.45
+    x_max: 0.55
+    y_min: -0.05
+    y_max: 0.05
+    yaw_deg_min: -15.0
+    yaw_deg_max: 15.0
+    # Not sampled: the rod is assumed to lie flat on the support surface.
+    roll_deg: 0.0
+    pitch_deg: 0.0
+
+    # --- Rod geometry -----------------------------------------------------
+    # Source: franka_description/mujoco/franka/objects.xml:12
+    #   <geom name="obj_rod_01" type="box" size="0.02 0.2 0.02" density="1000" ...>
+    # size is given as half extents in X, Y, Z.
+    rod_half_length: 0.20
+    rod_half_width: 0.02
+    rod_half_height: 0.02
+
+    # --- Support surface --------------------------------------------------
+    # Source: franka_description/mujoco/franka/dual_scene.xml:36
+    #   <geom name="floor" type="plane" material="groundplane"/>  (no `pos`)
+    support_surface_z: 0.0
+
+    # --- Applied height ---------------------------------------------------
+    # rod_center_z = support_surface_z + rod_half_height + apply_clearance_m
+    # ( = 0.0 + 0.02 + 0.002 = 0.022 )
+    apply_clearance_m: 0.002
+
+    # --- Candidate limits -------------------------------------------------
+    max_total_candidates: 200
+    # A write that times out or fails stops the run; there is no retry and no
+    # switch to another candidate. Kept as configuration so the policy is
+    # explicit and visible in the manifest.
+    max_write_attempts_per_run: 1
+
+    # --- Settling criterion ----------------------------------------------
+    poll_rate_hz: 50.0
+    # Minimum SIMULATED time spanned by the window (poll count alone proves
+    # nothing: repeated reads while paused also look "steady").
+    min_sim_window_sec: 0.50
+    # Drift limits apply to the maximum difference over ALL pairs in the
+    # window, not just adjacent pairs, so slow monotonic drift is rejected.
+    max_window_pos_tol: 0.0005
+    max_window_angle_tol_deg: 0.20
+    max_twist_linear_tol: 0.01
+    max_twist_angular_tol: 0.05
+    # Static geometry checks: the rod must sit at its resting height and lie
+    # flat. These do NOT prove contact with the support surface.
+    resting_z_tol: 0.003
+    resting_tilt_tol_deg: 2.0
+    # Simulated time must advance at least this fraction of wall-clock time.
+    min_clock_advance_ratio: 0.5
+    # Wall-clock (steady) timeout for the whole settling window.
+    stability_timeout_sec: 5.0
+
+    # --- Services ---------------------------------------------------------
+    set_body_state_service: /set_body_state
+    get_body_state_service: /get_body_state
+    get_sim_info_service: /get_sim_info
+    body_name: obj_rod_01
+    service_wait_timeout_sec: 10.0
+    service_call_timeout_sec: 2.0
+
+    # --- Polling internals ------------------------------------------------
+    # Query sim info every N polls to detect a model reload and the pause flag.
+    sim_info_check_every: 10
+    max_window_samples: 200
+
+    # --- Output -----------------------------------------------------------
+    run_manifest_dir: experiment_results/a1_runs

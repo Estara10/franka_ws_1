@@ -1,0 +1,4 @@
+scene_state=SCENE_APPLY_FAILED outcome_code=E_SERVICES_UNAVAILABLE
+manifest: /home/lidio/franka_ws_1/experiment_results/a1_runs/a1_p1a_sampled_c00d/manifest.json
+A1_RESULT {"scene_state": "SCENE_APPLY_FAILED", "outcome_code": "E_SERVICES_UNAVAILABLE", "evidence_written": true, "manifest": "/home/lidio/franka_ws_1/experiment_results/a1_runs/a1_p1a_sampled_c00d/manifest.json"}
+[ros2run]: Process exited with failure 2

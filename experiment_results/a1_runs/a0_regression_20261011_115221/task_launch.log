@@ -1,0 +1,247 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-11-19-52-25-751967-Estara-292230
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [292401]
+[INFO] [communication_latency_monitor_node-2]: process started with pid [292403]
+[INFO] [task_metrics_monitor_node-3]: process started with pid [292405]
+[communication_latency_monitor_node-2] [INFO] [1791719551.179111967] [communication_latency_monitor]: Latency monitor started.
+[communication_latency_monitor_node-2] [INFO] [1791719551.179336678] [communication_latency_monitor]:   latency_topic: /joint_states
+[communication_latency_monitor_node-2] [INFO] [1791719551.179351099] [communication_latency_monitor]:   task_status_topic: /task_status
+[communication_latency_monitor_node-2] [INFO] [1791719551.179358750] [communication_latency_monitor]:   target_latency_ms: 100.00
+[communication_latency_monitor_node-2] [INFO] [1791719551.179379546] [communication_latency_monitor]:   samples_csv: /home/lidio/franka_ws_1/launch_logs/comm_latency_20261011_195231_samples.csv
+[task_metrics_monitor_node-3] [INFO] [1791719551.181457413] [task_metrics_monitor]: Task metrics monitor started.
+[task_metrics_monitor_node-3] [INFO] [1791719551.181591395] [task_metrics_monitor]:   joint_state_topic: /joint_states
+[task_metrics_monitor_node-3] [INFO] [1791719551.181607536] [task_metrics_monitor]:   task_stage_topic: /task_stage
+[task_metrics_monitor_node-3] [INFO] [1791719551.181616039] [task_metrics_monitor]:   task_status_topic: /task_status
+[task_metrics_monitor_node-3] [INFO] [1791719551.181622285] [task_metrics_monitor]:   frames: base=base_link left=mj_left_hand right=mj_right_hand
+[task_metrics_monitor_node-3] [INFO] [1791719551.181631271] [task_metrics_monitor]:   thresholds: sync<=5.00mm, ee<=2.00mm
+[task_metrics_monitor_node-3] [INFO] [1791719551.181641806] [task_metrics_monitor]:   descend target: place_z=0.130, shift_x=-0.100
+[task_metrics_monitor_node-3] [INFO] [1791719551.181650993] [task_metrics_monitor]:   sync_samples_csv: /home/lidio/franka_ws_1/launch_logs/task_metrics_20261011_195231_sync_samples.csv
+[dual_arm_carry_task_node-1] [INFO] [1791719551.221251056] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791719551.224815946] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791719551.224864508] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791719551.224871328] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791719551.224876524] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791719551.224881352] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791719551.224886297] [dual_arm_carry_task]:   旋转阶段: 启用
+[task_metrics_monitor_node-3] [INFO] [1791719551.224961839] [task_metrics_monitor]: [metrics] stage transition: (none) -> INIT
+[dual_arm_carry_task_node-1] [INFO] [1791719553.225148218] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791719553.228876736] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.004 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791719553.228909533] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791719553.247093636] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791719553.247118417] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791719553.252941244] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262007177] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262044339] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262070180] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262084389] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262096877] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262108981] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262122245] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262145140] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262157690] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262169322] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262181560] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262193746] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262204978] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262253821] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262269849] [dual_arm_carry_task]:   使用当前机械臂位置作为起始点
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262285476] [dual_arm_carry_task]:   ✓ RETREAT目标已设为Franka标准ready姿态
+[dual_arm_carry_task_node-1] [INFO] [1791719553.262296512] [dual_arm_carry_task]:   ✓ 使用 SRDF 默认碰撞矩阵（无需手动初始化）
+[dual_arm_carry_task_node-1] [INFO] [1791719553.277491103] [dual_arm_carry_task]:   ✓ 铝棒碰撞物体已添加到 Planning Scene
+[dual_arm_carry_task_node-1] [INFO] [1791719553.785909976] [dual_arm_carry_task]:   ✓ 物体 aluminum_rod 已添加到 ACM（默认禁止所有碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1791719553.806040422] [dual_arm_carry_task]: ✓ 初始化完成，进入接近阶段
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719554.006251594] [dual_arm_carry_task]: [状态: APPROACH] 接近物体...
+[dual_arm_carry_task_node-1] [INFO] [1791719554.006325454] [dual_arm_carry_task]:   ★ [同步动作] 提前满幅打开夹爪...
+[task_metrics_monitor_node-3] [INFO] [1791719554.006492263] [task_metrics_monitor]: [metrics] stage transition: INIT -> APPROACH
+[dual_arm_carry_task_node-1] [INFO] [1791719554.022098313] [dual_arm_carry_task]:   发送双臂夹爪同步指令 -> 0.040
+[dual_arm_carry_task_node-1] [INFO] [1791719554.821051410] [dual_arm_carry_task]:   ✓ 双臂夹爪同步控制完成
+[dual_arm_carry_task_node-1] [INFO] [1791719554.821200131] [dual_arm_carry_task]:   左臂预定位目标: [0.50, 0.15, 0.28] 姿态:(R=180°,P=0°,Y=45°)
+[dual_arm_carry_task_node-1] [INFO] [1791719554.821249183] [dual_arm_carry_task]:   右臂预定位目标: [0.50, -0.15, 0.28] 姿态:(R=180°,P=0°,Y=45°)
+[dual_arm_carry_task_node-1] [INFO] [1791719554.823363675] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[dual_arm_carry_task_node-1] [INFO] [1791719554.840681428] [move_group_interface]: MoveGroup action client/server ready
+[dual_arm_carry_task_node-1] [INFO] [1791719554.841846568] [move_group_interface]: Planning request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791719554.884047161] [move_group_interface]: Planning request complete!
+[dual_arm_carry_task_node-1] [INFO] [1791719554.884129572] [move_group_interface]: time taken to generate plan: 0.00385366 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791719554.884252786] [dual_arm_carry_task]:   ✓ 双臂规划成功，开始执行...
+[dual_arm_carry_task_node-1] [INFO] [1791719554.885095382] [move_group_interface]: Execute request accepted
+[communication_latency_monitor_node-2] [INFO] [1791719556.180464183] [communication_latency_monitor]: [latency] n=2392 mean=0.37ms p95=2.00ms max=6.00ms over(100.0ms)=0.00%
+[task_metrics_monitor_node-3] [INFO] [1791719556.182617702] [task_metrics_monitor]: [metrics] stage=APPROACH sync_n=0 sync_p95=0.00mm ee_terminal=N/A energy_proxy=13.73J-like mean_power=3.60
+[dual_arm_carry_task_node-1] [INFO] [1791719557.205894115] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791719557.206501936] [dual_arm_carry_task]:   ✓ 双臂移动完成
+[dual_arm_carry_task_node-1] [INFO] [1791719557.206556240] [dual_arm_carry_task]: ✓ 接近完成，进入抓取阶段
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719557.406745041] [dual_arm_carry_task]: [状态: GRASP] 夹紧物体...
+[dual_arm_carry_task_node-1] [INFO] [1791719557.406809627] [dual_arm_carry_task]:   新策略(一阶优化): 仅保留垂直下降介入 → 夹取
+[dual_arm_carry_task_node-1] [INFO] [1791719557.406827507] [dual_arm_carry_task]:   [GRASP] Step 1: 垂直下降 (Z: 0.28 → 0.13)
+[task_metrics_monitor_node-3] [INFO] [1791719557.406855128] [task_metrics_monitor]: [metrics] stage transition: APPROACH -> GRASP
+[dual_arm_carry_task_node-1] [INFO] [1791719557.412597512] [move_group_interface]: MoveGroup action client/server ready
+[dual_arm_carry_task_node-1] [INFO] [1791719557.413345167] [move_group_interface]: Planning request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791719557.446027771] [move_group_interface]: Planning request complete!
+[dual_arm_carry_task_node-1] [INFO] [1791719557.446129623] [move_group_interface]: time taken to generate plan: 0.00113887 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791719557.447405982] [move_group_interface]: Execute request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791719558.404790539] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791719558.405129195] [dual_arm_carry_task]:   ✓ 垂直介入完成
+[dual_arm_carry_task_node-1] [INFO] [1791719558.705533133] [dual_arm_carry_task]:   [GRASP] 已记录放置接地参考高度: hand_z=0.129
+[dual_arm_carry_task_node-1] [INFO] [1791719558.705640809] [dual_arm_carry_task]:   [GRASP] Step 2: 更新世界ACM允许夹取碰撞
+[dual_arm_carry_task_node-1] [WARN] [1791719558.707408375] [dual_arm_carry_task]:   ! 物体 aluminum_rod 不在 ACM 中，正在自动补建条目
+[dual_arm_carry_task_node-1] [INFO] [1791719558.710075148] [dual_arm_carry_task]:   ✓ ACM已安全更新：允许夹爪与物体碰撞（保留所有SRDF规则）
+[dual_arm_carry_task_node-1] [INFO] [1791719558.710171397] [dual_arm_carry_task]:   ✓ ACM 更新完毕
+[dual_arm_carry_task_node-1] [INFO] [1791719558.710184187] [dual_arm_carry_task]:   [GRASP] Step 3: Closing grippers and attaching object
+[dual_arm_carry_task_node-1] [INFO] [1791719558.725616479] [dual_arm_carry_task]:   发送双臂夹爪同步指令 -> 0.010
+[dual_arm_carry_task_node-1] [INFO] [1791719559.907915327] [dual_arm_carry_task]:   ✓ 双臂夹爪同步控制完成
+[dual_arm_carry_task_node-1] [INFO] [1791719559.907970436] [dual_arm_carry_task]:   ✓ Grippers closed
+[dual_arm_carry_task_node-1] [INFO] [1791719559.908026793] [dual_arm_carry_task]:   [MuJoCo] Weld约束已激活（铝棒刚性绑定到双手）
+[dual_arm_carry_task_node-1] [INFO] [1791719559.908044636] [dual_arm_carry_task]:   [附着] 开始附着流程（最终修复版 - 全局坐标系）
+[dual_arm_carry_task_node-1] [INFO] [1791719559.908051561] [dual_arm_carry_task]:     附着到: mj_left_hand
+[dual_arm_carry_task_node-1] [INFO] [1791719560.008661778] [dual_arm_carry_task]:   [步骤1] 从 PlanningScene 获取物体实际位姿...
+[dual_arm_carry_task_node-1] [WARN] [1791719560.017942499] [dual_arm_carry_task]:     ! 无法从PlanningScene获取物体，使用回退位姿
+[dual_arm_carry_task_node-1] [INFO] [1791719560.019309639] [dual_arm_carry_task]:     [调试] 左hand world Z=0.130, 左finger world Z=0.072, 右finger world Z=0.072
+[dual_arm_carry_task_node-1] [INFO] [1791719560.019359162] [dual_arm_carry_task]:     [调试] 物体实际Z=0.020 (来自PlanningScene，非hand中点！)
+[dual_arm_carry_task_node-1] [INFO] [1791719560.019374789] [dual_arm_carry_task]:   [步骤2] 移除独立碰撞物体...
+[dual_arm_carry_task_node-1] [INFO] [1791719560.019453556] [dual_arm_carry_task]:     ✓ 发布 REMOVE 消息
+[dual_arm_carry_task_node-1] [INFO] [1791719560.319558925] [dual_arm_carry_task]:   [步骤3] 发布附着碰撞物体...
+[dual_arm_carry_task_node-1] [INFO] [1791719560.319664454] [dual_arm_carry_task]:     使用物体真实位姿: [0.500, 0.000, 0.020]（非hand中点！）
+[dual_arm_carry_task_node-1] [INFO] [1791719560.319895686] [dual_arm_carry_task]:     ✓ 发布 ATTACH 消息（使用全局坐标系）
+[dual_arm_carry_task_node-1] [INFO] [1791719560.819976652] [dual_arm_carry_task]:   [步骤4] 验证附着结果...
+[dual_arm_carry_task_node-1] [INFO] [1791719560.837660658] [dual_arm_carry_task]:     独立物体数量: 0 (期望=0)
+[dual_arm_carry_task_node-1] [INFO] [1791719560.837736180] [dual_arm_carry_task]:     附着物体数量: 1 (期望=1)
+[dual_arm_carry_task_node-1] [INFO] [1791719560.837795725] [dual_arm_carry_task]:     ✓ 独立物体已移除
+[dual_arm_carry_task_node-1] [INFO] [1791719560.837817749] [dual_arm_carry_task]:     ✓ 附着物体已确认
+[dual_arm_carry_task_node-1] [INFO] [1791719560.837835933] [dual_arm_carry_task]:   ✓ 附着流程完成
+[dual_arm_carry_task_node-1] [INFO] [1791719560.837854193] [dual_arm_carry_task]:     原理: 从PlanningScene获取物体真实位姿 + base_link全局坐标系
+[dual_arm_carry_task_node-1] [INFO] [1791719560.837875810] [dual_arm_carry_task]:     期望: 物体在地面原位附着（Z≈0.02），LIFT时随手臂抬升
+[dual_arm_carry_task_node-1] [INFO] [1791719560.867486131] [dual_arm_carry_task]:   ✓ Object attached to robot
+[dual_arm_carry_task_node-1] [INFO] [1791719560.867585397] [dual_arm_carry_task]:   [等待] 异步等待物理引擎稳定中（1.5秒）...
+[task_metrics_monitor_node-3] [INFO] [1791719561.068081012] [task_metrics_monitor]: [metrics] stage transition: GRASP -> WAITING_PHYSICS
+[communication_latency_monitor_node-2] [INFO] [1791719561.181101851] [communication_latency_monitor]: [latency] n=4887 mean=0.38ms p95=2.00ms max=6.00ms over(100.0ms)=0.00%
+[task_metrics_monitor_node-3] [INFO] [1791719561.183936055] [task_metrics_monitor]: [metrics] stage=WAITING_PHYSICS sync_n=0 sync_p95=0.00mm ee_terminal=N/A energy_proxy=62.68J-like mean_power=7.36
+[dual_arm_carry_task_node-1] [INFO] [1791719562.367828546] [dual_arm_carry_task]:   [Timer Triggered] ✓ Physics stabilized, entering LIFT
+[dual_arm_carry_task_node-1] [INFO] [1791719562.468544099] [dual_arm_carry_task]: [状态: LIFT] 抬起物体...
+[task_metrics_monitor_node-3] [INFO] [1791719562.468591941] [task_metrics_monitor]: [metrics] stage transition: WAITING_PHYSICS -> LIFT
+[dual_arm_carry_task_node-1] [INFO] [1791719562.519869921] [move_group_interface]: MoveGroup action client/server ready
+[dual_arm_carry_task_node-1] [INFO] [1791719562.520397148] [move_group_interface]: Planning request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791719562.541033588] [move_group_interface]: Planning request complete!
+[dual_arm_carry_task_node-1] [INFO] [1791719562.541161977] [move_group_interface]: time taken to generate plan: 0.000425691 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791719562.541466196] [move_group_interface]: Execute request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791719563.771198605] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791719563.771871984] [dual_arm_carry_task]:   ✓ [LIFT] Pilz PTP 抬升成功
+[dual_arm_carry_task_node-1] [INFO] [1791719563.972029594] [dual_arm_carry_task]: [状态: TRANSPORT] 平移物体...
+[dual_arm_carry_task_node-1] [INFO] [1791719563.972145211] [dual_arm_carry_task]:   [TRANSPORT] 模式=compliant, z=0.397, near_ground=false, waypoints=18, vel=0.32, acc=0.23, dx=0.120, dy=0.060
+[task_metrics_monitor_node-3] [INFO] [1791719563.972075724] [task_metrics_monitor]: [metrics] stage transition: LIFT -> TRANSPORT
+[dual_arm_carry_task_node-1] [INFO] [1791719563.980000664] [dual_arm_carry_task]:   ✓ [TRANSPORT] 已启用 Ruckig jerk 限制平滑
+[dual_arm_carry_task_node-1] [INFO] [1791719563.983127023] [dual_arm_carry_task]:   ✓ [TRANSPORT] 手工轨迹校验通过: 15航点，关节限位/自碰撞/跳变/夹爪距离已检查
+[dual_arm_carry_task_node-1] [INFO] [1791719563.983915734] [move_group_interface]: Execute request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791719566.104924205] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791719566.105386279] [dual_arm_carry_task]:   ✓ [TRANSPORT] 连续平移执行成功
+[communication_latency_monitor_node-2] [INFO] [1791719566.180100575] [communication_latency_monitor]: [latency] n=7385 mean=0.30ms p95=2.00ms max=6.00ms over(100.0ms)=0.00%
+[task_metrics_monitor_node-3] [INFO] [1791719566.182370890] [task_metrics_monitor]: [metrics] stage=TRANSPORT sync_n=111 sync_p95=0.09mm ee_terminal=N/A energy_proxy=146.07J-like mean_power=11.06
+[dual_arm_carry_task_node-1] [INFO] [1791719566.305592452] [dual_arm_carry_task]: [状态: ROTATE] 旋转物体方向（Y轴→45°）...
+[dual_arm_carry_task_node-1] [INFO] [1791719566.305623136] [dual_arm_carry_task]:   策略: 单段连续轨迹 + 密集航点 + TOTG（消除段间停顿）
+[dual_arm_carry_task_node-1] [INFO] [1791719566.305628459] [dual_arm_carry_task]:   [原理] 单段轨迹: TOTG生成全局平滑速度剖面，无中间归零停顿
+[dual_arm_carry_task_node-1] [INFO] [1791719566.305632356] [dual_arm_carry_task]:   [原理] 不刷新夹爪: simGripperGrasp保持at(0)=0(最大夹持力)，段间刷新会触发simGripperMove导致松手
+[dual_arm_carry_task_node-1] [INFO] [1791719566.305643108] [dual_arm_carry_task]:   [原理] Joint7偏置: 引导手腕关节主动承担Z轴旋转，避免中段/根部关节漂移翻转
+[task_metrics_monitor_node-3] [INFO] [1791719566.305697667] [task_metrics_monitor]: [metrics] stage transition: TRANSPORT -> ROTATE
+[dual_arm_carry_task_node-1] [INFO] [1791719566.356352857] [dual_arm_carry_task]:   杆件中心: (0.616, 0.061, 0.390)
+[dual_arm_carry_task_node-1] [INFO] [1791719566.356431330] [dual_arm_carry_task]:   夹持半径: 0.150 m
+[dual_arm_carry_task_node-1] [INFO] [1791719566.356454658] [dual_arm_carry_task]:   左臂初始角度: 90.1°, 右臂初始角度: -89.9°
+[dual_arm_carry_task_node-1] [INFO] [1791719566.356483357] [dual_arm_carry_task]:   [ROTATE] 模式=compliant, 航点密度缩放=1.15, 速度缩放=0.88, 加速度缩放=0.80
+[dual_arm_carry_task_node-1] [INFO] [1791719566.356510930] [dual_arm_carry_task]:   分段参数: 1段×52航点, 每步0.9°, 总计52航点
+[dual_arm_carry_task_node-1] [INFO] [1791719566.356547249] [dual_arm_carry_task]:   起始 J7: 左=-61.1°, 右=-33.1°
+[dual_arm_carry_task_node-1] [INFO] [1791719566.356574239] [dual_arm_carry_task]:   === 分段 1/1 (0° → 45°) ===
+[dual_arm_carry_task_node-1] [INFO] [1791719566.407629448] [dual_arm_carry_task]:     航点 1/52 (0.9°): 左(0.614,0.211,0.390) 右(0.618,-0.089,0.390) J7:L=-61.8° R=-34.1° 跳变:L=1.5° R=1.8°
+[dual_arm_carry_task_node-1] [INFO] [1791719566.412498118] [dual_arm_carry_task]:     航点 15/52 (13.0°): 左(0.582,0.207,0.390) 右(0.650,-0.085,0.390) J7:L=-70.4° R=-46.2° 跳变:L=1.5° R=1.7°
+[dual_arm_carry_task_node-1] [INFO] [1791719566.417231689] [dual_arm_carry_task]:     航点 30/52 (26.0°): 左(0.550,0.195,0.390) 右(0.682,-0.073,0.390) J7:L=-80.2° R=-58.0° 跳变:L=1.5° R=1.6°
+[dual_arm_carry_task_node-1] [INFO] [1791719566.421492948] [dual_arm_carry_task]:     航点 45/52 (38.9°): 左(0.522,0.177,0.390) 右(0.710,-0.055,0.390) J7:L=-91.0° R=-68.9° 跳变:L=1.6° R=1.6°
+[dual_arm_carry_task_node-1] [INFO] [1791719566.422840636] [dual_arm_carry_task]:     航点 52/52 (45.0°): 左(0.510,0.167,0.390) 右(0.722,-0.045,0.390) J7:L=-96.6° R=-73.8° 跳变:L=1.7° R=1.6°
+[dual_arm_carry_task_node-1] [INFO] [1791719566.441997024] [dual_arm_carry_task]:     TOTG缩放: vel=0.0528, acc=0.0480
+[dual_arm_carry_task_node-1] [INFO] [1791719566.442031723] [dual_arm_carry_task]:     TOTG: 时长=6.48s, 轨迹点=66
+[dual_arm_carry_task_node-1] [INFO] [1791719566.448253526] [dual_arm_carry_task]:   ✓ [ROTATE] 手工轨迹校验通过: 66航点，关节限位/自碰撞/跳变/夹爪距离已检查
+[dual_arm_carry_task_node-1] [INFO] [1791719566.448972115] [move_group_interface]: Execute request accepted
+[communication_latency_monitor_node-2] [INFO] [1791719571.184608927] [communication_latency_monitor]: [latency] n=9882 mean=0.25ms p95=2.00ms max=6.00ms over(100.0ms)=0.00%
+[task_metrics_monitor_node-3] [INFO] [1791719571.187192287] [task_metrics_monitor]: [metrics] stage=ROTATE sync_n=361 sync_p95=0.07mm ee_terminal=N/A energy_proxy=184.65J-like mean_power=10.31
+[dual_arm_carry_task_node-1] [INFO] [1791719573.071831997] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791719573.072707120] [dual_arm_carry_task]:   ✓ 分段 1/1 执行完成 (0° → 45°)
+[dual_arm_carry_task_node-1] [INFO] [1791719573.373910524] [dual_arm_carry_task]:   最终 J7: 左=-96.7°, 右=-73.7°
+[dual_arm_carry_task_node-1] [INFO] [1791719573.374007612] [dual_arm_carry_task]: ✓ 旋转完成（杆件现在沿X轴方向），进入下降阶段
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719573.574273962] [dual_arm_carry_task]: [状态: DESCEND] 下降准 备放置...
+[task_metrics_monitor_node-3] [INFO] [1791719573.574385232] [task_metrics_monitor]: [metrics] DESCEND reference captured: expected left=(0.408,0.168,0.130) right=(0.620,-0.042,0.130)
+[task_metrics_monitor_node-3] [INFO] [1791719573.574482380] [task_metrics_monitor]: [metrics] stage transition: ROTATE -> DESCEND
+[dual_arm_carry_task_node-1] [INFO] [1791719573.624529780] [dual_arm_carry_task]:   [DESCEND] 模式=compliant, dz=0.256, place_z=0.129, near_ground=true, waypoints=33, vel=0.09, acc=0.05
+[dual_arm_carry_task_node-1] [INFO] [1791719573.642071746] [dual_arm_carry_task]:   ✓ [DESCEND] 已启用 Ruckig jerk 限制平滑
+[dual_arm_carry_task_node-1] [INFO] [1791719573.646994775] [dual_arm_carry_task]:   ✓ [DESCEND] 手工轨迹校验通过: 56航点，关节限位/自碰撞/跳变/夹爪距离已检查
+[dual_arm_carry_task_node-1] [INFO] [1791719573.647678909] [move_group_interface]: Execute request accepted
+[communication_latency_monitor_node-2] [INFO] [1791719576.185248229] [communication_latency_monitor]: [latency] n=12385 mean=0.23ms p95=2.00ms max=14.00ms over(100.0ms)=0.00%
+[task_metrics_monitor_node-3] [INFO] [1791719576.187576586] [task_metrics_monitor]: [metrics] stage=DESCEND sync_n=611 sync_p95=0.08mm ee_terminal=N/A energy_proxy=215.93J-like mean_power=9.55
+[dual_arm_carry_task_node-1] [INFO] [1791719579.772264280] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791719579.773035581] [dual_arm_carry_task]:   ✓ [DESCEND] 连续减速下降成功
+[dual_arm_carry_task_node-1] [INFO] [1791719579.973533649] [dual_arm_carry_task]: [状态: PLACE] 放置物体（GRASP逆操作）...
+[task_metrics_monitor_node-3] [INFO] [1791719579.973736508] [task_metrics_monitor]: [metrics] DESCEND terminal ee error: left=2.920mm right=2.455mm avg=2.687mm
+[task_metrics_monitor_node-3] [INFO] [1791719579.973802426] [task_metrics_monitor]: [metrics] stage transition: DESCEND -> PLACE
+[dual_arm_carry_task_node-1] [INFO] [1791719579.979168368] [dual_arm_carry_task]:   [PLACE] 当前放置高度满足松爪条件: current_z=0.131, target_z=0.129
+[dual_arm_carry_task_node-1] [INFO] [1791719579.979219686] [dual_arm_carry_task]:   [PLACE] Step A: 打开夹爪并去激活weld约束释放物体
+[dual_arm_carry_task_node-1] [INFO] [1791719579.981993517] [dual_arm_carry_task]:   发送双臂夹爪同步指令 -> 0.040
+[dual_arm_carry_task_node-1] [INFO] [1791719580.365957690] [dual_arm_carry_task]:   ✓ 双臂夹爪同步控制完成
+[dual_arm_carry_task_node-1] [INFO] [1791719580.366088459] [dual_arm_carry_task]:   ✓ 夹爪已同步打开
+[dual_arm_carry_task_node-1] [INFO] [1791719580.366190586] [dual_arm_carry_task]:   [MuJoCo] Weld约束已去激活
+[dual_arm_carry_task_node-1] [INFO] [1791719580.466296936] [dual_arm_carry_task]:   [等待] 物理引擎稳定中（1.5秒）...
+[communication_latency_monitor_node-2] [INFO] [1791719581.184702550] [communication_latency_monitor]: [latency] n=14883 mean=0.25ms p95=2.00ms max=14.00ms over(100.0ms)=0.00%
+[task_metrics_monitor_node-3] [INFO] [1791719581.189698722] [task_metrics_monitor]: [metrics] stage=PLACE sync_n=800 sync_p95=0.07mm ee_terminal=2.687270 energy_proxy=239.51J-like mean_power=8.77
+[dual_arm_carry_task_node-1] [INFO] [1791719581.966491044] [dual_arm_carry_task]:   [PLACE] Step B: 解除物体附着，重新添加为世界碰撞物体
+[dual_arm_carry_task_node-1] [INFO] [1791719582.068143816] [dual_arm_carry_task]:     杆件放置位置: (0.514, 0.063, 0.020)，方向 Rz=45.3°
+[dual_arm_carry_task_node-1] [INFO] [1791719582.068318225] [dual_arm_carry_task]:     ✓ 执行解除附着: 成功
+[dual_arm_carry_task_node-1] [INFO] [1791719582.088946648] [dual_arm_carry_task]:     ✓ 重新添加铝棒为世界碰撞物体（Rz=45.3°）
+[dual_arm_carry_task_node-1] [INFO] [1791719582.389734027] [dual_arm_carry_task]:     世界物体: 1 (期望≥1), 附着物体: 0 (期望=0)
+[dual_arm_carry_task_node-1] [INFO] [1791719582.389786981] [dual_arm_carry_task]:     ✓ 解除附着并重新放置完成
+[dual_arm_carry_task_node-1] [INFO] [1791719582.395200121] [dual_arm_carry_task]:   ✓ 物体已放置
+[dual_arm_carry_task_node-1] [INFO] [1791719582.695361242] [dual_arm_carry_task]:   [PLACE] Step B2: 允许夹爪-杆件临时碰撞（撤离后再恢复）
+[dual_arm_carry_task_node-1] [INFO] [1791719582.701845851] [dual_arm_carry_task]:   ✓ ACM已安全更新：允许夹爪与物体碰撞（保留所有SRDF规则）
+[dual_arm_carry_task_node-1] [INFO] [1791719582.802066828] [dual_arm_carry_task]:   [PLACE] Step C+D: 连续水平撤退+垂直抬升 (IK轨迹+TOTG)
+[dual_arm_carry_task_node-1] [INFO] [1791719582.804669890] [dual_arm_carry_task]:   [PLACE] 模式=compliant, z=0.129, near_ground=true, waypoints=29, vel=0.16, acc=0.10
+[dual_arm_carry_task_node-1] [INFO] [1791719582.815032445] [dual_arm_carry_task]:   ✓ [PLACE] 已启用 Ruckig jerk 限制平滑
+[dual_arm_carry_task_node-1] [INFO] [1791719582.818173023] [dual_arm_carry_task]:   ✓ [PLACE] 手工轨迹校验通过: 33航点，关节限位/自碰撞/跳变已检查
+[dual_arm_carry_task_node-1] [INFO] [1791719582.818907435] [move_group_interface]: Execute request accepted
+[communication_latency_monitor_node-2] [INFO] [1791719586.187297167] [communication_latency_monitor]: [latency] n=17377 mean=0.31ms p95=2.00ms max=14.00ms over(100.0ms)=0.00%
+[task_metrics_monitor_node-3] [INFO] [1791719586.192420193] [task_metrics_monitor]: [metrics] stage=PLACE sync_n=800 sync_p95=0.07mm ee_terminal=2.687270 energy_proxy=281.31J-like mean_power=8.79
+[dual_arm_carry_task_node-1] [INFO] [1791719587.072916134] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791719587.073987202] [dual_arm_carry_task]:   ✓ [PLACE] 连续撤离阶段完成
+[dual_arm_carry_task_node-1] [INFO] [1791719587.274337651] [dual_arm_carry_task]: [状态: RETREAT] 撤退至初始位置...
+[task_metrics_monitor_node-3] [INFO] [1791719587.274499456] [task_metrics_monitor]: [metrics] stage transition: PLACE -> RETREAT
+[dual_arm_carry_task_node-1] [INFO] [1791719587.278512609] [dual_arm_carry_task]:   ✓ ACM已安全更新：允许夹爪与物体碰撞（保留所有SRDF规则）
+[dual_arm_carry_task_node-1] [INFO] [1791719587.333985276] [move_group_interface]: MoveGroup action client/server ready
+[dual_arm_carry_task_node-1] [INFO] [1791719587.334527103] [move_group_interface]: Planning request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791719587.345607842] [move_group_interface]: Planning request complete!
+[dual_arm_carry_task_node-1] [INFO] [1791719587.346098564] [move_group_interface]: time taken to generate plan: 0.000841958 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791719587.346624035] [move_group_interface]: Execute request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791719589.306012566] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791719589.306398095] [dual_arm_carry_task]:   ✓ [RETREAT] Pilz PTP 返航成功
+[dual_arm_carry_task_node-1] [INFO] [1791719589.312618819] [dual_arm_carry_task]:   ✓ ACM已安全更新：禁止夹爪与物体碰撞（保留所有SRDF规则）
+[dual_arm_carry_task_node-1] [INFO] [1791719589.513013676] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791719589.513100320] [dual_arm_carry_task]:     ✓ 任务完成！
+[dual_arm_carry_task_node-1] [INFO] [1791719589.513187781] [dual_arm_carry_task]: 已发布任务完成状态(DONE)。
+[dual_arm_carry_task_node-1] [INFO] [1791719589.513219150] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719589.513244167] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791719589.513308091] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[task_metrics_monitor_node-3] [INFO] [1791719589.513151204] [task_metrics_monitor]: [metrics] stage transition: RETREAT -> DONE
+[communication_latency_monitor_node-2] [INFO] [1791719589.513454506] [communication_latency_monitor]: Received task terminal status 'DONE', finalizing latency report.
+[communication_latency_monitor_node-2] [INFO] [1791719589.526223857] [communication_latency_monitor]: Latency report saved.
+[communication_latency_monitor_node-2] [INFO] [1791719589.526296387] [communication_latency_monitor]:   samples: /home/lidio/franka_ws_1/launch_logs/comm_latency_20261011_195231_samples.csv
+[communication_latency_monitor_node-2] [INFO] [1791719589.526317657] [communication_latency_monitor]:   summary: /home/lidio/franka_ws_1/launch_logs/comm_latency_20261011_195231_summary.csv
+[communication_latency_monitor_node-2] [INFO] [1791719589.526331536] [communication_latency_monitor]:   summary_table: /home/lidio/franka_ws_1/launch_logs/comm_latency_20261011_195231_summary.md
+[communication_latency_monitor_node-2] [INFO] [1791719589.526345331] [communication_latency_monitor]:   quick_result: n=19044 p95=2.00ms max=14.00ms target=100.00ms
+[task_metrics_monitor_node-3] [INFO] [1791719589.528903661] [task_metrics_monitor]: Task metrics report saved.
+[task_metrics_monitor_node-3] [INFO] [1791719589.529004637] [task_metrics_monitor]:   sync_samples: /home/lidio/franka_ws_1/launch_logs/task_metrics_20261011_195231_sync_samples.csv
+[task_metrics_monitor_node-3] [INFO] [1791719589.529046786] [task_metrics_monitor]:   summary_csv: /home/lidio/franka_ws_1/launch_logs/task_metrics_20261011_195231_summary.csv
+[task_metrics_monitor_node-3] [INFO] [1791719589.529079968] [task_metrics_monitor]:   summary_md: /home/lidio/franka_ws_1/launch_logs/task_metrics_20261011_195231_summary.md
+[task_metrics_monitor_node-3] [INFO] [1791719589.529125277] [task_metrics_monitor]:   quick_result: sync_p95=0.07mm (<=5.00), ee_terminal=2.687mm (<=2.00), energy_proxy=327.902
+[INFO] [communication_latency_monitor_node-2]: process has finished cleanly [pid 292403]
+[INFO] [task_metrics_monitor_node-3]: process has finished cleanly [pid 292405]
+[dual_arm_carry_task_node-1] [INFO] [1791719600.814126655] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 292401]

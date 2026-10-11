@@ -23,6 +23,10 @@ find_package(moveit_msgs REQUIRED)
 find_package(multi_mode_control_msgs REQUIRED)
 find_package(shape_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
+# A1 P1a: rod body state / simulation info services.
+find_package(mujoco_ros_msgs REQUIRED)
+# A1 P1b: rod pose truth message.
+find_package(dual_arm_a1_msgs REQUIRED)
 
 # Include directories
 include_directories(
@@ -44,6 +48,20 @@ add_executable(task_metrics_monitor_node
 
 add_executable(adaptive_compliance_supervisor_node
   src/adaptive_compliance_supervisor.cpp
+)
+
+# A1 P1a: pure, offline-testable core (sampling, geometry, settling criterion,
+# single-candidate orchestration). Deliberately has no ROS dependency.
+add_library(a1_sampling src/a1_sampling.cpp)
+
+# A1 P1b: pure, offline-testable truth handling (validation, latch-once freeze,
+# frame mapping, planning-scene read-back check). No ROS dependency.
+add_library(a1_truth src/a1_truth.cpp)
+
+# A1 P1a: ROS side -- applies one sampled pose via /set_body_state and writes a
+# manifest. Does not publish truth, does not start the task.
+add_executable(a1_scene_runner_node
+  src/a1_scene_runner_node.cpp
 )
 
 ament_target_dependencies(dual_arm_carry_task_node
@@ -84,12 +102,41 @@ ament_target_dependencies(adaptive_compliance_supervisor_node
   multi_mode_control_msgs
 )
 
+target_include_directories(a1_sampling PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+target_include_directories(a1_truth PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(a1_scene_runner_node
+  rclcpp
+  mujoco_ros_msgs
+  dual_arm_a1_msgs
+  geometry_msgs
+)
+
+target_link_libraries(a1_scene_runner_node a1_sampling)
+
+# The task node needs the truth message and the pure truth handling.
+ament_target_dependencies(dual_arm_carry_task_node
+  dual_arm_a1_msgs
+)
+
+target_link_libraries(dual_arm_carry_task_node a1_truth)
+
 # Install targets
 install(TARGETS
   dual_arm_carry_task_node
   communication_latency_monitor_node
   task_metrics_monitor_node
   adaptive_compliance_supervisor_node
+  a1_scene_runner_node
+  a1_sampling
+  a1_truth
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -99,9 +146,29 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}/
 )
 
+# Install A1 P1a configuration
+install(DIRECTORY
+  config
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_a1_sampling test/test_a1_sampling.cpp)
+  target_link_libraries(test_a1_sampling a1_sampling)
+
+  ament_add_gtest(test_a1_stability test/test_a1_stability.cpp)
+  target_link_libraries(test_a1_stability a1_sampling)
+
+  ament_add_gtest(test_a1_service_faults test/test_a1_service_faults.cpp)
+  target_link_libraries(test_a1_service_faults a1_sampling)
+
+  ament_add_gtest(test_a1_truth test/test_a1_truth.cpp)
+  target_link_libraries(test_a1_truth a1_truth)
 endif()
 
 ament_package()

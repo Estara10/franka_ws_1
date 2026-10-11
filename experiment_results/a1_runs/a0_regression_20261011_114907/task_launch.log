@@ -1,0 +1,87 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-11-19-49-14-312576-Estara-289223
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [289308]
+[INFO] [communication_latency_monitor_node-2]: process started with pid [289310]
+[INFO] [task_metrics_monitor_node-3]: process started with pid [289312]
+[task_metrics_monitor_node-3] [INFO] [1791719359.672534441] [task_metrics_monitor]: Task metrics monitor started.
+[task_metrics_monitor_node-3] [INFO] [1791719359.672638918] [task_metrics_monitor]:   joint_state_topic: /joint_states
+[task_metrics_monitor_node-3] [INFO] [1791719359.672649171] [task_metrics_monitor]:   task_stage_topic: /task_stage
+[task_metrics_monitor_node-3] [INFO] [1791719359.672655734] [task_metrics_monitor]:   task_status_topic: /task_status
+[task_metrics_monitor_node-3] [INFO] [1791719359.672663029] [task_metrics_monitor]:   frames: base=base_link left=mj_left_hand right=mj_right_hand
+[task_metrics_monitor_node-3] [INFO] [1791719359.672670324] [task_metrics_monitor]:   thresholds: sync<=5.00mm, ee<=2.00mm
+[task_metrics_monitor_node-3] [INFO] [1791719359.672683788] [task_metrics_monitor]:   descend target: place_z=0.180, shift_x=-0.100
+[task_metrics_monitor_node-3] [INFO] [1791719359.672694429] [task_metrics_monitor]:   sync_samples_csv: /home/lidio/franka_ws_1/launch_logs/task_metrics_20261011_194919_sync_samples.csv
+[communication_latency_monitor_node-2] [INFO] [1791719359.675600850] [communication_latency_monitor]: Latency monitor started.
+[communication_latency_monitor_node-2] [INFO] [1791719359.675760397] [communication_latency_monitor]:   latency_topic: /joint_states
+[communication_latency_monitor_node-2] [INFO] [1791719359.675805277] [communication_latency_monitor]:   task_status_topic: /task_status
+[communication_latency_monitor_node-2] [INFO] [1791719359.675818734] [communication_latency_monitor]:   target_latency_ms: 100.00
+[communication_latency_monitor_node-2] [INFO] [1791719359.675836062] [communication_latency_monitor]:   samples_csv: /home/lidio/franka_ws_1/launch_logs/comm_latency_20261011_194919_samples.csv
+[dual_arm_carry_task_node-1] [INFO] [1791719359.692635526] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791719359.695510282] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791719359.695565223] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791719359.695584367] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791719359.695594691] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791719359.695604815] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791719359.695616089] [dual_arm_carry_task]:   旋转阶段: 启用
+[task_metrics_monitor_node-3] [INFO] [1791719359.695605680] [task_metrics_monitor]: [metrics] stage transition: (none) -> INIT
+[dual_arm_carry_task_node-1] [INFO] [1791719361.695958266] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791719361.709296648] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.012 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791719361.709365329] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791719361.754360031] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791719361.754394596] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791719361.768686658] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787432245] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787483393] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787516468] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787533643] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787549621] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787564545] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787582503] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787613599] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787628731] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787642490] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787657565] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787673063] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787687417] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787748152] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787778138] [dual_arm_carry_task]:   使用当前机械臂位置作为起始点
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787799243] [dual_arm_carry_task]:   ✓ RETREAT目标已设为Franka标准ready姿态
+[dual_arm_carry_task_node-1] [INFO] [1791719361.787813671] [dual_arm_carry_task]:   ✓ 使用 SRDF 默认碰撞矩阵（无需手动初始化）
+[dual_arm_carry_task_node-1] [INFO] [1791719361.809270585] [dual_arm_carry_task]:   ✓ 铝棒碰撞物体已添加到 Planning Scene
+[dual_arm_carry_task_node-1] [INFO] [1791719362.320366850] [dual_arm_carry_task]:   ✓ 物体 aluminum_rod 已添加到 ACM（默认禁止所有碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1791719362.335897071] [dual_arm_carry_task]: ✓ 初始化完成，进入接近阶段
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719362.536146326] [dual_arm_carry_task]: [状态: APPROACH] 接近物体...
+[dual_arm_carry_task_node-1] [INFO] [1791719362.536210818] [dual_arm_carry_task]:   ★ [同步动作] 提前满幅打开夹爪...
+[task_metrics_monitor_node-3] [INFO] [1791719362.536295803] [task_metrics_monitor]: [metrics] stage transition: INIT -> APPROACH
+[dual_arm_carry_task_node-1] [INFO] [1791719362.556881848] [dual_arm_carry_task]:   发送双臂夹爪同步指令 -> 0.040
+[communication_latency_monitor_node-2] [INFO] [1791719363.087811681] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[dual_arm_carry_task_node-1] [INFO] [1791719363.087881889] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[task_metrics_monitor_node-3] [INFO] [1791719363.087911878] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[communication_latency_monitor_node-2] [INFO] [1791719363.089850949] [communication_latency_monitor]: Latency report saved.
+[communication_latency_monitor_node-2] [INFO] [1791719363.089864985] [communication_latency_monitor]:   samples: /home/lidio/franka_ws_1/launch_logs/comm_latency_20261011_194919_samples.csv
+[communication_latency_monitor_node-2] [INFO] [1791719363.089870358] [communication_latency_monitor]:   summary: /home/lidio/franka_ws_1/launch_logs/comm_latency_20261011_194919_summary.csv
+[communication_latency_monitor_node-2] [INFO] [1791719363.089873990] [communication_latency_monitor]:   summary_table: /home/lidio/franka_ws_1/launch_logs/comm_latency_20261011_194919_summary.md
+[communication_latency_monitor_node-2] [INFO] [1791719363.089877216] [communication_latency_monitor]:   quick_result: n=1214 p95=2.00ms max=4.00ms target=100.00ms
+[task_metrics_monitor_node-3] [INFO] [1791719363.090588137] [task_metrics_monitor]: Task metrics report saved.
+[task_metrics_monitor_node-3] [INFO] [1791719363.090613001] [task_metrics_monitor]:   sync_samples: /home/lidio/franka_ws_1/launch_logs/task_metrics_20261011_194919_sync_samples.csv
+[task_metrics_monitor_node-3] [INFO] [1791719363.090621275] [task_metrics_monitor]:   summary_csv: /home/lidio/franka_ws_1/launch_logs/task_metrics_20261011_194919_summary.csv
+[task_metrics_monitor_node-3] [INFO] [1791719363.090627360] [task_metrics_monitor]:   summary_md: /home/lidio/franka_ws_1/launch_logs/task_metrics_20261011_194919_summary.md
+[task_metrics_monitor_node-3] [INFO] [1791719363.090632884] [task_metrics_monitor]:   quick_result: sync_p95=0.00mm (<=5.00), ee_terminal=N/Amm (<=2.00), energy_proxy=0.000
+[INFO] [communication_latency_monitor_node-2]: process has finished cleanly [pid 289310]
+[INFO] [task_metrics_monitor_node-3]: process has finished cleanly [pid 289312]
+[dual_arm_carry_task_node-1] [ERROR] [1791719370.558538733] [dual_arm_carry_task]:   ✗ 等待双臂夹爪执行结果超时
+[dual_arm_carry_task_node-1] [ERROR] [1791719370.565560797] [dual_arm_carry_task]:   ✗ 预打开夹爪失败，停止任务
+[dual_arm_carry_task_node-1] [ERROR] [1791719370.765776560] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [ERROR] [1791719370.765811296] [dual_arm_carry_task]:     ✗ 任务失败！
+[dual_arm_carry_task_node-1] [INFO] [1791719370.765820231] [dual_arm_carry_task]: 已发布任务失败状态(ERROR)。
+[dual_arm_carry_task_node-1] [ERROR] [1791719370.765826012] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791719370.765832332] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791719370.765837714] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 289308]
