@@ -6,6 +6,8 @@
 #define DUAL_ARM_HAS_RUCKIG 0
 #endif
 #include <cctype>
+#include <cmath>
+#include <unordered_map>
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
 #include "dual_arm_carry_task/gripper_controller.hpp"
 
@@ -13,6 +15,12 @@ namespace {
 constexpr double kReleaseHeightTolerance = 0.004;
 constexpr double kReleaseCorrectionVelScale = 0.08;
 constexpr double kReleaseCorrectionAccScale = 0.05;
+constexpr double kMaxManualTrajectoryJointStepRad = 0.75;
+constexpr double kMaxManualTrajectoryHandDistanceDrift = 0.02;
+// MoveIt's Ruckig convenience overload uses 1000 rad/s^3 when the model does
+// not provide jerk limits. Keep that fallback explicit and shared by every
+// manually generated phase instead of relying on an undocumented default.
+constexpr double kFallbackJerkLimitRadPerSec3 = 500.0;
 
 struct MotionModeProfile
 {
@@ -143,8 +151,47 @@ bool parameterizeAndSmoothTrajectory(robot_trajectory::RobotTrajectory& traj,
     }
 
 #if DUAL_ARM_HAS_RUCKIG
-    if (trajectory_processing::RuckigSmoothing::applySmoothing(traj, vel_scale, acc_scale)) {
+    std::unordered_map<std::string, double> velocity_limits;
+    std::unordered_map<std::string, double> acceleration_limits;
+    std::unordered_map<std::string, double> jerk_limits;
+    std::size_t fallback_jerk_count = 0;
+
+    // Use the same MoveIt velocity/acceleration bounds as the scaling-factor
+    // overload, while supplying jerk explicitly for every active variable.
+    // This avoids silently falling back to Ruckig's hard-coded 1000 value.
+    if (const auto* group = traj.getGroup(); group != nullptr) {
+        for (const auto* joint : group->getActiveJointModels()) {
+            for (const auto& variable : joint->getVariableNames()) {
+                const auto& bounds = joint->getVariableBounds(variable);
+                const double velocity = bounds.velocity_bounded_ && bounds.max_velocity_ > 0.0
+                                            ? bounds.max_velocity_ * vel_scale
+                                            : 1.0;
+                const double acceleration = bounds.acceleration_bounded_ && bounds.max_acceleration_ > 0.0
+                                                ? bounds.max_acceleration_ * acc_scale
+                                                : 1.0;
+                const double jerk = bounds.jerk_bounded_ && bounds.max_jerk_ > 0.0
+                                        ? bounds.max_jerk_
+                                        : kFallbackJerkLimitRadPerSec3;
+                velocity_limits.emplace(variable, velocity);
+                acceleration_limits.emplace(variable, acceleration);
+                jerk_limits.emplace(variable, jerk);
+                if (!(bounds.jerk_bounded_ && bounds.max_jerk_ > 0.0)) {
+                    ++fallback_jerk_count;
+                }
+            }
+        }
+    }
+
+    const bool smoothing_ok = !velocity_limits.empty() &&
+        trajectory_processing::RuckigSmoothing::applySmoothing(
+            traj, velocity_limits, acceleration_limits, jerk_limits);
+    if (smoothing_ok) {
         RCLCPP_INFO(logger, "  ✓ [%s] 已启用 Ruckig jerk 限制平滑", phase);
+        if (fallback_jerk_count > 0) {
+            RCLCPP_WARN(logger,
+                        "  ! [%s] %zu 个变量未配置 jerk limit，使用显式回退 %.1f rad/s^3",
+                        phase, fallback_jerk_count, kFallbackJerkLimitRadPerSec3);
+        }
     } else {
         RCLCPP_WARN(logger, "  ! [%s] Ruckig 平滑失败，沿用 TOTG 轨迹", phase);
     }
@@ -153,6 +200,176 @@ bool parameterizeAndSmoothTrajectory(robot_trajectory::RobotTrajectory& traj,
 #endif
 
     return true;
+}
+
+double wrappedAbsJointDelta(double a, double b)
+{
+    double diff = std::abs(a - b);
+    if (diff > M_PI) {
+        diff = 2.0 * M_PI - diff;
+    }
+    return diff;
+}
+
+bool validateManualTrajectory(const robot_trajectory::RobotTrajectory& traj,
+                              const moveit::core::RobotModelConstPtr& robot_model,
+                              const std::string& group_name,
+                              const rclcpp::Logger& logger,
+                              const char* phase,
+                              bool enforce_hand_distance = true)
+{
+    const auto* jmg = robot_model ? robot_model->getJointModelGroup(group_name) : nullptr;
+    if (jmg == nullptr) {
+        RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 找不到规划组 %s",
+                     phase, group_name.c_str());
+        return false;
+    }
+
+    if (traj.getWayPointCount() < 2) {
+        RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点数量不足 (%zu)",
+                     phase, traj.getWayPointCount());
+        return false;
+    }
+
+    if (!robot_model->hasLinkModel("mj_left_hand") ||
+        !robot_model->hasLinkModel("mj_right_hand")) {
+        RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 找不到左右夹爪 link", phase);
+        return false;
+    }
+
+    planning_scene::PlanningScene validation_scene(robot_model);
+    collision_detection::AllowedCollisionMatrix acm =
+        validation_scene.getAllowedCollisionMatrix();
+    collision_detection::CollisionRequest collision_request;
+    collision_request.group_name = group_name;
+    collision_request.contacts = false;
+
+    std::vector<double> previous_positions;
+    double reference_hand_distance = 0.0;
+
+    for (std::size_t i = 0; i < traj.getWayPointCount(); ++i) {
+        const auto& state = traj.getWayPoint(i);
+
+        if (!state.satisfiesBounds(jmg, 1e-4)) {
+            RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 超出关节限位",
+                         phase, i);
+            return false;
+        }
+
+        collision_detection::CollisionResult collision_result;
+        validation_scene.checkSelfCollision(collision_request, collision_result, state, acm);
+        if (collision_result.collision) {
+            RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 存在自碰撞",
+                         phase, i);
+            return false;
+        }
+
+        std::vector<double> positions;
+        state.copyJointGroupPositions(jmg, positions);
+        for (const double position : positions) {
+            if (!std::isfinite(position)) {
+                RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 含非有限关节值",
+                             phase, i);
+                return false;
+            }
+        }
+
+        if (!previous_positions.empty()) {
+            double max_step = 0.0;
+            const std::size_t count = std::min(previous_positions.size(), positions.size());
+            for (std::size_t j = 0; j < count; ++j) {
+                max_step = std::max(max_step, wrappedAbsJointDelta(positions[j], previous_positions[j]));
+            }
+            if (max_step > kMaxManualTrajectoryJointStepRad) {
+                RCLCPP_ERROR(logger,
+                             "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 关节跳变 %.1f° 超过阈值 %.1f°",
+                             phase, i, max_step * 180.0 / M_PI,
+                             kMaxManualTrajectoryJointStepRad * 180.0 / M_PI);
+                return false;
+            }
+        }
+        previous_positions = positions;
+
+        if (enforce_hand_distance) {
+            const auto& left_tf = state.getGlobalLinkTransform("mj_left_hand");
+            const auto& right_tf = state.getGlobalLinkTransform("mj_right_hand");
+            const double hand_distance = (left_tf.translation() - right_tf.translation()).norm();
+            if (!std::isfinite(hand_distance)) {
+                RCLCPP_ERROR(logger, "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 夹爪距离非有限",
+                             phase, i);
+                return false;
+            }
+            if (i == 0) {
+                reference_hand_distance = hand_distance;
+            } else {
+                const double drift = std::abs(hand_distance - reference_hand_distance);
+                if (drift > kMaxManualTrajectoryHandDistanceDrift) {
+                    RCLCPP_ERROR(logger,
+                                 "  ✗ [%s] 手工轨迹校验失败: 航点 %zu 左右夹爪距离漂移 %.1f mm 超过阈值 %.1f mm",
+                                 phase, i, drift * 1000.0,
+                                 kMaxManualTrajectoryHandDistanceDrift * 1000.0);
+                    return false;
+                }
+            }
+        }
+    }
+
+    if (enforce_hand_distance) {
+        RCLCPP_INFO(logger,
+                    "  ✓ [%s] 手工轨迹校验通过: %zu航点，关节限位/自碰撞/跳变/夹爪距离已检查",
+                    phase, traj.getWayPointCount());
+    } else {
+        RCLCPP_INFO(logger,
+                    "  ✓ [%s] 手工轨迹校验通过: %zu航点，关节限位/自碰撞/跳变已检查",
+                    phase, traj.getWayPointCount());
+    }
+    return true;
+}
+
+struct CoordinatedIkResult
+{
+    bool success {false};
+    bool left_success {false};
+    bool right_success {false};
+};
+
+CoordinatedIkResult solveCoordinatedIk(const moveit::core::RobotState& seed_state,
+                                       moveit::core::RobotState& solved_state,
+                                       const moveit::core::JointModelGroup* left_jmg,
+                                       const moveit::core::JointModelGroup* right_jmg,
+                                       const geometry_msgs::msg::Pose& left_target,
+                                       const geometry_msgs::msg::Pose& right_target,
+                                       double timeout)
+{
+    CoordinatedIkResult result;
+    if (left_jmg == nullptr || right_jmg == nullptr) {
+        return result;
+    }
+
+    auto attempt = [&](double attempt_timeout) {
+        moveit::core::RobotState candidate(seed_state);
+        result.left_success = candidate.setFromIK(left_jmg, left_target, attempt_timeout);
+        result.right_success = result.left_success &&
+            candidate.setFromIK(right_jmg, right_target, attempt_timeout);
+        if (!result.left_success || !result.right_success) {
+            return false;
+        }
+        candidate.update();
+        solved_state = candidate;
+        result.success = true;
+        return true;
+    };
+
+    if (attempt(timeout)) {
+        return result;
+    }
+
+    // Retry from the exact same seed. Never let a failed left/right partial
+    // solve leak into the next attempt or into the caller's trajectory.
+    if (timeout < 0.5) {
+        attempt(0.5);
+    }
+    return result;
 }
 }
 
@@ -589,9 +806,10 @@ void DualArmController::publishAluminumRod()
         // 定义铝棒位置 (与MuJoCo中objects.xml一致，或由视觉动态检测)
         geometry_msgs::msg::Pose box_pose;
         box_pose.orientation.w = 1.0;
-        if (ctx_->rod_pose_received_) {
-            box_pose.position.x = ctx_->detected_rod_pose_.position.x;
-            box_pose.position.y = ctx_->detected_rod_pose_.position.y;
+        geometry_msgs::msg::Pose detected_pose;
+        if (ctx_->getDetectedRodPose(detected_pose)) {
+            box_pose.position.x = detected_pose.position.x;
+            box_pose.position.y = detected_pose.position.y;
         } else {
             box_pose.position.x = 0.50;  // 与MuJoCo中的位置一致
             box_pose.position.y = 0.0;
@@ -697,7 +915,8 @@ void DualArmController::executeInit()
             if (ctx_->use_vision_) {
                 RCLCPP_INFO(ctx_->get_logger(), "  [视觉模式] 等待物体检测...");
                 auto start = ctx_->now();
-                while (rclcpp::ok() && !ctx_->rod_pose_received_) {
+                geometry_msgs::msg::Pose detected_pose;
+                while (rclcpp::ok() && !ctx_->getDetectedRodPose(detected_pose)) {
                     if ((ctx_->now() - start).seconds() > 10.0) {
                         RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 视觉超时: 10秒内未检测到物体");
                         ctx_->current_state_ = TaskState::ERROR;
@@ -705,13 +924,23 @@ void DualArmController::executeInit()
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
-                double yaw = extractYawFromQuaternion(ctx_->detected_rod_pose_.orientation);
+                double yaw = extractYawFromQuaternion(detected_pose.orientation);
                 RCLCPP_INFO(ctx_->get_logger(),
                     "  ✓ 物体已检测: pos=(%.3f, %.3f, %.3f) yaw=%.1f°",
-                    ctx_->detected_rod_pose_.position.x,
-                    ctx_->detected_rod_pose_.position.y,
-                    ctx_->detected_rod_pose_.position.z,
+                    detected_pose.position.x,
+                    detected_pose.position.y,
+                    detected_pose.position.z,
                     yaw * 180.0 / M_PI);
+            }
+
+            // A1 P1b: prepare-only path. Frozen truth -> planning scene sync.
+            // This returns before any of the static-path scene construction
+            // below, and before APPROACH, so no motion can be reached.
+            if (ctx_->usesA1Truth()) {
+                if (!prepareFromA1Truth()) {
+                    return;  // reason already logged; state set to ERROR
+                }
+                return;  // PREPARED, no motion
             }
 
             // 跳过初始位置移动，直接使用当前位置
@@ -741,14 +970,241 @@ void DualArmController::executeInit()
         }
     }
 
+/**
+ * @brief A1 P1b: freeze the truth reference and synchronise the planning scene.
+ *
+ * Reached from INIT only when rod_pose_source == a1_truth. It never moves the
+ * robot: on success the FSM goes to PREPARED and the caller returns immediately,
+ * so APPROACH/GRASP are not reachable from here.
+ */
+bool DualArmController::prepareFromA1Truth()
+    {
+        using namespace std::chrono_literals;
+
+        // 1. This round A1 is preparation only. Refuse at the entry of the call
+        //    chain rather than truncating after motion has started.
+        if (!ctx_->prepare_only_) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "  ✗ [A1] rod_pose_source=a1_truth 需要 prepare_only=true；本轮不开启 A1 运动");
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+
+        // 2. Coordinate frames. The planning frame is read from MoveIt; the
+        //    mapping onto the truth frame is decided by documented source
+        //    evidence, not by assuming a TF chain exists.
+        const std::string planning_frame = ctx_->dual_arm_->getPlanningFrame();
+        RCLCPP_INFO(ctx_->get_logger(), "  [A1] MoveIt 规划坐标系: %s", planning_frame.c_str());
+
+        // 3. Bounded wait (steady clock) for the truth reference to freeze.
+        const double timeout_sec = ctx_->a1_truth_timeout_sec_;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                  std::chrono::duration<double>(timeout_sec));
+        while (rclcpp::ok() && !ctx_->a1_truth_latch_.frozen()) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "  ✗ [A1] E_TRUTH_TIMEOUT: %.1f 秒内未收到有效真值 (topic=%s, "
+                             "expected_run_id=%s)",
+                             timeout_sec, ctx_->a1_truth_topic_.c_str(),
+                             ctx_->expected_run_id_.empty() ? "<UNSET>"
+                                                            : ctx_->expected_run_id_.c_str());
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "    不回退到硬编码 A0 位姿，也不复用视觉检测缓存；停止准备");
+                if (!ctx_->a1_truth_latch_.last_rejection_code().empty()) {
+                    RCLCPP_ERROR(ctx_->get_logger(), "    最近一次被拒原因: %s",
+                                 ctx_->a1_truth_latch_.last_rejection_code().c_str());
+                }
+                ctx_->setCurrentState(TaskState::ERROR);
+                return false;
+            }
+            std::this_thread::sleep_for(50ms);
+        }
+        if (!rclcpp::ok()) {
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+
+        a1t::TruthPayload truth;
+        if (!ctx_->getFrozenRodTruth(truth)) {
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [A1] 真值 latch 状态异常");
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 冻结真值: run_id=%s frame=%s pos=(%.6f, %.6f, %.6f) size=(%.3f, %.3f, %.3f) mass=%.6f kg",
+                    truth.run_id.c_str(), truth.frame_id.c_str(),
+                    truth.position.x, truth.position.y, truth.position.z,
+                    truth.size.x, truth.size.y, truth.size.z, truth.mass_kg);
+        const double truth_yaw = extractYawFromQuaternion(
+            tf2::toMsg(tf2::Quaternion(truth.orientation.x, truth.orientation.y,
+                                       truth.orientation.z, truth.orientation.w)));
+        RCLCPP_INFO(ctx_->get_logger(), "  [A1] 冻结真值 yaw=%.4f° (长轴为杆局部 Y 轴)",
+                    truth_yaw * 180.0 / M_PI);
+
+        const a1t::FrameMapping mapping =
+            a1t::resolveFrameMapping(truth.frame_id, planning_frame);
+        if (mapping == a1t::FrameMapping::UNSUPPORTED) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "  ✗ [A1] E_TRUTH_FRAME_UNSUPPORTED: 真值 frame '%s' 与规划坐标系 '%s' "
+                         "之间没有源码依据的变换",
+                         truth.frame_id.c_str(), planning_frame.c_str());
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 坐标处理: %s",
+                    mapping == a1t::FrameMapping::SAME_FRAME
+                        ? "同名坐标系，位姿直通"
+                        : "world 与 base_link 数值等价（SRDF 固定 virtual_joint + URDF/MuJoCo "
+                          "基座位置一致），按显式单位变换处理");
+
+        // 4. Synchronise the world object from the frozen truth.
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = truth.position.x;
+        pose.position.y = truth.position.y;
+        pose.position.z = truth.position.z;
+        pose.orientation.x = truth.orientation.x;
+        pose.orientation.y = truth.orientation.y;
+        pose.orientation.z = truth.orientation.z;
+        pose.orientation.w = truth.orientation.w;
+        geometry_msgs::msg::Vector3 size;
+        size.x = truth.size.x;
+        size.y = truth.size.y;
+        size.z = truth.size.z;
+
+        std::string reason;
+        if (!syncAluminumRodFromTruth(pose, size, planning_frame, reason)) {
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [A1] 规划场景同步失败: %s", reason.c_str());
+            ctx_->setCurrentState(TaskState::ERROR);
+            return false;
+        }
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "✓ [A1] 准备完成(PREPARED): 真值已冻结且规划场景已同步确认，未执行任何搬运运动\n");
+        ctx_->setCurrentState(TaskState::PREPARED);
+        return true;
+    }
+
+/**
+ * @brief Writes the rod world object from the frozen truth and verifies it.
+ *
+ * Uses the synchronous, bool-returning apply so a failure cannot be reported as
+ * success, then reads the object back and compares position, orientation
+ * (q/-q equivalent) and size. The ACM/SRDF are deliberately not touched.
+ */
+bool DualArmController::syncAluminumRodFromTruth(const geometry_msgs::msg::Pose& pose,
+                                                const geometry_msgs::msg::Vector3& size,
+                                                const std::string& planning_frame,
+                                                std::string& reason)
+    {
+        moveit_msgs::msg::CollisionObject collision_object;
+        collision_object.header.frame_id = planning_frame;
+        collision_object.id = "aluminum_rod";
+
+        shape_msgs::msg::SolidPrimitive primitive;
+        primitive.type = primitive.BOX;
+        primitive.dimensions = {size.x, size.y, size.z};
+
+        collision_object.primitives.push_back(primitive);
+        collision_object.primitive_poses.push_back(pose);
+        collision_object.operation = moveit_msgs::msg::CollisionObject::ADD;
+
+        moveit::planning_interface::PlanningSceneInterface psi;
+        if (!psi.applyCollisionObject(collision_object)) {
+            reason = "E_SCENE_APPLY_FAILED: /apply_planning_scene 返回失败";
+            return false;
+        }
+
+        // Read back and verify. A topic-only publish would not prove anything.
+        const auto objects = psi.getObjects(std::vector<std::string>{"aluminum_rod"});
+        const auto it = objects.find("aluminum_rod");
+        if (it == objects.end()) {
+            reason = "E_SCENE_READBACK_MISSING: 读回时未找到 aluminum_rod";
+            return false;
+        }
+        if (it->second.primitive_poses.empty() || it->second.primitives.empty()) {
+            reason = "E_SCENE_READBACK_MISSING: aluminum_rod 缺少 primitive 或 pose";
+            return false;
+        }
+        if (it->second.primitives[0].dimensions.size() < 3) {
+            reason = "E_SCENE_READBACK_MISSING: aluminum_rod 尺寸字段不完整";
+            return false;
+        }
+
+        // Compose the object frame pose with the primitive pose. MoveIt may
+        // express the placement in either: it returns the primitive pose
+        // relative to the object pose, so reading only `primitive_poses[0]`
+        // yields identity when the placement was stored on the object. The
+        // composition below is correct for both conventions.
+        tf2::Transform object_tf;
+        tf2::Transform primitive_tf;
+        tf2::fromMsg(it->second.pose, object_tf);
+        tf2::fromMsg(it->second.primitive_poses[0], primitive_tf);
+        geometry_msgs::msg::Pose actual_pose;
+        tf2::toMsg(object_tf * primitive_tf, actual_pose);
+        const auto& actual_dims = it->second.primitives[0].dimensions;
+
+        // Raw read-back, logged so a mismatch can be diagnosed from the record
+        // rather than guessed at.
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 读回原始值: object_frame='%s' primitives=%zu pose=(%.6f, %.6f, %.6f) "
+                    "quat=(%.6f, %.6f, %.6f, %.6f) dims=(%.4f, %.4f, %.4f)",
+                    it->second.header.frame_id.c_str(), it->second.primitives.size(),
+                    actual_pose.position.x, actual_pose.position.y, actual_pose.position.z,
+                    actual_pose.orientation.x, actual_pose.orientation.y,
+                    actual_pose.orientation.z, actual_pose.orientation.w,
+                    actual_dims[0], actual_dims[1], actual_dims[2]);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 写入请求值: object_frame='%s' pose=(%.6f, %.6f, %.6f) "
+                    "quat=(%.6f, %.6f, %.6f, %.6f)",
+                    collision_object.header.frame_id.c_str(), pose.position.x, pose.position.y,
+                    pose.position.z, pose.orientation.x, pose.orientation.y, pose.orientation.z,
+                    pose.orientation.w);
+
+        a1t::TruthPayload expected;
+        expected.position = {pose.position.x, pose.position.y, pose.position.z};
+        expected.orientation = {pose.orientation.x, pose.orientation.y, pose.orientation.z,
+                                pose.orientation.w};
+        expected.size = {size.x, size.y, size.z};
+
+        const a1t::Vec3 actual_position = {actual_pose.position.x, actual_pose.position.y,
+                                           actual_pose.position.z};
+        const a1t::Quat actual_orientation = {actual_pose.orientation.x, actual_pose.orientation.y,
+                                              actual_pose.orientation.z, actual_pose.orientation.w};
+        const a1t::Vec3 actual_size = {actual_dims[0], actual_dims[1], actual_dims[2]};
+
+        const double pos_tol_m = 0.001;                        // 1 mm
+        const double angle_tol_rad = 0.5 * M_PI / 180.0;       // 0.5 deg
+        const double size_tol_m = 1e-6;
+        const a1t::SceneCheck check = a1t::verifySceneReadback(
+            expected, actual_position, actual_orientation, actual_size, pos_tol_m, angle_tol_rad,
+            size_tol_m);
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [A1] 场景读回核对: Δpos=%.4f mm, Δangle=%.4f°, Δsize=%.3e m (容差 %.1f mm / %.1f° / %.0e m)",
+                    check.pos_err_m * 1000.0, check.angle_err_rad * 180.0 / M_PI,
+                    check.size_err_m, pos_tol_m * 1000.0, angle_tol_rad * 180.0 / M_PI, size_tol_m);
+
+        if (!check.ok) {
+            reason = check.reason_code + ": " + check.detail;
+            return false;
+        }
+        reason = "ok";
+        return true;
+    }
+
 void DualArmController::executeApproach()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: APPROACH] 接近物体...");
         
         // ========== 物体与机械臂参数定义 ==========
         // 物体位置 (从视觉检测获取，或回退到 objects.xml 硬编码)
-        double obj_x = ctx_->rod_pose_received_ ? ctx_->detected_rod_pose_.position.x : 0.50;
-        double obj_y = ctx_->rod_pose_received_ ? ctx_->detected_rod_pose_.position.y : 0.0;
+        geometry_msgs::msg::Pose detected_pose;
+        const bool has_detected_pose = ctx_->getDetectedRodPose(detected_pose);
+        double obj_x = has_detected_pose ? detected_pose.position.x : 0.50;
+        double obj_y = has_detected_pose ? detected_pose.position.y : 0.0;
         
         // 杆件参数 (长轴在Y方向，横向放置)
            // Y方向半长 20cm
@@ -769,7 +1225,11 @@ void DualArmController::executeApproach()
         try {
             // ========== 提前打开夹爪 ==========
             RCLCPP_INFO(ctx_->get_logger(), "  ★ [同步动作] 提前满幅打开夹爪...");
-            ctx_->grippers_->controlDualGrippers(0.04);
+            if (!ctx_->grippers_->controlDualGrippers(0.04)) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 预打开夹爪失败，停止任务");
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
             
             // ========== 左臂目标位姿 (全局姿态预解算) ==========
             geometry_msgs::msg::Pose left_target;
@@ -947,7 +1407,11 @@ void DualArmController::executeGrasp()
             RCLCPP_INFO(ctx_->get_logger(), "  [GRASP] Step 3: Closing grippers and attaching object");
             
             // 闭合夹爪
-            ctx_->grippers_->controlDualGrippers(ctx_->gripper_close_pos_);   // 同步闭合
+            if (!ctx_->grippers_->controlDualGrippers(ctx_->gripper_close_pos_)) {   // 同步闭合
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 夹爪闭合失败，禁止激活 weld 和附着物体");
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ Grippers closed");
             
             // 关键：非阻塞式等待MuJoCo物理引擎完全稳定
@@ -960,8 +1424,18 @@ void DualArmController::executeGrasp()
                 RCLCPP_INFO(ctx_->get_logger(), "  [MuJoCo] Weld约束已激活（铝棒刚性绑定到双手）");
             }
             
-            // 附着物体到机器人
-            ctx_->arms_->attachObject();
+            // 附着物体到机器人。附着失败时必须回滚 weld，避免仿真已抓住但
+            // PlanningScene 未附着，后续规划基于错误物体状态继续执行。
+            if (!ctx_->arms_->attachObject()) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ Object attach failed, rolling back weld and aborting");
+                if (ctx_->weld_pub_) {
+                    auto weld_msg = std_msgs::msg::Bool();
+                    weld_msg.data = false;
+                    ctx_->weld_pub_->publish(weld_msg);
+                }
+                ctx_->setCurrentState(TaskState::ERROR);
+                return;
+            }
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ Object attached to robot");
             
             RCLCPP_INFO(ctx_->get_logger(), "  [等待] 异步等待物理引擎稳定中（1.5秒）...");
@@ -971,8 +1445,14 @@ void DualArmController::executeGrasp()
             ctx_->wait_timer_ = ctx_->create_wall_timer(
                 std::chrono::milliseconds(1500),
                 [this]() {
+                    if (ctx_->getCurrentState() != TaskState::WAITING_PHYSICS) {
+                        if (ctx_->wait_timer_) {
+                            ctx_->wait_timer_->cancel();
+                        }
+                        return;
+                    }
                     RCLCPP_INFO(ctx_->get_logger(), "  [Timer Triggered] ✓ Physics stabilized, entering LIFT");
-                    ctx_->current_state_ = TaskState::LIFT;
+                    ctx_->setCurrentState(TaskState::LIFT);
                     if (ctx_->wait_timer_) {
                         ctx_->wait_timer_->cancel();
                     }
@@ -984,7 +1464,7 @@ void DualArmController::executeGrasp()
         }
     }
 
-void DualArmController::attachObject()
+bool DualArmController::attachObject()
     {
         using namespace std::chrono_literals;
         
@@ -1021,8 +1501,9 @@ void DualArmController::attachObject()
         } else {
             // 回退：使用视觉检测位姿或已知初始位置
             RCLCPP_WARN(ctx_->get_logger(), "    ! 无法从PlanningScene获取物体，使用回退位姿");
-            if (ctx_->rod_pose_received_) {
-                object_world_pose = ctx_->detected_rod_pose_;
+            geometry_msgs::msg::Pose detected_pose;
+            if (ctx_->getDetectedRodPose(detected_pose)) {
+                object_world_pose = detected_pose;
             } else {
                 object_world_pose.position.x = 0.50;
                 object_world_pose.position.y = 0.0;
@@ -1103,21 +1584,31 @@ void DualArmController::attachObject()
         RCLCPP_INFO(ctx_->get_logger(), "    独立物体数量: %zu (期望=0)", objects.size());
         RCLCPP_INFO(ctx_->get_logger(), "    附着物体数量: %zu (期望=1)", attached_objects.size());
         
-        if (objects.size() > 0) {
-            RCLCPP_WARN(ctx_->get_logger(), "    ! 仍有独立物体（可能是Goal State显示，可忽略）");
+        const bool world_has_rod = objects.count("aluminum_rod") > 0;
+        const bool attached_has_rod = attached_objects.count("aluminum_rod") > 0;
+
+        if (world_has_rod) {
+            RCLCPP_WARN(ctx_->get_logger(), "    ! aluminum_rod 仍作为独立物体存在");
         } else {
             RCLCPP_INFO(ctx_->get_logger(), "    ✓ 独立物体已移除");
         }
         
-        if (attached_objects.size() == 1) {
+        if (attached_has_rod) {
             RCLCPP_INFO(ctx_->get_logger(), "    ✓ 附着物体已确认");
         } else {
-            RCLCPP_WARN(ctx_->get_logger(), "    ! 附着物体验证异常");
+            RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 附着物体验证失败：未找到 aluminum_rod");
+            return false;
+        }
+
+        if (world_has_rod) {
+            RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 附着状态不一致：aluminum_rod 同时存在于世界物体中");
+            return false;
         }
         
         RCLCPP_INFO(ctx_->get_logger(), "  ✓ 附着流程完成");
         RCLCPP_INFO(ctx_->get_logger(), "    原理: 从PlanningScene获取物体真实位姿 + base_link全局坐标系");
         RCLCPP_INFO(ctx_->get_logger(), "    期望: 物体在地面原位附着（Z≈0.02），LIFT时随手臂抬升");
+        return true;
     }
 
 void DualArmController::executeLift()
@@ -1196,10 +1687,11 @@ void DualArmController::executeTransport()
             // 旋转场景下若平移过远，右臂在ROTATE中段（约20°附近）更容易出现IK无解。
             // 这里对启用旋转的工况使用更保守的平移终点，优先保证旋转可达性与稳定性。
             double total_dx, total_dy;
-            if (ctx_->rod_pose_received_) {
+            geometry_msgs::msg::Pose detected_pose;
+            if (ctx_->getDetectedRodPose(detected_pose)) {
                 // Mode B: compute deltas from detected pose to target pose
-                total_dx = ctx_->rod_target_x_ - ctx_->detected_rod_pose_.position.x;
-                total_dy = ctx_->rod_target_y_ - ctx_->detected_rod_pose_.position.y;
+                total_dx = ctx_->rod_target_x_ - detected_pose.position.x;
+                total_dy = ctx_->rod_target_y_ - detected_pose.position.y;
                 total_dx = std::clamp(total_dx, -0.30, 0.30);
                 total_dy = std::clamp(total_dy, -0.25, 0.25);
                 RCLCPP_INFO(ctx_->get_logger(),
@@ -1240,18 +1732,16 @@ void DualArmController::executeTransport()
                 right_target.position.y += total_dy * s;
 
                 auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
-                bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, ik_timeout);
-                bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, ik_timeout);
+                const auto ik_result = solveCoordinatedIk(
+                    *seed_state, *waypoint_state, left_jmg, right_jmg,
+                    left_target, right_target, ik_timeout);
 
-                if (!left_ik || !right_ik) {
-                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.5);
-                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.5);
-                }
-
-                if (!left_ik || !right_ik) {
+                if (!ik_result.success) {
                     RCLCPP_ERROR(ctx_->get_logger(),
                                  "  ✗ [TRANSPORT] 连续轨迹航点 %d/%d IK失败 Left=%s Right=%s",
-                                 i, num_waypoints, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                                 i, num_waypoints,
+                                 ik_result.left_success ? "OK" : "FAIL",
+                                 ik_result.right_success ? "OK" : "FAIL");
                     ctx_->current_state_ = TaskState::ERROR;
                     return;
                 }
@@ -1263,6 +1753,12 @@ void DualArmController::executeTransport()
 
             if (!parameterizeAndSmoothTrajectory(*traj, vel_scale, acc_scale,
                                                  ctx_->get_logger(), "TRANSPORT")) {
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
+            if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                          ctx_->get_logger(), "TRANSPORT")) {
                 ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
@@ -1332,8 +1828,9 @@ void DualArmController::executeRotate()
             const int wp_per_seg = scaledWaypointCount(45, mode_profile.rotate_waypoint_scale, 36);
             const int total_wp = num_segments * wp_per_seg;
             double total_angle;
-            if (ctx_->rod_pose_received_) {
-                double init_yaw = extractYawFromQuaternion(ctx_->detected_rod_pose_.orientation);
+            geometry_msgs::msg::Pose detected_pose;
+            if (ctx_->getDetectedRodPose(detected_pose)) {
+                double init_yaw = extractYawFromQuaternion(detected_pose.orientation);
                 total_angle = ctx_->rod_target_yaw_rad_ - init_yaw;
                 // Normalize to [-PI, PI]
                 while (total_angle > M_PI) total_angle -= 2.0 * M_PI;
@@ -1583,6 +2080,12 @@ void DualArmController::executeRotate()
                 
                 RCLCPP_INFO(ctx_->get_logger(), "    TOTG: 时长=%.2fs, 轨迹点=%zu",
                             traj->getDuration(), traj->getWayPointCount());
+
+                if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                              ctx_->get_logger(), "ROTATE")) {
+                    ctx_->current_state_ = TaskState::ERROR;
+                    return;
+                }
                 
                 // ----- 构建Plan并执行（不走OMPL） -----
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
@@ -1706,18 +2209,16 @@ void DualArmController::executeDescend()
                 right_target.position.z = right_start.position.z + (right_goal.position.z - right_start.position.z) * s;
 
                 auto waypoint_state = std::make_shared<moveit::core::RobotState>(*seed_state);
-                bool left_ik = waypoint_state->setFromIK(left_jmg, left_target, ik_timeout);
-                bool right_ik = waypoint_state->setFromIK(right_jmg, right_target, ik_timeout);
+                const auto ik_result = solveCoordinatedIk(
+                    *seed_state, *waypoint_state, left_jmg, right_jmg,
+                    left_target, right_target, ik_timeout);
 
-                if (!left_ik || !right_ik) {
-                    left_ik = waypoint_state->setFromIK(left_jmg, left_target, 0.5);
-                    right_ik = waypoint_state->setFromIK(right_jmg, right_target, 0.5);
-                }
-
-                if (!left_ik || !right_ik) {
+                if (!ik_result.success) {
                     RCLCPP_ERROR(ctx_->get_logger(),
                                  "  ✗ [DESCEND] 连续轨迹航点 %d/%d IK失败 Left=%s Right=%s",
-                                 i, num_waypoints, left_ik ? "OK" : "FAIL", right_ik ? "OK" : "FAIL");
+                                 i, num_waypoints,
+                                 ik_result.left_success ? "OK" : "FAIL",
+                                 ik_result.right_success ? "OK" : "FAIL");
                     ctx_->current_state_ = TaskState::ERROR;
                     return;
                 }
@@ -1729,6 +2230,12 @@ void DualArmController::executeDescend()
 
             if (!parameterizeAndSmoothTrajectory(*traj, vel_scale, acc_scale,
                                                  ctx_->get_logger(), "DESCEND")) {
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
+            if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                          ctx_->get_logger(), "DESCEND")) {
                 ctx_->current_state_ = TaskState::ERROR;
                 return;
             }
@@ -1832,6 +2339,11 @@ void DualArmController::executePlace()
                     return false;
                 }
 
+                if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                              ctx_->get_logger(), "PLACE_RELEASE_ALIGN")) {
+                    return false;
+                }
+
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 traj->getRobotTrajectoryMsg(plan.trajectory_);
                 plan.planning_time_ = 0.0;
@@ -1857,10 +2369,17 @@ void DualArmController::executePlace()
                 return;
             }
 
-            // ========== Step A: 去激活MuJoCo weld约束 + 打开夹爪释放物体 ==========
-            RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step A: 去激活weld约束并打开夹爪释放物体");
+            // ========== Step A: 打开夹爪 + 去激活MuJoCo weld约束释放物体 ==========
+            RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step A: 打开夹爪并去激活weld约束释放物体");
             
-            // 先去激活weld，再开夹爪，让物体自然落下
+            if (!ctx_->grippers_->controlDualGrippers(0.04)) {         // 完全同步打开
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 夹爪打开失败，保持 weld/attach 状态并停止放置流程");
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+            RCLCPP_INFO(ctx_->get_logger(), "  ✓ 夹爪已同步打开");
+
+            // 夹爪确认打开后再解除 weld，避免开爪失败时物体状态被误报为已释放。
             {
                 auto weld_msg = std_msgs::msg::Bool();
                 weld_msg.data = false;
@@ -1869,16 +2388,17 @@ void DualArmController::executePlace()
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             
-            ctx_->grippers_->controlDualGrippers(0.04);         // 完全同步打开
-            RCLCPP_INFO(ctx_->get_logger(), "  ✓ 夹爪已同步打开");
-            
             // 等待物理引擎稳定（杆件落地）
             RCLCPP_INFO(ctx_->get_logger(), "  [等待] 物理引擎稳定中（1.5秒）...");
             std::this_thread::sleep_for(std::chrono::milliseconds(1500));
             
             // ========== Step B: 解除附着并重新添加为世界碰撞物体 ==========
             RCLCPP_INFO(ctx_->get_logger(), "  [PLACE] Step B: 解除物体附着，重新添加为世界碰撞物体");
-            ctx_->arms_->detachAndReplaceObject();
+            if (!ctx_->arms_->detachAndReplaceObject()) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ 解除附着或重建世界物体失败，停止放置流程");
+                ctx_->setCurrentState(TaskState::ERROR);
+                return;
+            }
             RCLCPP_INFO(ctx_->get_logger(), "  ✓ 物体已放置");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             
@@ -1976,6 +2496,12 @@ void DualArmController::executePlace()
                 return;
             }
 
+            if (!validateManualTrajectory(*traj, robot_model, ctx_->dual_arm_group_,
+                                          ctx_->get_logger(), "PLACE", false)) {
+                ctx_->current_state_ = TaskState::ERROR;
+                return;
+            }
+
             moveit::planning_interface::MoveGroupInterface::Plan plan;
             traj->getRobotTrajectoryMsg(plan.trajectory_);
             plan.planning_time_ = 0.0;
@@ -1996,7 +2522,7 @@ void DualArmController::executePlace()
         }
     }
 
-void DualArmController::detachAndReplaceObject()
+bool DualArmController::detachAndReplaceObject()
     {
         using namespace std::chrono_literals;
         
@@ -2012,19 +2538,50 @@ void DualArmController::detachAndReplaceObject()
         double rod_center_y = (left_current.pose.position.y + right_current.pose.position.y) / 2.0;
         double rod_center_z = 0.02;  // 放置到地面（与初始高度相同）
         
-        RCLCPP_INFO(ctx_->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向 Rz=%s",
-            rod_center_x, rod_center_y, rod_center_z, ctx_->enable_rotate_ ? "45°" : "0°");
+        // The rod's local long axis is its Y axis. Infer its world yaw from
+        // the current hand baseline instead of assuming a fixed 45° target.
+        const double hand_dx = right_current.pose.position.x - left_current.pose.position.x;
+        const double hand_dy = right_current.pose.position.y - left_current.pose.position.y;
+        double rod_yaw = std::atan2(hand_dy, hand_dx) + M_PI / 2.0;
+        while (rod_yaw > M_PI) rod_yaw -= 2.0 * M_PI;
+        while (rod_yaw < -M_PI) rod_yaw += 2.0 * M_PI;
+
+        RCLCPP_INFO(ctx_->get_logger(), "    杆件放置位置: (%.3f, %.3f, %.3f)，方向 Rz=%.1f°",
+            rod_center_x, rod_center_y, rod_center_z, rod_yaw * 180.0 / M_PI);
         
         // ========== 步骤1: 解除附着 ==========
         // 修复：之前只是发了REMOVE消息到话题，但由于ROS 2 MoveIt架构中话题处理的延迟或覆盖，
         // 常常无法正确更新 attached_objects，导致MoveIt依然认为物体粘在手上（RETREAT时发生碰撞）。
         // 改用高层API detachObject 会通过 Service 进行可靠同步。
         bool detach_success = ctx_->left_arm_->detachObject("aluminum_rod");
+        if (!detach_success) {
+            // The object is normally attached to mj_left_hand. Only fall back
+            // to the dual-arm interface when the primary detach request fails;
+            // issuing both requests creates a stale second detach and produces
+            // misleading "Attached body not found" errors in MoveIt.
+            detach_success = ctx_->dual_arm_->detachObject("aluminum_rod");
+        }
         RCLCPP_INFO(ctx_->get_logger(), "    ✓ 执行解除附着: %s", detach_success ? "成功" : "失败");
-        std::this_thread::sleep_for(300ms);
-        
-        // 为了绝对安全，额外从 MoveGroupInterface 中显式调用
-        ctx_->dual_arm_->detachObject("aluminum_rod");
+        if (!detach_success) {
+            RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 解除附着请求失败");
+            return false;
+        }
+
+        moveit::planning_interface::PlanningSceneInterface psi;
+        bool attached_body_removed = false;
+        for (int attempt = 0; attempt < 15; ++attempt) {
+            auto attached_objects = psi.getAttachedObjects({"aluminum_rod"});
+            if (attached_objects.count("aluminum_rod") == 0) {
+                attached_body_removed = true;
+                break;
+            }
+            std::this_thread::sleep_for(100ms);
+        }
+        if (!attached_body_removed) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "    ✗ PlanningScene 仍存在 attached aluminum_rod，禁止重新加入世界物体");
+            return false;
+        }
         
         // ========== 步骤2: 重新添加为世界碰撞物体（旋转后姿态）==========
         moveit_msgs::msg::CollisionObject collision_object;
@@ -2041,7 +2598,7 @@ void DualArmController::detachAndReplaceObject()
         rod_pose.position.z = rod_center_z;
         
         tf2::Quaternion q_rod;
-        q_rod.setRPY(0, 0, ctx_->enable_rotate_ ? M_PI / 4.0 : 0.0);
+        q_rod.setRPY(0, 0, rod_yaw);
         rod_pose.orientation = tf2::toMsg(q_rod);
         
         collision_object.primitives.push_back(primitive);
@@ -2049,11 +2606,14 @@ void DualArmController::detachAndReplaceObject()
         collision_object.operation = moveit_msgs::msg::CollisionObject::ADD;
         
         // 修复：使用 PlanningSceneInterface 的 Apply 方法强制同步更新世界物体
-        moveit::planning_interface::PlanningSceneInterface psi;
-        psi.applyCollisionObject(collision_object);
+        const bool apply_success = psi.applyCollisionObject(collision_object);
+        if (!apply_success) {
+            RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 重新添加铝棒为世界碰撞物体失败");
+            return false;
+        }
         
-        RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（Rz=%s）",
-            ctx_->enable_rotate_ ? "45°" : "0°");
+        RCLCPP_INFO(ctx_->get_logger(), "    ✓ 重新添加铝棒为世界碰撞物体（Rz=%.1f°）",
+            rod_yaw * 180.0 / M_PI);
         std::this_thread::sleep_for(300ms);
         
         // ========== 步骤3: 验证结果 ==========
@@ -2062,8 +2622,20 @@ void DualArmController::detachAndReplaceObject()
         
         RCLCPP_INFO(ctx_->get_logger(), "    世界物体: %zu (期望≥1), 附着物体: %zu (期望=0)",
                     objects.size(), attached_objects.size());
+
+        const bool world_has_rod = objects.count("aluminum_rod") > 0;
+        const bool attached_has_rod = attached_objects.count("aluminum_rod") > 0;
+
+        if (!world_has_rod || attached_has_rod) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "    ✗ 放置后场景状态不一致: world_has_rod=%s attached_has_rod=%s",
+                         world_has_rod ? "true" : "false",
+                         attached_has_rod ? "true" : "false");
+            return false;
+        }
         
         RCLCPP_INFO(ctx_->get_logger(), "    ✓ 解除附着并重新放置完成");
+        return true;
     }
 
 void DualArmController::executeRetreat()

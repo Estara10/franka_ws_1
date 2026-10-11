@@ -1,0 +1,1 @@
+(empty file = no MJ_INTERNAL_COMPLIANCE_* exported; simulator uses its compiled defaults)

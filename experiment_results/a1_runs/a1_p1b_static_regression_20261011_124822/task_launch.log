@@ -1,0 +1,57 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-11-20-48-27-466581-Estara-328768
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [328912]
+[dual_arm_carry_task_node-1] [INFO] [1791722912.812030125] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791722912.816106790] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791722912.816164246] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791722912.816182148] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791722912.816197064] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791722912.816211056] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791722912.816225409] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1791722912.816239993] [dual_arm_carry_task]:   杆位姿来源: static
+[dual_arm_carry_task_node-1] [INFO] [1791722914.816630503] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791722914.822321445] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.008 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791722914.822370189] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791722914.851402486] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791722914.851460082] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791722914.859419489] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864584300] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864624409] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864643340] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864648281] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864652639] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864657337] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864663499] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864676268] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864680155] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864683954] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864689062] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864693766] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864697082] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864711064] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864716366] [dual_arm_carry_task]:   使用当前机械臂位置作为起始点
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864725444] [dual_arm_carry_task]:   ✓ RETREAT目标已设为Franka标准ready姿态
+[dual_arm_carry_task_node-1] [INFO] [1791722914.864729005] [dual_arm_carry_task]:   ✓ 使用 SRDF 默认碰撞矩阵（无需手动初始化）
+[dual_arm_carry_task_node-1] [INFO] [1791722914.877361241] [dual_arm_carry_task]:   ✓ 铝棒碰撞物体已添加到 Planning Scene
+[dual_arm_carry_task_node-1] [INFO] [1791722915.380345136] [dual_arm_carry_task]:   ✓ 物体 aluminum_rod 已添加到 ACM（默认禁止所有碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1791722915.386602570] [dual_arm_carry_task]: ✓ 初始化完成，进入接近阶段
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791722915.586714443] [dual_arm_carry_task]: [状态: APPROACH] 接近物体...
+[dual_arm_carry_task_node-1] [INFO] [1791722915.586782345] [dual_arm_carry_task]:   ★ [同步动作] 提前满幅打开夹爪...
+[dual_arm_carry_task_node-1] [INFO] [1791722915.594865777] [dual_arm_carry_task]:   发送双臂夹爪同步指令 -> 0.040
+[dual_arm_carry_task_node-1] [INFO] [1791722916.492195774] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[dual_arm_carry_task_node-1] [ERROR] [1791722920.595099799] [dual_arm_carry_task]:   ✗ 等待双臂夹爪 goal 响应超时
+[dual_arm_carry_task_node-1] [ERROR] [1791722920.605205266] [dual_arm_carry_task]:   ✗ 预打开夹爪失败，停止任务
+[dual_arm_carry_task_node-1] [ERROR] [1791722920.805366696] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [ERROR] [1791722920.805395802] [dual_arm_carry_task]:     ✗ 任务失败！
+[dual_arm_carry_task_node-1] [INFO] [1791722920.805400966] [dual_arm_carry_task]: 已发布任务失败状态(ERROR)。
+[dual_arm_carry_task_node-1] [ERROR] [1791722920.805403879] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791722920.805407075] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791722920.805409179] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 328912]

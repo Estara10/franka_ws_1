@@ -3,6 +3,13 @@
 两台 Franka Panda 在 MuJoCo 中协同夹持并搬运铝杆，重点研究双臂协调轨迹规划、轨迹优化
 和柔顺控制。技术栈为 ROS 2 Humble、MoveIt 2、ros2_control 和 MuJoCo。
 
+本项目是大学生创新创业训练项目，优先推进学习研究、核心算法、功能验证与成果展示。
+所有 AI Agent 的长期开发准则以 [`项目指南`](docs/PROJECT_GUIDE.md) 为准，采用与任务
+风险相称的测试和审阅，避免过度工程化。
+
+本次结题仅进行 MuJoCo 仿真验证，不开展实际机器测试。修订后的结题目标与实验评价方案见
+[`结题目标修订说明`](docs/deliverables/结题目标修订说明.md)。
+
 当前唯一开发主线位于 `src/multipanda_ros2`。早期 `src/dual_arm_*` 四包已移动到
 [`archive/`](archive/README.md)，不再参与构建。
 

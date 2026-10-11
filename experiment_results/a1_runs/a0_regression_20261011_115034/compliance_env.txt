@@ -1,0 +1,3 @@
+(if only this line is present, no MJ_INTERNAL_COMPLIANCE_* was exported, so the
+ simulator used its compiled defaults: enabled, threshold 2.0, k_gain 0.08,
+ d_gain 0.15, min_k 0.10, max_d 2.5)
