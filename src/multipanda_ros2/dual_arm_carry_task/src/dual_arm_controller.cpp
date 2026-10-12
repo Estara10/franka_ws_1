@@ -7,7 +7,14 @@
 #endif
 #include <cctype>
 #include <cmath>
+#include <memory>
 #include <unordered_map>
+#include <vector>
+#include <moveit/collision_detection/collision_matrix.h>
+#include <moveit_msgs/srv/get_planning_scene.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <srdfdom/model.h>
+#include <urdf_parser/urdf_parser.h>
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
 #include "dual_arm_carry_task/gripper_controller.hpp"
 
@@ -1081,6 +1088,71 @@ bool DualArmController::prepareFromA1Truth()
             return false;
         }
 
+        // 5. A1 P2a/P2b: optional static and joint pre-grasp path checks on the
+        //    frozen truth. Both run inside the same no-motion boundary.
+        //    run inside the same no-motion boundary. A failure is reported
+        //    loudly and is NOT turned into a prepare failure -- the truth really
+        //    is frozen and the scene really is synced -- but the run record
+        //    makes the rejection unmistakable and the sample is never accepted.
+        if (ctx_->p2a_check_) {
+            a1v::SampleValidation validation;
+            const bool static_ok = runP2aChecks(truth, validation);
+            if (!static_ok) {
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "  ✗ [P2A] 该样本未通过静态有效性检查（几何=%s 说明=%s / IK=%s 说明=%s / "
+                             "碰撞=%s 说明=%s）",
+                             a1v::statusName(validation.geometry.status),
+                             validation.geometry.reason_code.c_str(),
+                             a1v::statusName(validation.ik.status),
+                             validation.ik.reason_code.c_str(),
+                             a1v::statusName(validation.collision.status),
+                             validation.collision.reason_code.c_str());
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "  ✗ [P2A] 不放宽碰撞规则或容差；该样本按拒绝处理，"
+                             "不得作为可搬运样本使用");
+            } else {
+                RCLCPP_INFO(ctx_->get_logger(),
+                            "  ✓ [P2A] 静态检查通过（几何/IK/碰撞）");
+                // P2b runs only on a sample whose static checks passed.
+                a1v::SampleValidation full = validation;
+                if (ctx_->p2b_check_) {
+                    const bool path_ok = runP2bPathCheck(full);
+                    const char* p2_accept = (static_ok && path_ok) ? "true" : "false";
+                    RCLCPP_INFO(ctx_->get_logger(),
+                                "[P2B_RESULT] geometry=%s ik=%s collision=%s path_validation=%s "
+                                "p2_acceptance=%s",
+                                a1v::statusName(full.geometry.status),
+                                a1v::statusName(full.ik.status),
+                                a1v::statusName(full.collision.status),
+                                a1v::statusName(full.path_validation.status), p2_accept);
+                    if (path_ok) {
+                        RCLCPP_INFO(ctx_->get_logger(),
+                                    "  [P2] p2_acceptance=true 的语义 = 通过本次静态与预抓取路径检查；"
+                                    "**不是**搬运 DONE，下降/闭合/抓持与完整搬运仍属 P3");
+                    } else {
+                        RCLCPP_ERROR(ctx_->get_logger(),
+                                     "  ✗ [P2B] 联合预抓取路径未通过：%s（%s）",
+                                     full.path_validation.reason_code.c_str(),
+                                     full.path_validation.detail.c_str());
+                        RCLCPP_ERROR(ctx_->get_logger(),
+                                     "  ✗ [P2] 不放宽碰撞规则或换起点；本样本按拒绝处理");
+                    }
+                } else {
+                    RCLCPP_INFO(ctx_->get_logger(),
+                                "[P2B_RESULT] geometry=%s ik=%s collision=%s "
+                                "path_validation=NOT_RUN p2_acceptance=null",
+                                a1v::statusName(full.geometry.status),
+                                a1v::statusName(full.ik.status),
+                                a1v::statusName(full.collision.status));
+                    RCLCPP_INFO(ctx_->get_logger(),
+                                "  [P2B] 未启用 p2b_check，跳过联合预抓取路径检查");
+                }
+            }
+        } else {
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P2A] 未启用 p2a_check，跳过静态有效性检查（几何/IK/碰撞均为 NOT_RUN）");
+        }
+
         RCLCPP_INFO(ctx_->get_logger(),
                     "✓ [A1] 准备完成(PREPARED): 真值已冻结且规划场景已同步确认，未执行任何搬运运动\n");
         ctx_->setCurrentState(TaskState::PREPARED);
@@ -1194,6 +1266,1583 @@ bool DualArmController::syncAluminumRodFromTruth(const geometry_msgs::msg::Pose&
         reason = "ok";
         return true;
     }
+
+// ===========================================================================
+// A1 P2a: static sample validity (geometry, combined dual-arm IK, collision).
+// Everything here runs inside the PREPARED boundary: no arm, gripper, weld or
+// attach command is ever sent.
+// ===========================================================================
+namespace {
+
+Eigen::Isometry3d toEigenPose(const a1v::ArmTarget& t)
+{
+    Eigen::Isometry3d m = Eigen::Isometry3d::Identity();
+    m.translation() = Eigen::Vector3d(t.position.x, t.position.y, t.position.z);
+    m.linear() = Eigen::Quaterniond(t.orientation.w, t.orientation.x, t.orientation.y,
+                                    t.orientation.z)
+                     .normalized()
+                     .toRotationMatrix();
+    return m;
+}
+
+a1v::ArmTarget fromEigenPose(const Eigen::Isometry3d& m)
+{
+    const Eigen::Quaterniond q(m.rotation());
+    a1v::ArmTarget t;
+    t.position = {m.translation().x(), m.translation().y(), m.translation().z()};
+    t.orientation = {q.x(), q.y(), q.z(), q.w()};
+    return t;
+}
+
+// Contact tally shared by the P2a static check and the P2b path check, so both
+// classify contacts identically.
+struct ContactTally {
+    std::size_t rod {0};
+    std::size_t support {0};
+    std::size_t dual_arm {0};
+    std::size_t self {0};
+    std::size_t world {0};
+    std::vector<std::string> examples;
+    std::size_t total() const { return rod + support + dual_arm + self + world; }
+};
+
+ContactTally tallyContactsIn(const planning_scene::PlanningSceneConstPtr& sc,
+                             const moveit::core::RobotModelConstPtr& mdl,
+                             const moveit::core::RobotState& st,
+                             const collision_detection::AllowedCollisionMatrix& acm,
+                             const std::string& rod_id,
+                             const std::string& support_id)
+{
+    ContactTally tally;
+    collision_detection::CollisionRequest req;
+    req.contacts = true;
+    req.max_contacts = 200;
+    collision_detection::CollisionResult res;
+    sc->checkCollision(req, res, st, acm);
+    for (const auto& contact : res.contacts) {
+        const std::string& a = contact.first.first;
+        const std::string& b = contact.first.second;
+        if (a1v::isRodPair(a, b, rod_id)) {
+            ++tally.rod;
+        } else if (a1v::isSupportPair(a, b, support_id)) {
+            ++tally.support;
+        } else if (a1v::isCrossArmPair(a, b)) {
+            ++tally.dual_arm;
+        } else if (mdl->hasLinkModel(a) && mdl->hasLinkModel(b)) {
+            ++tally.self;
+        } else {
+            ++tally.world;
+        }
+        if (tally.examples.size() < 10) {
+            tally.examples.push_back(a + "<->" + b);
+        }
+    }
+    return tally;
+}
+
+std::string describeTally(const ContactTally& t)
+{
+    std::string s = "杆接触=" + std::to_string(t.rod) + " 地面/支撑面=" + std::to_string(t.support) +
+                    " 双臂互碰=" + std::to_string(t.dual_arm) + " 自碰撞=" + std::to_string(t.self) +
+                    " 其他世界物体=" + std::to_string(t.world);
+    if (!t.examples.empty()) {
+        s += " 例:";
+        for (const std::string& e : t.examples) {
+            s += " " + e;
+        }
+    }
+    return s;
+}
+
+// Collects the arm joints of one group in a stable order for limit / jump
+// checks.
+void collectArmJoints(const moveit::core::RobotState& st,
+                      const moveit::core::JointModelGroup* jmg,
+                      std::vector<double>& q,
+                      std::vector<double>& lower,
+                      std::vector<double>& upper,
+                      std::vector<std::string>& names)
+{
+    for (const moveit::core::JointModel* jm : jmg->getActiveJointModels()) {
+        for (const std::string& var : jm->getVariableNames()) {
+            const moveit::core::VariableBounds& b = jm->getVariableBounds(var);
+            q.push_back(st.getVariablePosition(var));
+            lower.push_back(b.position_bounded_ ? b.min_position_
+                                                : -std::numeric_limits<double>::infinity());
+            upper.push_back(b.position_bounded_ ? b.max_position_
+                                                : std::numeric_limits<double>::infinity());
+            names.push_back(var);
+        }
+    }
+}
+
+}  // namespace
+
+/**
+ * A1 P2a: build an INDEPENDENT robot model in which only the two hand links have
+ * their collision geometry replaced by the conservative AABB of the MuJoCo
+ * hand_c mesh.
+ *
+ * The URDF and SRDF are re-parsed from the node's own parameters, so the result
+ * is a private object: the shared RobotModel and the live PlanningScene are
+ * never touched. If anything cannot be loaded the caller is told, so an empty
+ * model can never silently stand in for a real one.
+ */
+std::shared_ptr<moveit::core::RobotModel> DualArmController::buildMujocoHandModel(
+    const a1v::Aabb& hand_aabb,
+    const std::vector<std::string>& hand_links,
+    std::string& reason)
+{
+    if (!hand_aabb.valid) {
+        reason = "E_HAND_AABB_INVALID: the hand mesh bounding box was not computed";
+        return nullptr;
+    }
+    if (!ctx_->has_parameter("robot_description") ||
+        !ctx_->has_parameter("robot_description_semantic")) {
+        reason = "E_MODEL_PARAMS_MISSING: robot_description / robot_description_semantic "
+                 "are not available on this node";
+        return nullptr;
+    }
+    const std::string urdf_xml = ctx_->get_parameter("robot_description").as_string();
+    const std::string srdf_xml = ctx_->get_parameter("robot_description_semantic").as_string();
+    if (urdf_xml.empty() || srdf_xml.empty()) {
+        reason = "E_MODEL_PARAMS_EMPTY: robot_description or robot_description_semantic is empty";
+        return nullptr;
+    }
+
+    // Fresh parse: this object is ours alone.
+    urdf::ModelInterfaceSharedPtr urdf_model = urdf::parseURDF(urdf_xml);
+    if (!urdf_model) {
+        reason = "E_URDF_PARSE_FAILED: the robot description could not be parsed";
+        return nullptr;
+    }
+
+    const a1v::Vec3 center = hand_aabb.center();
+    const a1v::Vec3 size = hand_aabb.size();
+    if (!(size.x > 0.0) || !(size.y > 0.0) || !(size.z > 0.0)) {
+        reason = "E_HAND_AABB_DEGENERATE: the hand mesh bounding box has a non-positive extent";
+        return nullptr;
+    }
+
+    for (const std::string& name : hand_links) {
+        // The parsed model is private, so adjusting its links is safe here.
+        urdf::LinkSharedPtr link = std::const_pointer_cast<urdf::Link>(urdf_model->getLink(name));
+        if (!link) {
+            reason = "E_HAND_LINK_MISSING: '" + name + "' is not in the robot description";
+            return nullptr;
+        }
+        auto box = std::make_shared<urdf::Box>();
+        box->dim = urdf::Vector3(size.x, size.y, size.z);
+
+        auto collision = std::make_shared<urdf::Collision>();
+        collision->origin.clear();  // identity rotation, zero position ...
+        // ... then offset to the AABB centre, which is NOT the hand origin.
+        collision->origin.position = urdf::Vector3(center.x, center.y, center.z);
+        collision->geometry = box;
+
+        link->collision_array.clear();
+        link->collision_array.push_back(collision);
+        link->collision = collision;
+    }
+
+    auto srdf_model = std::make_shared<srdf::Model>();
+    if (!srdf_model->initString(*urdf_model, srdf_xml)) {
+        reason = "E_SRDF_PARSE_FAILED: the semantic description could not be parsed";
+        return nullptr;
+    }
+
+    try {
+        auto model = std::make_shared<moveit::core::RobotModel>(urdf_model, srdf_model);
+        return model;
+    } catch (const std::exception& e) {
+        reason = std::string("E_MODEL_BUILD_FAILED: ") + e.what();
+        return nullptr;
+    }
+}
+
+bool DualArmController::runP2aChecks(const a1t::TruthPayload& truth, a1v::SampleValidation& out)
+{
+    using namespace std::chrono_literals;
+
+    // P2a judges a static target only. Saying so explicitly keeps a static pass
+    // from being read as "transportable".
+    out.path_validation.status = a1v::CheckStatus::NOT_RUN;
+    out.path_validation.reason_code = "E_P2B_NOT_RUN";
+    out.path_validation.detail =
+        "joint pre-grasp path validity belongs to P2b and is not evaluated here";
+
+    // Every exit path emits the machine-readable line, so a rejected sample is
+    // recorded as precisely as an accepted one. Absence of the line is never a
+    // pass: the run script treats a missing line as "did not pass".
+    auto emit = [&](bool ok) {
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "[P2A_RESULT] geometry=%s ik=%s collision=%s path_validation=NOT_RUN "
+                    "p2_acceptance=null static_passed=%s",
+                    a1v::statusName(out.geometry.status), a1v::statusName(out.ik.status),
+                    a1v::statusName(out.collision.status), ok ? "true" : "false");
+        return ok;
+    };
+
+    RCLCPP_INFO(ctx_->get_logger(), "\n----- [P2A] 样本静态有效性检查（不运动）-----");
+
+    // -----------------------------------------------------------------------
+    // 1. Geometry
+    // -----------------------------------------------------------------------
+    a1v::WorkspaceBounds bounds;
+    bounds.x_min = ctx_->p2a_workspace_x_min_;
+    bounds.x_max = ctx_->p2a_workspace_x_max_;
+    bounds.y_min = ctx_->p2a_workspace_y_min_;
+    bounds.y_max = ctx_->p2a_workspace_y_max_;
+    bounds.source = ctx_->p2a_workspace_source_;
+
+    a1v::SupportCriteria support;
+    support.support_z = ctx_->p2a_support_z_;
+    support.resting_z_tol = ctx_->p2a_resting_z_tol_;
+    support.max_tilt_deg = ctx_->p2a_max_tilt_deg_;
+
+    const a1v::GeometryResult geo = a1v::checkGeometry(truth, bounds, support);
+    out.geometry = geo.item;
+
+    RCLCPP_INFO(ctx_->get_logger(), "  [P2A][几何] %s (%s)", a1v::statusName(out.geometry.status),
+                out.geometry.reason_code.c_str());
+    RCLCPP_INFO(ctx_->get_logger(),
+                "    杆 yaw=%.4f° 倾角=%.4f° 中心 z=%.6f | footprint x=[%.4f, %.4f] y=[%.4f, %.4f]",
+                geo.yaw_rad * 180.0 / M_PI, geo.tilt_deg, geo.center_z, geo.footprint.x_min,
+                geo.footprint.x_max, geo.footprint.y_min, geo.footprint.y_max);
+    RCLCPP_INFO(ctx_->get_logger(),
+                "    配置工作区 x=[%.3f, %.3f] y=[%.3f, %.3f]，最小余量 %.3f mm。来源: %s",
+                bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max,
+                geo.footprint.min_clearance_m * 1000.0,
+                bounds.source.empty() ? "<未注明>" : bounds.source.c_str());
+    RCLCPP_INFO(ctx_->get_logger(),
+                "    说明: MuJoCo 支撑面为无限 plane（dual_scene.xml 的 floor geom，无 pos），"
+                "上界是配置的研究包络，不是物理桌面边缘");
+    if (out.geometry.status != a1v::CheckStatus::PASSED) {
+        RCLCPP_ERROR(ctx_->get_logger(), "    ✗ %s", out.geometry.detail.c_str());
+    }
+
+    // -----------------------------------------------------------------------
+    // 2. Shared targets
+    // -----------------------------------------------------------------------
+    a1v::GraspGeometry gg;
+    gg.grasp_offset_m = ctx_->p2a_grasp_offset_m_;
+    gg.eef_base_yaw_rad = ctx_->p2a_eef_base_yaw_deg_ * M_PI / 180.0;
+    gg.pre_grasp_height_m = ctx_->approach_height_;
+    gg.grasp_height_m = ctx_->grasp_height_;
+
+    double rod_yaw = 0.0;
+    const a1v::DualTarget pre = a1v::buildPreGraspTarget(truth, gg, &rod_yaw);
+    const a1v::DualTarget grasp = a1v::buildGraspTarget(truth, gg, &rod_yaw);
+
+    if (!std::isfinite(rod_yaw)) {
+        out.ik.status = a1v::CheckStatus::FAILED;
+        out.ik.reason_code = "E_TARGET_NO_YAW";
+        out.ik.detail = "rod yaw could not be extracted, so no target can be built";
+        out.collision.status = a1v::CheckStatus::NOT_RUN;
+        return emit(false);
+    }
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2A][目标] 抓取偏移 %.3f m（沿杆长轴，杆半长 %.3f m），末端基准 yaw %.1f°",
+                gg.grasp_offset_m, truth.size.y * 0.5, ctx_->p2a_eef_base_yaw_deg_);
+    RCLCPP_INFO(ctx_->get_logger(), "    预抓取 z=%.3f 抓取 z=%.3f（均为腕部 link8 原点高度，非指尖/TCP）",
+                gg.pre_grasp_height_m, gg.grasp_height_m);
+    RCLCPP_INFO(ctx_->get_logger(), "    左(杆 +长轴端) 预抓取=(%.4f, %.4f, %.4f) 抓取=(%.4f, %.4f, %.4f)",
+                pre.left.position.x, pre.left.position.y, pre.left.position.z,
+                grasp.left.position.x, grasp.left.position.y, grasp.left.position.z);
+    RCLCPP_INFO(ctx_->get_logger(), "    右(杆 -长轴端) 预抓取=(%.4f, %.4f, %.4f) 抓取=(%.4f, %.4f, %.4f)",
+                pre.right.position.x, pre.right.position.y, pre.right.position.z,
+                grasp.right.position.x, grasp.right.position.y, grasp.right.position.z);
+
+    // Cross-check the ROS-free orientation builder against tf2, the API the A0
+    // path uses, so "yaw=0 reproduces A0" is demonstrated and not asserted.
+    {
+        tf2::Quaternion reference;
+        reference.setRPY(M_PI, 0.0, rod_yaw + gg.eef_base_yaw_rad);
+        const double diff = a1t::rotationDistanceRad(
+            a1t::Quat{pre.left.orientation.x, pre.left.orientation.y, pre.left.orientation.z,
+                      pre.left.orientation.w},
+            a1t::Quat{reference.x(), reference.y(), reference.z(), reference.w()});
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "    姿态约定核对: 本构造器 q=(%.9f, %.9f, %.9f, %.9f) 与 tf2 setRPY(π,0,%.4f°) "
+                    "角度差 %.3e rad",
+                    pre.left.orientation.x, pre.left.orientation.y, pre.left.orientation.z,
+                    pre.left.orientation.w, (rod_yaw + gg.eef_base_yaw_rad) * 180.0 / M_PI, diff);
+    }
+
+    // -----------------------------------------------------------------------
+    // 3. Combined dual-arm IK
+    // -----------------------------------------------------------------------
+    auto robot_model = ctx_->dual_arm_->getRobotModel();
+    const moveit::core::JointModelGroup* left_jmg =
+        robot_model->getJointModelGroup(ctx_->left_arm_group_);
+    const moveit::core::JointModelGroup* right_jmg =
+        robot_model->getJointModelGroup(ctx_->right_arm_group_);
+    if (left_jmg == nullptr || right_jmg == nullptr) {
+        out.ik.status = a1v::CheckStatus::FAILED;
+        out.ik.reason_code = "E_IK_NO_GROUP";
+        out.ik.detail = "an arm joint model group is not present in the robot model";
+        out.collision.status = a1v::CheckStatus::NOT_RUN;
+        return emit(false);
+    }
+
+    // Verified at runtime rather than assumed: which link the arm group's
+    // targets actually refer to.
+    const std::string left_eef = ctx_->left_arm_->getEndEffectorLink();
+    const std::string right_eef = ctx_->right_arm_->getEndEffectorLink();
+    RCLCPP_INFO(ctx_->get_logger(), "  [P2A][IK] 末端 link: 左=%s 右=%s（目标位姿即该 link 的原点位姿）",
+                left_eef.c_str(), right_eef.c_str());
+
+    const moveit::core::RobotStatePtr start = ctx_->dual_arm_->getCurrentState();
+    const a1v::DualTarget targets[2] = {pre, grasp};
+    const char* eefs[2] = {left_eef.c_str(), right_eef.c_str()};
+    const double pos_tol = ctx_->p2a_ik_pos_tol_m_;
+    const double ang_tol = ctx_->p2a_ik_angle_tol_deg_ * M_PI / 180.0;
+
+    // Bounded search over several IK attempts.
+    //
+    // KDL restarts randomly inside its timeout, so "take the first success"
+    // makes the outcome depend on luck: repeated runs of the same sample
+    // produced descent changes of 1.86 rad and 2.26 rad for the same arm.
+    // Every attempt that solves BOTH targets and passes the limit and residual
+    // checks is therefore scored, and the pair with the smallest pre-grasp ->
+    // grasp change is kept. The check then answers "does a well-behaved
+    // combined dual-arm configuration exist for this sample?", which is the
+    // question that matters, instead of "did the first random seed land well?".
+    moveit::core::RobotState best_pre(*start);
+    moveit::core::RobotState best_grasp(*start);
+    bool have_candidate = false;
+    double best_descent_jump = std::numeric_limits<double>::infinity();
+    double best_margin = 0.0;
+    std::string last_failure_code;
+    std::string last_failure_detail;
+    int solved_pairs = 0;
+    int skipped_limits = 0;
+    int skipped_residual = 0;
+
+    for (int attempt = 0; attempt < ctx_->p2a_ik_attempts_; ++attempt) {
+        moveit::core::RobotState trial_pre(*start);
+        moveit::core::RobotState trial_grasp(*start);
+
+        bool solved = trial_pre.setFromIK(left_jmg, toEigenPose(pre.left), ctx_->p2a_ik_timeout_sec_) &&
+                      trial_pre.setFromIK(right_jmg, toEigenPose(pre.right), ctx_->p2a_ik_timeout_sec_) &&
+                      trial_grasp.setFromIK(left_jmg, toEigenPose(grasp.left), ctx_->p2a_ik_timeout_sec_) &&
+                      trial_grasp.setFromIK(right_jmg, toEigenPose(grasp.right), ctx_->p2a_ik_timeout_sec_);
+        if (!solved) {
+            last_failure_code = "E_IK_NO_SOLUTION";
+            last_failure_detail = "attempt " + std::to_string(attempt + 1) +
+                                  ": no combined dual-arm solution for both targets";
+            continue;
+        }
+        ++solved_pairs;
+        trial_pre.update();
+        trial_grasp.update();
+
+        // (a) joint limits of both arms, (b) FK residual against the target,
+        //     for both states.
+        bool candidate_ok = true;
+        double candidate_margin = std::numeric_limits<double>::infinity();
+        const moveit::core::RobotState* trial_states[2] = {&trial_pre, &trial_grasp};
+        for (int si = 0; si < 2 && candidate_ok; ++si) {
+            const moveit::core::RobotState& tst = *trial_states[si];
+            std::vector<double> q, lo, hi;
+            std::vector<std::string> names;
+            collectArmJoints(tst, left_jmg, q, lo, hi, names);
+            collectArmJoints(tst, right_jmg, q, lo, hi, names);
+            const a1v::JointLimitCheck lim = a1v::checkJointLimits(q, lo, hi, names);
+            if (!lim.ok) {
+                candidate_ok = false;
+                ++skipped_limits;
+                last_failure_code = "E_IK_JOINT_LIMITS";
+                last_failure_detail = std::string(si == 0 ? "pre-grasp" : "grasp") + ": joint " +
+                                      lim.offending_name + " = " + std::to_string(lim.value) +
+                                      " outside [" + std::to_string(lim.lower) + ", " +
+                                      std::to_string(lim.upper) + "]";
+                break;
+            }
+            candidate_margin = std::min(candidate_margin, lim.worst_margin_rad);
+
+            const a1v::ArmTarget actual_left = fromEigenPose(tst.getGlobalLinkTransform(eefs[0]));
+            const a1v::ArmTarget actual_right = fromEigenPose(tst.getGlobalLinkTransform(eefs[1]));
+            const a1v::PoseError el = a1v::poseError(targets[si].left, actual_left);
+            const a1v::PoseError er = a1v::poseError(targets[si].right, actual_right);
+            if (el.pos_m > pos_tol || er.pos_m > pos_tol || el.angle_rad > ang_tol ||
+                er.angle_rad > ang_tol) {
+                candidate_ok = false;
+                ++skipped_residual;
+                last_failure_code = "E_IK_RESIDUAL";
+                last_failure_detail = std::string(si == 0 ? "pre-grasp" : "grasp") +
+                                      ": FK residual exceeds tolerance (tolerances " +
+                                      std::to_string(pos_tol * 1000.0) + " mm / " +
+                                      std::to_string(ang_tol * 180.0 / M_PI) + " deg)";
+                break;
+            }
+        }
+        if (!candidate_ok) {
+            continue;
+        }
+
+        // (c) score by the descent change -- the quantity the gate below judges.
+        double candidate_jump = 0.0;
+        for (int ai = 0; ai < 2; ++ai) {
+            const moveit::core::JointModelGroup* jmg = ai == 0 ? left_jmg : right_jmg;
+            std::vector<double> qp, qg, l3, u3;
+            std::vector<std::string> n3;
+            collectArmJoints(trial_pre, jmg, qp, l3, u3, n3);
+            collectArmJoints(trial_grasp, jmg, qg, l3, u3, n3);
+            candidate_jump = std::max(candidate_jump, a1v::maxAbsJointDelta(qp, qg));
+        }
+
+        if (!have_candidate || candidate_jump < best_descent_jump) {
+            have_candidate = true;
+            best_descent_jump = candidate_jump;
+            best_margin = candidate_margin;
+            best_pre = trial_pre;
+            best_grasp = trial_grasp;
+        }
+    }
+
+    moveit::core::RobotState& pre_state = best_pre;
+    moveit::core::RobotState& grasp_state = best_grasp;
+
+    if (!have_candidate) {
+        out.ik.status = a1v::CheckStatus::FAILED;
+        out.ik.reason_code = last_failure_code.empty() ? "E_IK_NO_SOLUTION" : last_failure_code;
+        out.ik.detail = (last_failure_detail.empty() ? std::string("no solution in any attempt")
+                                                     : last_failure_detail) +
+                        " (" + std::to_string(ctx_->p2a_ik_attempts_) + " attempts)";
+        RCLCPP_ERROR(ctx_->get_logger(), "    ✗ %s", out.ik.detail.c_str());
+        out.collision.status = a1v::CheckStatus::NOT_RUN;
+        out.collision.reason_code = "E_IK_NOT_SOLVED";
+        out.collision.detail = "collision is judged on a solved combined state";
+        return emit(false);
+    }
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2A][IK] %d/%d 次尝试同时解出双臂（关节限位剔除 %d，残差剔除 %d）；"
+                "已选下降变化最小者",
+                solved_pairs, ctx_->p2a_ik_attempts_, skipped_limits, skipped_residual);
+
+    bool ik_ok = true;
+    std::string ik_reason = "E_OK";
+    std::string ik_detail = "both combined states solved, within limits, FK residual and jump checks";
+
+    // Report the chosen pair.
+    {
+        const moveit::core::RobotState* final_states[2] = {&pre_state, &grasp_state};
+        const char* labels[2] = {"pre-grasp", "grasp"};
+        for (int si = 0; si < 2; ++si) {
+            const moveit::core::RobotState& tst = *final_states[si];
+            std::vector<double> q, lo, hi;
+            std::vector<std::string> names;
+            collectArmJoints(tst, left_jmg, q, lo, hi, names);
+            collectArmJoints(tst, right_jmg, q, lo, hi, names);
+            const a1v::JointLimitCheck lim = a1v::checkJointLimits(q, lo, hi, names);
+            const a1v::ArmTarget actual_left = fromEigenPose(tst.getGlobalLinkTransform(eefs[0]));
+            const a1v::ArmTarget actual_right = fromEigenPose(tst.getGlobalLinkTransform(eefs[1]));
+            const a1v::PoseError el = a1v::poseError(targets[si].left, actual_left);
+            const a1v::PoseError er = a1v::poseError(targets[si].right, actual_right);
+
+            std::vector<double> q_start, l2, u2;
+            std::vector<std::string> n2;
+            collectArmJoints(*start, left_jmg, q_start, l2, u2, n2);
+            collectArmJoints(*start, right_jmg, q_start, l2, u2, n2);
+
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "    [%s] 关节限位余量 %.4f rad | FK 残差 左=%.4f mm/%.4f° 右=%.4f mm/%.4f°",
+                        labels[si], lim.worst_margin_rad, el.pos_m * 1000.0,
+                        el.angle_rad * 180.0 / M_PI, er.pos_m * 1000.0, er.angle_rad * 180.0 / M_PI);
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "    [%s] 相对机器人起始位形的最大单关节差 %.4f rad（仅记录，不作判据："
+                        "起始位形不是抓取起点，且抓取姿态按设计相差 180° 腕部翻转）",
+                        labels[si], a1v::maxAbsJointDelta(q, q_start));
+        }
+    }
+
+    // (d) The gate: the descent must not re-configure an arm relative to the
+    //     pre-grasp solution. An elbow flip between the two IK solutions would
+    //     make the descent impossible even though each pose is valid alone.
+    for (int ai = 0; ai < 2 && ik_ok; ++ai) {
+        const moveit::core::JointModelGroup* jmg = ai == 0 ? left_jmg : right_jmg;
+        std::vector<double> qp, qg, l3, u3;
+        std::vector<std::string> n3;
+        collectArmJoints(pre_state, jmg, qp, l3, u3, n3);
+        collectArmJoints(grasp_state, jmg, qg, l3, u3, n3);
+        const double descent_jump = a1v::maxAbsJointDelta(qp, qg);
+        const char* arm = ai == 0 ? "左臂" : "右臂";
+        RCLCPP_INFO(ctx_->get_logger(), "    [预抓取→抓取] %s 最大单关节变化 %.4f rad（上限 %.4f）",
+                    arm, descent_jump, ctx_->p2a_max_joint_jump_rad_);
+        if (descent_jump > ctx_->p2a_max_joint_jump_rad_) {
+            ik_ok = false;
+            ik_reason = "E_IK_DESCENT_JUMP";
+            ik_detail = std::string(arm) + ": pre-grasp -> grasp changes one joint by " +
+                        std::to_string(descent_jump) + " rad, above " +
+                        std::to_string(ctx_->p2a_max_joint_jump_rad_) + " rad (best of " +
+                        std::to_string(solved_pairs) + " solved attempts)";
+        }
+    }
+    (void)best_margin;
+    if (!ik_ok) {
+        out.ik.status = a1v::CheckStatus::FAILED;
+        out.ik.reason_code = ik_reason;
+        out.ik.detail = ik_detail;
+        RCLCPP_ERROR(ctx_->get_logger(), "    ✗ %s", ik_detail.c_str());
+        out.collision.status = a1v::CheckStatus::NOT_RUN;
+        out.collision.reason_code = "E_IK_NOT_VALID";
+        out.collision.detail = "collision is judged on states that passed the IK checks";
+        return emit(false);
+    }
+    out.ik.status = a1v::CheckStatus::PASSED;
+    out.ik.reason_code = ik_reason;
+    out.ik.detail = ik_detail;
+
+    // Log the joint solutions so the record carries them.
+    {
+        std::vector<double> q, lo, hi;
+        std::vector<std::string> names;
+        collectArmJoints(grasp_state, left_jmg, q, lo, hi, names);
+        std::string line;
+        for (std::size_t i = 0; i < q.size(); ++i) {
+            line += names[i] + "=" + std::to_string(q[i]) + " ";
+        }
+        RCLCPP_INFO(ctx_->get_logger(), "    [grasp] 左臂关节解: %s", line.c_str());
+        q.clear(); lo.clear(); hi.clear(); names.clear();
+        collectArmJoints(grasp_state, right_jmg, q, lo, hi, names);
+        line.clear();
+        for (std::size_t i = 0; i < q.size(); ++i) {
+            line += names[i] + "=" + std::to_string(q[i]) + " ";
+        }
+        RCLCPP_INFO(ctx_->get_logger(), "    [grasp] 右臂关节解: %s", line.c_str());
+    }
+
+    // -----------------------------------------------------------------------
+    // 4. Collision on the live planning scene
+    // -----------------------------------------------------------------------
+    const std::string rod_id = "aluminum_rod";
+
+    auto scene_client =
+        ctx_->create_client<moveit_msgs::srv::GetPlanningScene>("/get_planning_scene");
+    if (!scene_client->wait_for_service(5s)) {
+        out.collision.status = a1v::CheckStatus::FAILED;
+        out.collision.reason_code = "E_P2A_SCENE_UNAVAILABLE";
+        out.collision.detail = "/get_planning_scene is unavailable, so the environment cannot be checked";
+        RCLCPP_ERROR(ctx_->get_logger(), "    ✗ %s", out.collision.detail.c_str());
+        return emit(false);
+    }
+    auto scene_request = std::make_shared<moveit_msgs::srv::GetPlanningScene::Request>();
+    scene_request->components.components =
+        moveit_msgs::msg::PlanningSceneComponents::SCENE_SETTINGS |
+        moveit_msgs::msg::PlanningSceneComponents::ROBOT_STATE |
+        moveit_msgs::msg::PlanningSceneComponents::ROBOT_STATE_ATTACHED_OBJECTS |
+        moveit_msgs::msg::PlanningSceneComponents::WORLD_OBJECT_NAMES |
+        moveit_msgs::msg::PlanningSceneComponents::WORLD_OBJECT_GEOMETRY |
+        moveit_msgs::msg::PlanningSceneComponents::ALLOWED_COLLISION_MATRIX;
+    auto scene_future = scene_client->async_send_request(scene_request);
+    if (scene_future.wait_for(5s) != std::future_status::ready) {
+        out.collision.status = a1v::CheckStatus::FAILED;
+        out.collision.reason_code = "E_P2A_SCENE_TIMEOUT";
+        out.collision.detail = "/get_planning_scene did not answer within 5 s";
+        RCLCPP_ERROR(ctx_->get_logger(), "    ✗ %s", out.collision.detail.c_str());
+        return emit(false);
+    }
+    const auto scene_response = scene_future.get();
+
+    // Refuse to claim an environment check if the rod is not actually in the
+    // scene we are about to test against.
+    bool rod_in_scene = false;
+    for (const auto& obj : scene_response->scene.world.collision_objects) {
+        if (obj.id == rod_id) {
+            rod_in_scene = true;
+            break;
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "  [P2A][碰撞] 场景来源 /get_planning_scene：世界物体 %zu 个，"
+                                    "aluminum_rod 在场景中: %s",
+                scene_response->scene.world.collision_objects.size(),
+                rod_in_scene ? "是" : "否");
+    if (!rod_in_scene) {
+        out.collision.status = a1v::CheckStatus::FAILED;
+        out.collision.reason_code = "E_P2A_ROD_NOT_IN_SCENE";
+        out.collision.detail = "aluminum_rod is absent from the live scene; no environment claim is made";
+        RCLCPP_ERROR(ctx_->get_logger(), "    ✗ %s", out.collision.detail.c_str());
+        return emit(false);
+    }
+
+    // Build the verification scene from what the live planner actually has --
+    // never a bare robot_model-only scene.
+    auto scene = std::make_shared<planning_scene::PlanningScene>(robot_model);
+    scene->setPlanningSceneMsg(scene_response->scene);
+
+    // Verification copy of the ACM. Any entry that would hide a dual-arm mutual
+    // collision, or any contact between the rod and a non-finger link, is
+    // turned OFF in this copy only. The global SRDF/ACM is not modified.
+    collision_detection::AllowedCollisionMatrix base_acm = scene->getAllowedCollisionMatrix();
+
+    // The support surface is NOT in the MoveIt planning scene: the MuJoCo floor
+    // is a `type="plane"` geom in dual_scene.xml that never enters MoveIt. A rod
+    // pose/height check is not a robot-vs-ground check, so the plane is added to
+    // this VERIFICATION scene only, via processCollisionObjectMsg, which touches
+    // the local PlanningScene and never publishes.
+    const std::string support_id = ctx_->p2a_support_object_id_;
+    bool support_already_present = false;
+    {
+        const std::vector<std::string> world_ids = scene->getWorld()->getObjectIds();
+        for (const std::string& id : world_ids) {
+            if (id == support_id) {
+                support_already_present = true;
+            }
+        }
+        std::string joined;
+        for (const std::string& id : world_ids) {
+            joined += " " + id;
+        }
+        RCLCPP_INFO(ctx_->get_logger(), "  [P2A][碰撞] 验证场景世界物体:%s",
+                    joined.empty() ? " <none>" : joined.c_str());
+    }
+
+    if (ctx_->p2a_support_plane_) {
+        if (support_already_present) {
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P2A][支撑面] 场景中已存在 '%s'，不重复添加", support_id.c_str());
+        } else {
+            // Source: franka_description/mujoco/franka/dual_scene.xml
+            //   <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+            // i.e. an unbounded plane at z = support_z (the geom has no `pos`).
+            //
+            // It is represented as a slab whose TOP FACE lies exactly on that
+            // plane: shape_msgs/SolidPrimitive in this ROS distro has no PLANE
+            // constant (only BOX/SPHERE/CYLINDER/CONE/PRISM), so a plane cannot
+            // be handed to MoveIt through a CollisionObject. A robot point below
+            // z = support_z is inside the slab, so this is faithful for the
+            // collision question; the slab is finite, which is recorded as a
+            // limitation rather than hidden.
+            const double slab_half = 3.0;
+            // A DEEP box, not a thin slab: the top face stays on the support
+            // plane, and it now covers the whole depth a path could reach.
+            const double slab_thickness = ctx_->p2a_support_depth_m_;
+            moveit_msgs::msg::CollisionObject floor_obj;
+            floor_obj.header.frame_id = scene->getPlanningFrame();
+            floor_obj.id = support_id;
+            shape_msgs::msg::SolidPrimitive slab;
+            slab.type = shape_msgs::msg::SolidPrimitive::BOX;
+            slab.dimensions = {2.0 * slab_half, 2.0 * slab_half, slab_thickness};
+            floor_obj.primitives.push_back(slab);
+            geometry_msgs::msg::Pose slab_pose;
+            slab_pose.position.z = ctx_->p2a_support_z_ - slab_thickness * 0.5;
+            slab_pose.orientation.w = 1.0;
+            floor_obj.primitive_poses.push_back(slab_pose);
+            floor_obj.operation = moveit_msgs::msg::CollisionObject::ADD;
+            // Local verification scene only; nothing is published.
+            scene->processCollisionObjectMsg(floor_obj);
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P2A][支撑面] 已在**验证场景**中补齐 '%s': BOX %.1fx%.1fx%.3f，顶面位于 "
+                        "z=%.3f 向下覆盖 %.1f m (frame=%s)，来源 dual_scene.xml 的 floor geom"
+                        "（无限 plane，此处用有限深板近似；超出 ±%.1f m 或深于 %.1f m 处不覆盖）",
+                        support_id.c_str(), 2.0 * slab_half, 2.0 * slab_half, slab_thickness,
+                        ctx_->p2a_support_z_, slab_thickness, scene->getPlanningFrame().c_str(),
+                        slab_half, slab_thickness);
+        }
+    } else {
+        RCLCPP_WARN(ctx_->get_logger(),
+                    "  [P2A][支撑面] 已禁用，本轮**不包含**机器人与地面的碰撞检查");
+    }
+
+    std::vector<std::string> acm_names;
+    base_acm.getAllEntryNames(acm_names);
+    std::size_t cross_arm_allowed = 0;
+    std::size_t rod_allowed = 0;
+    std::vector<std::string> stripped_examples;
+    for (std::size_t i = 0; i < acm_names.size(); ++i) {
+        for (std::size_t j = i + 1; j < acm_names.size(); ++j) {
+            collision_detection::AllowedCollision::Type type;
+            if (!base_acm.getEntry(acm_names[i], acm_names[j], type) ||
+                type != collision_detection::AllowedCollision::ALWAYS) {
+                continue;
+            }
+            if (a1v::isCrossArmPair(acm_names[i], acm_names[j])) {
+                base_acm.setEntry(acm_names[i], acm_names[j], false);
+                ++cross_arm_allowed;
+                if (stripped_examples.size() < 10) {
+                    stripped_examples.push_back(acm_names[i] + "<->" + acm_names[j]);
+                }
+            } else if (a1v::isRodPair(acm_names[i], acm_names[j], rod_id)) {
+                base_acm.setEntry(acm_names[i], acm_names[j], false);
+                ++rod_allowed;
+                if (stripped_examples.size() < 10) {
+                    stripped_examples.push_back(acm_names[i] + "<->" + acm_names[j]);
+                }
+            }
+        }
+    }
+
+    std::string examples;
+    for (const std::string& e : stripped_examples) {
+        examples += " " + e;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+                "    ACM 条目核查: 共 %zu 个条目；会隐藏双臂互碰的允许项 %zu 个，"
+                "会隐藏杆接触的允许项 %zu 个（已在验证副本中关闭，未改动全局 ACM/SRDF）%s",
+                acm_names.size(), cross_arm_allowed, rod_allowed,
+                examples.empty() ? "" : ("；示例:" + examples).c_str());
+
+    // The grasp pose is the only one where finger-rod contact is expected, and
+    // only for the finger links -- the hand and the rest of the arm stay
+    // checked.
+    collision_detection::AllowedCollisionMatrix grasp_acm = base_acm;
+    const char* fingers[4] = {"mj_left_leftfinger", "mj_left_rightfinger", "mj_right_leftfinger",
+                              "mj_right_rightfinger"};
+    for (const char* f : fingers) {
+        grasp_acm.setEntry(f, rod_id, true);
+    }
+
+    // The base is bolted to the world: base_link and both link0 bodies cross the
+    // support plane by construction. That is the fixed mounting, not a free-link
+    // collision, so exactly these three pairs are allowed -- no other link is
+    // exempted from the ground, and no arm link is exempted at all.
+    if (ctx_->p2a_support_plane_) {
+        // Fixed base assembly only. Justification is geometric, not blanket:
+        // each of these has collision geometry straddling z = support_z whose
+        // z-extent is independent of the arm configuration (see
+        // a1v::isMountingLink). The hand and fingers are NOT included.
+        const char* mounting[5] = {"base_link", "mj_left_link0", "mj_right_link0", "mj_left_link1",
+                                   "mj_right_link1"};
+        for (const char* m : mounting) {
+            base_acm.setEntry(m, support_id, true);
+            grasp_acm.setEntry(m, support_id, true);
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "    [P2A][支撑面] 仅允许固定安装配对 base_link/link0/link1（两臂）与 '%s' "
+                    "接触（这些碰撞体跨越安装平面且不随臂位形变化）；手部与手指**不在**豁免内，"
+                    "其余连杆与地面的接触一律检查",
+                    support_id.c_str());
+    }
+
+    ContactTally pre_tally;
+    ContactTally grasp_tally;
+    pre_tally = tallyContactsIn(scene, robot_model, pre_state, base_acm, rod_id, support_id);
+    grasp_tally = tallyContactsIn(scene, robot_model, grasp_state, grasp_acm, rod_id, support_id);
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2A][对照 model=urdf_reference] 原始 URDF 六体手掌近似，仅作对照，非本轮判据");
+    RCLCPP_INFO(ctx_->get_logger(), "    [预抓取 z=%.3f] 不允许任何杆接触: %s", gg.pre_grasp_height_m,
+                describeTally(pre_tally).c_str());
+    RCLCPP_INFO(ctx_->get_logger(),
+                "    [抓取 z=%.3f] 仅允许手指-杆接触（hand/其余连杆仍检查）: %s", gg.grasp_height_m,
+                describeTally(grasp_tally).c_str());
+
+    // =======================================================================
+    // Chosen model: mj_left_hand / mj_right_hand collision replaced by the
+    // conservative AABB of the simulation's actual hand_c mesh. This model is
+    // built independently; the shared RobotModel and the live scene are
+    // untouched.
+    // =======================================================================
+    const std::vector<std::string> hand_links = {"mj_left_hand", "mj_right_hand"};
+    bool hand_aabb_ok = false;
+    a1v::Aabb hand_aabb;
+    std::size_t hand_mesh_vertices = 0;
+    std::string mesh_path;
+
+    if (ctx_->p2a_hand_aabb_substitution_) {
+        try {
+            mesh_path = ament_index_cpp::get_package_share_directory("franka_description") +
+                        "/mujoco/franka/assets/hand.stl";
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2A][hand] E_HAND_MESH_PKG_NOT_FOUND: %s", e.what());
+            out.collision.status = a1v::CheckStatus::FAILED;
+            out.collision.reason_code = "E_HAND_MESH_PKG_NOT_FOUND";
+            out.collision.detail = e.what();
+            return emit(false);
+        }
+
+        std::vector<a1v::Vec3> verts;
+        std::string mesh_error;
+        if (!a1v::readBinaryStlVertices(mesh_path, verts, mesh_error)) {
+            // An unreadable mesh stops the check: an empty model must never be
+            // used in place of the real one.
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2A][hand] E_HAND_MESH_LOAD_FAILED: %s",
+                         mesh_error.c_str());
+            out.collision.status = a1v::CheckStatus::FAILED;
+            out.collision.reason_code = "E_HAND_MESH_LOAD_FAILED";
+            out.collision.detail = mesh_error;
+            return emit(false);
+        }
+        hand_mesh_vertices = verts.size();
+
+        const a1v::Aabb box = a1v::aabbOfPoints(verts);
+        // A loaded-but-conservative check: the box must contain every vertex,
+        // otherwise it is not a bounding proxy at all.
+        if (!a1v::aabbContainsAll(box, verts)) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "  ✗ [P2A][hand] E_HAND_AABB_NOT_CONSERVATIVE: 包围盒未覆盖全部顶点");
+            out.collision.status = a1v::CheckStatus::FAILED;
+            out.collision.reason_code = "E_HAND_AABB_NOT_CONSERVATIVE";
+            out.collision.detail = "the computed box does not contain all mesh vertices";
+            return emit(false);
+        }
+        hand_aabb = box;
+        hand_aabb_ok = true;
+
+        const a1v::Vec3 c = hand_aabb.center();
+        const a1v::Vec3 sz = hand_aabb.size();
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2A][hand] 模型来源: %s（%zu 顶点，二进制 STL，未施加额外缩放）",
+                    mesh_path.c_str(), hand_mesh_vertices);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2A][hand] hand_c 局部 AABB: x[%.6f, %.6f] y[%.6f, %.6f] z[%.6f, %.6f]",
+                    hand_aabb.min.x, hand_aabb.max.x, hand_aabb.min.y, hand_aabb.max.y,
+                    hand_aabb.min.z, hand_aabb.max.z);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2A][hand] 替换为 BOX 中心=(%.6f, %.6f, %.6f) 尺寸=(%.6f, %.6f, %.6f)"
+                    "（中心为 (min+max)/2，非 hand 原点；已断言包含全部顶点）",
+                    c.x, c.y, c.z, sz.x, sz.y, sz.z);
+    }
+
+    std::shared_ptr<moveit::core::RobotModel> mujoco_model;
+    planning_scene::PlanningScenePtr mujoco_scene;
+    moveit::core::RobotState mj_pre_state(*start);
+    moveit::core::RobotState mj_grasp_state(*start);
+    ContactTally mj_pre_tally;
+    ContactTally mj_grasp_tally;
+
+    if (hand_aabb_ok) {
+        std::string build_reason;
+        mujoco_model = buildMujocoHandModel(hand_aabb, hand_links, build_reason);
+        if (!mujoco_model) {
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2A][hand] %s", build_reason.c_str());
+            out.collision.status = a1v::CheckStatus::FAILED;
+            out.collision.reason_code = build_reason.substr(0, build_reason.find(':'));
+            out.collision.detail = build_reason;
+            return emit(false);
+        }
+
+        // Same world as the reference scene: the very same message plus the
+        // support surface, so the two models are compared on identical worlds.
+        mujoco_scene = std::make_shared<planning_scene::PlanningScene>(mujoco_model);
+        mujoco_scene->setPlanningSceneMsg(scene_response->scene);
+        if (ctx_->p2a_support_plane_) {
+            moveit_msgs::msg::CollisionObject floor_obj;
+            floor_obj.header.frame_id = mujoco_scene->getPlanningFrame();
+            floor_obj.id = support_id;
+            shape_msgs::msg::SolidPrimitive slab;
+            slab.type = shape_msgs::msg::SolidPrimitive::BOX;
+            slab.dimensions = {6.0, 6.0, ctx_->p2a_support_depth_m_};
+            floor_obj.primitives.push_back(slab);
+            geometry_msgs::msg::Pose slab_pose;
+            slab_pose.position.z = ctx_->p2a_support_z_ - ctx_->p2a_support_depth_m_ * 0.5;
+            slab_pose.orientation.w = 1.0;
+            floor_obj.primitive_poses.push_back(slab_pose);
+            floor_obj.operation = moveit_msgs::msg::CollisionObject::ADD;
+            mujoco_scene->processCollisionObjectMsg(floor_obj);
+        }
+
+        // Map the solved states across by joint name.
+        auto mapState = [&](const moveit::core::RobotState& src) {
+            moveit::core::RobotState dst(mujoco_model);
+            std::vector<std::string> names;
+            std::vector<double> values;
+            std::set<std::string> dst_vars;
+            for (const std::string& v : dst.getVariableNames()) {
+                dst_vars.insert(v);
+            }
+            for (const std::string& v : src.getVariableNames()) {
+                if (dst_vars.count(v) != 0) {
+                    names.push_back(v);
+                    values.push_back(src.getVariablePosition(v));
+                }
+            }
+            dst.setVariablePositions(names, values);
+            dst.update();
+            return dst;
+        };
+        mj_pre_state = mapState(pre_state);
+        mj_grasp_state = mapState(grasp_state);
+
+        // The mapping is only trustworthy if it reproduces the same FK; verify
+        // it rather than assuming the two models agree.
+        const a1v::ArmTarget mj_left_actual =
+            fromEigenPose(mj_grasp_state.getGlobalLinkTransform(left_eef));
+        const a1v::PoseError map_err = a1v::poseError(grasp.left, mj_left_actual);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2A][hand] 状态按同名关节映射后 FK 残差 %.6f mm / %.6f°（左臂抓取目标）",
+                    map_err.pos_m * 1000.0, map_err.angle_rad * 180.0 / M_PI);
+
+        // The ACM is name-based, so the same matrix applies to both models.
+        mj_pre_tally = tallyContactsIn(mujoco_scene, mujoco_model, mj_pre_state, base_acm, rod_id, support_id);
+        mj_grasp_tally = tallyContactsIn(mujoco_scene, mujoco_model, mj_grasp_state, grasp_acm, rod_id, support_id);
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2A][判据 model=mujoco_hand_aabb] 手掌替换为 hand_c AABB，其余连杆/手指/"
+                    "场景/ACM 语义不变");
+        RCLCPP_INFO(ctx_->get_logger(), "    [预抓取 z=%.3f] %s", gg.pre_grasp_height_m,
+                    describeTally(mj_pre_tally).c_str());
+        RCLCPP_INFO(ctx_->get_logger(), "    [抓取 z=%.3f] %s", gg.grasp_height_m,
+                    describeTally(mj_grasp_tally).c_str());
+
+        // Hand the criterion over to P2b: same model, same world, same ACM,
+        // same recorded start and pre-grasp solution.
+        a1_verify_.valid = true;
+        a1_verify_.model = mujoco_model;
+        a1_verify_.scene = mujoco_scene;
+        a1_verify_.base_acm = base_acm;
+        a1_verify_.grasp_acm = grasp_acm;
+        a1_verify_.rod_id = rod_id;
+        a1_verify_.support_id = support_id;
+        a1_verify_.mesh_path = hand_aabb_ok ? mesh_path : std::string();
+        a1_verify_.hand_aabb = hand_aabb;
+        a1_verify_.pregrasp_target = pre;
+        a1_verify_.left_eef = left_eef;
+        a1_verify_.right_eef = right_eef;
+        a1_verify_.start = std::make_shared<moveit::core::RobotState>(mapState(*start));
+        a1_verify_.pregrasp = std::make_shared<moveit::core::RobotState>(mj_pre_state);
+        a1_verify_.grasp = std::make_shared<moveit::core::RobotState>(mj_grasp_state);
+        for (const std::string& v : pre_state.getVariableNames()) {
+            a1_verify_.pregrasp_joints[v] = pre_state.getVariablePosition(v);
+        }
+    } else {
+        RCLCPP_WARN(ctx_->get_logger(),
+                    "  [P2A][判据] hand AABB 替换已禁用，回退到 model=urdf_reference 作为判据");
+    }
+
+    const bool use_mujoco = hand_aabb_ok;
+    const ContactTally& chosen_pre = use_mujoco ? mj_pre_tally : pre_tally;
+    const ContactTally& chosen_grasp = use_mujoco ? mj_grasp_tally : grasp_tally;
+    const char* chosen_name = use_mujoco ? "mujoco_hand_aabb" : "urdf_reference";
+
+    // Negative example for the substituted hand itself: an obstacle placed to
+    // coincide with the substituted hand box must be detected. This proves the
+    // replacement box still participates in collision checking instead of
+    // quietly disabling the hand.
+    if (use_mujoco && ctx_->p2a_hand_negative_) {
+        const std::string obstacle_id = "a1_hand_obstacle_injected";
+        const a1v::Vec3 sz = hand_aabb.size();
+        moveit_msgs::msg::CollisionObject obstacle;
+        obstacle.header.frame_id = mujoco_scene->getPlanningFrame();
+        obstacle.id = obstacle_id;
+        shape_msgs::msg::SolidPrimitive box;
+        box.type = shape_msgs::msg::SolidPrimitive::BOX;
+        box.dimensions = {sz.x, sz.y, sz.z};
+        obstacle.primitives.push_back(box);
+        // Placed at the substituted box's own centre (the AABB centre, which is
+        // NOT the hand origin) and with the hand's orientation, so the obstacle
+        // truly coincides with the replacement geometry.
+        const Eigen::Isometry3d hand_world =
+            mj_grasp_state.getGlobalLinkTransform("mj_left_hand");
+        const a1v::Vec3 box_centre = hand_aabb.center();
+        Eigen::Isometry3d obstacle_world = hand_world;
+        obstacle_world.translation() +=
+            hand_world.rotation() * Eigen::Vector3d(box_centre.x, box_centre.y, box_centre.z);
+        geometry_msgs::msg::Pose obstacle_pose;
+        obstacle_pose.position.x = obstacle_world.translation().x();
+        obstacle_pose.position.y = obstacle_world.translation().y();
+        obstacle_pose.position.z = obstacle_world.translation().z();
+        const Eigen::Quaterniond hand_q(obstacle_world.rotation());
+        obstacle_pose.orientation.x = hand_q.x();
+        obstacle_pose.orientation.y = hand_q.y();
+        obstacle_pose.orientation.z = hand_q.z();
+        obstacle_pose.orientation.w = hand_q.w();
+        obstacle.primitive_poses.push_back(obstacle_pose);
+        obstacle.operation = moveit_msgs::msg::CollisionObject::ADD;
+        mujoco_scene->processCollisionObjectMsg(obstacle);
+
+        ContactTally neg_tally = tallyContactsIn(mujoco_scene, mujoco_model, mj_grasp_state,
+                                                grasp_acm, rod_id, support_id);
+
+        obstacle.operation = moveit_msgs::msg::CollisionObject::REMOVE;
+        mujoco_scene->processCollisionObjectMsg(obstacle);
+
+        bool obstacle_seen = false;
+        for (const std::string& e : neg_tally.examples) {
+            if (e.find(obstacle_id) != std::string::npos) {
+                obstacle_seen = true;
+            }
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "    [手掌负例-注入] 在与替换后手掌 AABB 同中心同姿态处注入障碍 '%s'"
+                    "（验证注入，非实际机器人运动）: %s",
+                    obstacle_id.c_str(), describeTally(neg_tally).c_str());
+        if (neg_tally.total() == 0 || !obstacle_seen) {
+            out.collision.status = a1v::CheckStatus::FAILED;
+            out.collision.reason_code = "E_P2A_HAND_NEGATIVE_MISSED";
+            out.collision.detail =
+                "an obstacle coincident with the substituted hand box was not reported, so the "
+                "replacement geometry is not actually being checked";
+            RCLCPP_ERROR(ctx_->get_logger(),
+                         "    ✗ 替换后的手掌未检出与该障碍的碰撞 —— 替换几何未参与检查，按失败处理");
+            return emit(false);
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "    ✓ [手掌负例-注入] 替换后的手掌仍然检出碰撞，替换几何确实参与检查");
+    }
+
+    // Ground-collision negative, injected on purpose. It proves the completed
+    // scene can actually reject a free arm link passing through the support
+    // surface. This is a VERIFICATION INJECTION, not a sampled pose: the target
+    // is deliberately placed below the floor.
+    if (ctx_->p2a_support_plane_ && ctx_->p2a_ground_negative_) {
+        const double injected_z = ctx_->p2a_support_z_ - 0.05;
+        a1v::ArmTarget injected_left = pre.left;
+        a1v::ArmTarget injected_right = pre.right;
+        injected_left.position.z = injected_z;
+        injected_right.position.z = injected_z;
+
+        bool injected_solved = false;
+        moveit::core::RobotState injected(*start);
+        for (int attempt = 0; attempt < ctx_->p2a_ik_attempts_ && !injected_solved; ++attempt) {
+            moveit::core::RobotState trial(*start);
+            injected_solved =
+                trial.setFromIK(left_jmg, toEigenPose(injected_left), ctx_->p2a_ik_timeout_sec_) &&
+                trial.setFromIK(right_jmg, toEigenPose(injected_right), ctx_->p2a_ik_timeout_sec_);
+            if (injected_solved) {
+                injected = trial;
+            }
+        }
+
+        if (!injected_solved) {
+            RCLCPP_WARN(ctx_->get_logger(),
+                        "    [地面负例-注入] 未能为 z=%.3f 构造 IK 解；本次注入未执行"
+                        "（不视为检查通过）",
+                        injected_z);
+        } else {
+            injected.update();
+            ContactTally injected_tally;
+            if (use_mujoco) {
+                auto mapInjected = [&](const moveit::core::RobotState& src) {
+                    moveit::core::RobotState dst(mujoco_model);
+                    std::vector<std::string> names;
+                    std::vector<double> values;
+                    std::set<std::string> dst_vars;
+                    for (const std::string& v : dst.getVariableNames()) {
+                        dst_vars.insert(v);
+                    }
+                    for (const std::string& v : src.getVariableNames()) {
+                        if (dst_vars.count(v) != 0) {
+                            names.push_back(v);
+                            values.push_back(src.getVariablePosition(v));
+                        }
+                    }
+                    dst.setVariablePositions(names, values);
+                    dst.update();
+                    return dst;
+                };
+                moveit::core::RobotState mj_injected = mapInjected(injected);
+                injected_tally = tallyContactsIn(mujoco_scene, mujoco_model, mj_injected, base_acm,
+                                                 rod_id, support_id);
+            } else {
+                injected_tally =
+                    tallyContactsIn(scene, robot_model, injected, base_acm, rod_id, support_id);
+            }
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "    [地面负例-注入] 目标 z=%.3f（低于支撑面 %.3f，非采样位姿）: %s", injected_z,
+                        ctx_->p2a_support_z_, describeTally(injected_tally).c_str());
+            if (injected_tally.total() == 0) {
+                out.collision.status = a1v::CheckStatus::FAILED;
+                out.collision.reason_code = "E_P2A_GROUND_NEGATIVE_MISSED";
+                out.collision.detail =
+                    "the injected below-floor state produced no contact, so the support-surface "
+                    "check is not proven to work";
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "    ✗ 注入的穿地状态未被拒绝 —— 支撑面检查不可信，按失败处理");
+                return emit(false);
+            }
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "    ✓ [地面负例-注入] 穿地状态被正确拒绝（地面/支撑面接触 %zu 处）",
+                        injected_tally.support);
+        }
+    }
+
+    if (chosen_pre.total() > 0 || chosen_grasp.total() > 0) {
+        out.collision.status = a1v::CheckStatus::FAILED;
+        out.collision.reason_code = chosen_pre.total() > 0 ? "E_P2A_COLLISION_PREGRASP"
+                                                           : "E_P2A_COLLISION_GRASP";
+        out.collision.detail = std::string("model=") + chosen_name + " pre-grasp{" +
+                               describeTally(chosen_pre) + "} grasp{" + describeTally(chosen_grasp) + "}";
+        RCLCPP_ERROR(ctx_->get_logger(), "    ✗ [model=%s] 组合状态存在碰撞", chosen_name);
+        return emit(false);
+    }
+
+    out.collision.status = a1v::CheckStatus::PASSED;
+    out.collision.reason_code = "E_OK";
+    out.collision.detail = std::string("model=") + chosen_name +
+                           ": no environment, self or dual-arm collision in either combined state";
+
+    RCLCPP_INFO(ctx_->get_logger(), "  [P2A] 静态检查汇总: %s", out.summary().c_str());
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2A] 注意: 静态通过仅表示该组合目标本身有效；"
+                "p2_acceptance=null, path_validation=NOT_RUN，可搬运性由 P2b 判定");
+    // Single machine-readable line for the run record.
+    RCLCPP_INFO(ctx_->get_logger(),
+                "[P2A_RESULT] geometry=%s ik=%s collision=%s path_validation=NOT_RUN "
+                "p2_acceptance=null",
+                a1v::statusName(out.geometry.status), a1v::statusName(out.ik.status),
+                a1v::statusName(out.collision.status));
+    return emit(out.allStaticPassed());
+}
+
+bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
+{
+    out.path_validation.status = a1v::CheckStatus::NOT_RUN;
+    out.path_validation.reason_code = "E_P2B_NOT_RUN";
+    out.path_validation.detail = "not evaluated";
+
+    if (!a1_verify_.valid || !a1_verify_.model || !a1_verify_.scene) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_NO_VERIFY_CONTEXT";
+        out.path_validation.detail =
+            "the P2a criterion model/scene is unavailable; refusing to plan against anything else";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+        return false;
+    }
+    const auto model = a1_verify_.model;
+    const auto scene = a1_verify_.scene;
+    const std::string& rod_id = a1_verify_.rod_id;
+    const std::string& support_id = a1_verify_.support_id;
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "\n----- [P2B] 联合预抓取路径规划与校验（仅规划，不执行运动）-----");
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  判据模型 model=mujoco_hand_aabb（手掌为 hand_c AABB），场景为 P2a 独立验证场景");
+
+    // -----------------------------------------------------------------------
+    // 1. The recorded start state must be present and valid. The robot is never
+    //    teleported and the start is never swapped for a default/ready pose.
+    // -----------------------------------------------------------------------
+    a1_verify_.start->update();
+    const moveit::core::JointModelGroup* left_jmg = model->getJointModelGroup(ctx_->left_arm_group_);
+    const moveit::core::JointModelGroup* right_jmg =
+        model->getJointModelGroup(ctx_->right_arm_group_);
+    if (left_jmg == nullptr || right_jmg == nullptr) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_NO_GROUP";
+        out.path_validation.detail = "an arm group is missing from the criterion model";
+        return false;
+    }
+
+    auto collectAll = [&](const moveit::core::RobotState& st, std::vector<double>& q,
+                          std::vector<double>& lo, std::vector<double>& hi,
+                          std::vector<std::string>& names) {
+        q.clear(); lo.clear(); hi.clear(); names.clear();
+        collectArmJoints(st, left_jmg, q, lo, hi, names);
+        collectArmJoints(st, right_jmg, q, lo, hi, names);
+    };
+
+    std::vector<double> q0, lo0, hi0;
+    std::vector<std::string> n0;
+    collectAll(*a1_verify_.start, q0, lo0, hi0, n0);
+    const a1v::JointLimitCheck start_limits = a1v::checkJointLimits(q0, lo0, hi0, n0);
+    if (!start_limits.ok) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_START_INVALID";
+        out.path_validation.detail = "the recorded start state is invalid: joint " +
+                                     start_limits.offending_name + " = " +
+                                     std::to_string(start_limits.value);
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+        return false;
+    }
+
+    // The live robot must still be where the static check saw it.
+    {
+        const moveit::core::RobotStatePtr live = ctx_->dual_arm_->getCurrentState();
+        std::set<std::string> live_vars;
+        for (const std::string& v : live->getVariableNames()) {
+            live_vars.insert(v);
+        }
+        double worst = 0.0;
+        for (const std::string& name : n0) {
+            if (live_vars.count(name) != 0) {
+                worst = std::max(worst, std::fabs(live->getVariablePosition(name) -
+                                                  a1_verify_.start->getVariablePosition(name)));
+            }
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2B] 起始状态: 记录值与当前 live 状态最大关节差 %.6f rad（起点不被替换）",
+                    worst);
+        if (worst > 1e-3) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_START_MOVED";
+            out.path_validation.detail = "the robot is no longer at the recorded start (max joint "
+                                         "delta " + std::to_string(worst) + " rad)";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+            return false;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 2. Plan with the existing MoveIt interface. This is a real planner call;
+    //    a hand-built interpolation would not be reported as a plan.
+    // -----------------------------------------------------------------------
+    auto dual = ctx_->dual_arm_;
+    dual->setPlanningTime(ctx_->p2b_planning_time_sec_);
+    dual->setNumPlanningAttempts(ctx_->p2b_planning_attempts_);
+    dual->setPlannerId(ctx_->p2b_planner_id_);
+    dual->setStartStateToCurrentState();
+
+    moveit::core::RobotState goal(*dual->getCurrentState());
+    goal.setVariablePositions(a1_verify_.pregrasp_joints);
+    goal.update();
+    dual->setJointValueTarget(goal);
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2B] 调用规划器: planner=%s, time=%.1fs, attempts=%d, 起点=当前实际状态, "
+                "终点=本次选定预抓取解",
+                ctx_->p2b_planner_id_.c_str(), ctx_->p2b_planning_time_sec_,
+                ctx_->p2b_planning_attempts_);
+
+    moveit::planning_interface::MoveGroupInterface::Plan plan;
+    const auto plan_code = dual->plan(plan);
+    if (plan_code != moveit::core::MoveItErrorCode::SUCCESS) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_PLAN_FAILED";
+        out.path_validation.detail = "the planner returned error code " +
+                                     std::to_string(plan_code.val) +
+                                     "; planning failure is never reported as acceptance";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+        return false;
+    }
+
+    const auto& traj = plan.trajectory_.joint_trajectory;
+    const auto& traj_names = traj.joint_names;
+    if (traj.points.empty() || traj_names.empty()) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_EMPTY_TRAJECTORY";
+        out.path_validation.detail = "the planner returned an empty trajectory";
+        return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // 3. Structural validation of the returned path.
+    // -----------------------------------------------------------------------
+    for (std::size_t pi = 0; pi < traj.points.size(); ++pi) {
+        const auto& pos = traj.points[pi].positions;
+        if (pos.size() != traj_names.size()) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_DIM_MISMATCH";
+            out.path_validation.detail = "point " + std::to_string(pi) + " has " +
+                                         std::to_string(pos.size()) + " values for " +
+                                         std::to_string(traj_names.size()) + " joint names";
+            return false;
+        }
+        for (std::size_t ji = 0; ji < pos.size(); ++ji) {
+            if (!std::isfinite(pos[ji])) {
+                out.path_validation.status = a1v::CheckStatus::FAILED;
+                out.path_validation.reason_code = "E_P2B_NOT_FINITE";
+                out.path_validation.detail = "non-finite value at point " + std::to_string(pi) +
+                                             ", joint " + traj_names[ji];
+                return false;
+            }
+        }
+    }
+
+    // Joint-limit check on every waypoint, in the criterion model.
+    for (std::size_t pi = 0; pi < traj.points.size(); ++pi) {
+        moveit::core::RobotState st(*a1_verify_.start);
+        st.setVariablePositions(traj_names, traj.points[pi].positions);
+        st.update();
+        std::vector<double> q, lo, hi;
+        std::vector<std::string> nm;
+        collectAll(st, q, lo, hi, nm);
+        const a1v::JointLimitCheck lim = a1v::checkJointLimits(q, lo, hi, nm);
+        if (!lim.ok) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_LIMIT_VIOLATION";
+            out.path_validation.detail = "waypoint " + std::to_string(pi) + ": joint " +
+                                         lim.offending_name + " = " + std::to_string(lim.value) +
+                                         " outside limits";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+            return false;
+        }
+    }
+
+    // Continuity: the maximum single-joint change between adjacent waypoints.
+    double max_waypoint_delta = 0.0;
+    for (std::size_t pi = 1; pi < traj.points.size(); ++pi) {
+        max_waypoint_delta = std::max(
+            max_waypoint_delta,
+            a1v::maxAbsJointDelta(traj.points[pi - 1].positions, traj.points[pi].positions));
+    }
+
+    // Start consistency: the path must begin where the robot actually is.
+    {
+        std::set<std::string> start_vars;
+        for (const std::string& v : a1_verify_.start->getVariableNames()) {
+            start_vars.insert(v);
+        }
+        double worst = 0.0;
+        for (std::size_t ji = 0; ji < traj_names.size(); ++ji) {
+            if (start_vars.count(traj_names[ji]) == 0) {
+                continue;
+            }
+            worst = std::max(worst, std::fabs(traj.points.front().positions[ji] -
+                                              a1_verify_.start->getVariablePosition(traj_names[ji])));
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2B] 路径: %zu 航点, %zu 关节 | 起点与记录起始状态最大差 %.6f rad | "
+                    "相邻航点最大单关节变化 %.4f rad",
+                    traj.points.size(), traj_names.size(), worst, max_waypoint_delta);
+        if (worst > 1e-3) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_PATH_START_MISMATCH";
+            out.path_validation.detail = "the path does not start at the recorded start state "
+                                         "(max delta " + std::to_string(worst) + " rad)";
+            return false;
+        }
+    }
+
+    // End FK residual against the SAME chosen pre-grasp target.
+    auto stateOf = [&](const std::vector<double>& pos) {
+        moveit::core::RobotState st(*a1_verify_.start);
+        st.setVariablePositions(traj_names, pos);
+        st.update();
+        return st;
+    };
+    const moveit::core::RobotState end_state = stateOf(traj.points.back().positions);
+    const a1v::ArmTarget end_left =
+        fromEigenPose(end_state.getGlobalLinkTransform(a1_verify_.left_eef));
+    const a1v::ArmTarget end_right =
+        fromEigenPose(end_state.getGlobalLinkTransform(a1_verify_.right_eef));
+    const a1v::PoseError end_err_l = a1v::poseError(a1_verify_.pregrasp_target.left, end_left);
+    const a1v::PoseError end_err_r = a1v::poseError(a1_verify_.pregrasp_target.right, end_right);
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2B] 终点 FK 残差（对本次选定预抓取目标）: 左=%.4f mm/%.4f° 右=%.4f mm/%.4f°",
+                end_err_l.pos_m * 1000.0, end_err_l.angle_rad * 180.0 / M_PI,
+                end_err_r.pos_m * 1000.0, end_err_r.angle_rad * 180.0 / M_PI);
+    if (end_err_l.pos_m > ctx_->p2a_ik_pos_tol_m_ || end_err_r.pos_m > ctx_->p2a_ik_pos_tol_m_ ||
+        end_err_l.angle_rad > ctx_->p2a_ik_angle_tol_deg_ * M_PI / 180.0 ||
+        end_err_r.angle_rad > ctx_->p2a_ik_angle_tol_deg_ * M_PI / 180.0) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_ENDPOINT_MISMATCH";
+        out.path_validation.detail =
+            "the planned end does not reproduce the pre-grasp solution this round selected";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+        return false;
+    }
+
+    // Record the joint path itself, so the result is reproducible from the run
+    // log rather than only summarised. The run script extracts these lines.
+    {
+        std::string name_line;
+        for (const std::string& n : traj_names) {
+            name_line += (name_line.empty() ? "" : ",") + n;
+        }
+        RCLCPP_INFO(ctx_->get_logger(), "[P2B_PATH_NAMES] %s", name_line.c_str());
+        for (std::size_t pi = 0; pi < traj.points.size(); ++pi) {
+            std::string row = std::to_string(pi);
+            for (double v : traj.points[pi].positions) {
+                row += "," + std::to_string(v);
+            }
+            RCLCPP_INFO(ctx_->get_logger(), "[P2B_PATH] %s", row.c_str());
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "[P2B_START_END] model=mujoco_hand_aabb start_source=live_current_state "
+                    "goal=this_round_selected_pregrasp planner=%s waypoints=%zu joints=%zu",
+                    ctx_->p2b_planner_id_.c_str(), traj.points.size(), traj_names.size());
+    }
+
+    // -----------------------------------------------------------------------
+    // 4. Collision over every waypoint and every interpolated state, on the
+    //    criterion model, with one fixed ACM set.
+    // -----------------------------------------------------------------------
+    const double step = ctx_->p2b_max_joint_step_rad_;
+    if (!(step > 0.0)) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_BAD_CONFIG";
+        out.path_validation.detail = "p2b_max_joint_step_rad must be positive";
+        return false;
+    }
+    constexpr std::size_t kMaxSubdivisions = 2000;
+
+    std::size_t checked_states = 0;
+    std::size_t subdivisions = 0;
+    ContactTally path_tally_total;
+    std::string worst_detail;
+    for (std::size_t pi = 0; pi + 1 < traj.points.size(); ++pi) {
+        const auto& a = traj.points[pi].positions;
+        const auto& b = traj.points[pi + 1].positions;
+        const double seg_delta = a1v::maxAbsJointDelta(a, b);
+        const std::size_t n = a1v::subdivisionsFor(seg_delta, step);
+        if (n > kMaxSubdivisions) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_SEGMENT_TOO_LONG";
+            out.path_validation.detail =
+                "segment " + std::to_string(pi) + " needs " + std::to_string(n) +
+                " subdivisions at the configured step; refusing to skip any of it";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+            return false;
+        }
+        subdivisions += n;
+        for (std::size_t k = 0; k < n; ++k) {
+            const double t = static_cast<double>(k) / static_cast<double>(n);
+            const std::vector<double> pos = a1v::interpolateJoints(a, b, t);
+            moveit::core::RobotState st = stateOf(pos);
+            // The pre-grasp path must not put the hand or fingers through the
+            // rod, so the strict ACM (fingers not exempted) is used throughout.
+            const ContactTally tly = tallyContactsIn(scene, model, st, a1_verify_.base_acm, rod_id,
+                                                     support_id);
+            ++checked_states;
+            if (tly.total() > 0) {
+                path_tally_total.rod += tly.rod;
+                path_tally_total.support += tly.support;
+                path_tally_total.dual_arm += tly.dual_arm;
+                path_tally_total.self += tly.self;
+                path_tally_total.world += tly.world;
+                if (worst_detail.empty()) {
+                    worst_detail = "segment " + std::to_string(pi) + " t=" + std::to_string(t) +
+                                   " " + describeTally(tly);
+                }
+            }
+        }
+    }
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2B] 插值分辨率: 最大单关节步长 %.4f rad ⇒ 共细分 %zu 段, 检查 %zu 个状态"
+                "（航点 %zu）。这是离散采样检查，**不是**连续碰撞的数学保证",
+                step, subdivisions, checked_states, traj.points.size());
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2B] 自碰撞口径: 沿用既有 SRDF/ACM 豁免，含同臂 hand↔link6(Never)/link7/link8"
+                " 等继承项；跨臂允许项已在验证副本中关闭。结果是在该规则下的结果");
+
+    if (path_tally_total.total() > 0) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_PATH_COLLISION";
+        out.path_validation.detail = "path collision: " + worst_detail;
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] 路径存在碰撞: %s",
+                     describeTally(path_tally_total).c_str());
+        return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Mid-path negative: an obstacle that blocks the MIDDLE of the path but
+    //    not its endpoints. This proves the interior is really checked.
+    // -----------------------------------------------------------------------
+    if (ctx_->p2b_midpath_negative_ && traj.points.size() >= 3) {
+        const std::string obstacle_id = "a1_path_obstacle_injected";
+        auto placeObstacle = [&](const Eigen::Isometry3d& hand_world) {
+            moveit_msgs::msg::CollisionObject obstacle;
+            obstacle.header.frame_id = scene->getPlanningFrame();
+            obstacle.id = obstacle_id;
+            shape_msgs::msg::SolidPrimitive box;
+            box.type = shape_msgs::msg::SolidPrimitive::BOX;
+            box.dimensions = {0.05, 0.05, 0.05};
+            obstacle.primitives.push_back(box);
+            geometry_msgs::msg::Pose op;
+            op.position.x = hand_world.translation().x();
+            op.position.y = hand_world.translation().y();
+            op.position.z = hand_world.translation().z();
+            op.orientation.w = 1.0;
+            obstacle.primitive_poses.push_back(op);
+            obstacle.operation = moveit_msgs::msg::CollisionObject::ADD;
+            scene->processCollisionObjectMsg(obstacle);
+        };
+        auto removeObstacle = [&]() {
+            moveit_msgs::msg::CollisionObject obstacle;
+            obstacle.header.frame_id = scene->getPlanningFrame();
+            obstacle.id = obstacle_id;
+            obstacle.operation = moveit_msgs::msg::CollisionObject::REMOVE;
+            scene->processCollisionObjectMsg(obstacle);
+        };
+
+        // The injection must be strictly INTERIOR: it has to block part of the
+        // path while leaving BOTH endpoints clean. Placing it blindly at the
+        // middle waypoint is not enough -- if the hand barely translates while
+        // the wrist re-orients, the middle and the end overlap and the test
+        // would not demonstrate interior coverage. Candidate positions are
+        // therefore searched and validated before the real run.
+        // A link that barely translates is a poor carrier for the obstacle: its
+        // own collision volume then reaches both endpoints. Several links and
+        // positions are therefore searched, and the obstacle is kept small.
+        const char* carrier_links[4] = {"mj_left_link5", "mj_left_link6", "mj_left_link7",
+                                        "mj_left_link8"};
+        std::size_t chosen = 0;
+        const char* chosen_link = nullptr;
+        bool found = false;
+        ContactTally chosen_mid;
+        const std::size_t lo = traj.points.size() / 5;
+        const std::size_t hi = (traj.points.size() * 4) / 5;
+        std::string scan_log;
+        for (const char* link : carrier_links) {
+            for (std::size_t idx = lo; idx <= hi && !found; ++idx) {
+                const moveit::core::RobotState cand = stateOf(traj.points[idx].positions);
+                placeObstacle(cand.getGlobalLinkTransform(link));
+                const ContactTally sc = tallyContactsIn(scene, model, *a1_verify_.start,
+                                                        a1_verify_.base_acm, rod_id, support_id);
+                const ContactTally ec = tallyContactsIn(scene, model, end_state,
+                                                        a1_verify_.base_acm, rod_id, support_id);
+                const ContactTally mc = tallyContactsIn(scene, model, cand, a1_verify_.base_acm,
+                                                        rod_id, support_id);
+                removeObstacle();
+                if (sc.total() == 0 && ec.total() == 0 && mc.total() > 0) {
+                    found = true;
+                    chosen = idx;
+                    chosen_link = link;
+                    chosen_mid = mc;
+                    scan_log += " [" + std::string(link) + "@" + std::to_string(idx) + ":起0/终0/中" +
+                                std::to_string(mc.total()) + "]";
+                }
+            }
+            if (found) {
+                break;
+            }
+            scan_log += " [" + std::string(link) + ": 无严格内部候选]";
+        }
+
+        if (!found) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_MIDPATH_NEGATIVE_NOT_CONSTRUCTIBLE";
+            out.path_validation.detail =
+                "no strictly interior obstacle position was found on this path (candidates" +
+                scan_log + "); interior coverage is NOT demonstrated, so this is reported as a "
+                "failure rather than quietly dropped";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+            return false;
+        }
+
+        const moveit::core::RobotState mid_state = stateOf(traj.points[chosen].positions);
+        placeObstacle(mid_state.getGlobalLinkTransform(chosen_link));
+
+        // Re-run the full interpolation with the obstacle present.
+        std::size_t blocked_states = 0;
+        for (std::size_t pi = 0; pi + 1 < traj.points.size(); ++pi) {
+            const auto& a = traj.points[pi].positions;
+            const auto& b = traj.points[pi + 1].positions;
+            const std::size_t n = a1v::subdivisionsFor(a1v::maxAbsJointDelta(a, b), step);
+            for (std::size_t k = 0; k < n; ++k) {
+                const double t = static_cast<double>(k) / static_cast<double>(n);
+                moveit::core::RobotState st = stateOf(a1v::interpolateJoints(a, b, t));
+                if (tallyContactsIn(scene, model, st, a1_verify_.base_acm, rod_id, support_id)
+                        .total() > 0) {
+                    ++blocked_states;
+                }
+            }
+        }
+        removeObstacle();
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2B][中段负例-注入] 候选扫描: %s", scan_log.c_str());
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2B][中段负例-注入] 选用航点 %zu/%zu 的 %s 位置注入 0.05 m 障碍 '%s'"
+                    "（验证注入，非规划器结果、非实际运动；起终点经确认无碰撞）",
+                    chosen + 1, traj.points.size(), chosen_link, obstacle_id.c_str());
+        RCLCPP_INFO(ctx_->get_logger(), "     中间航点碰撞=%zu", chosen_mid.total());
+        RCLCPP_INFO(ctx_->get_logger(), "     注入后整条路径上有 %zu 个采样状态被检出碰撞（原为 0）",
+                    blocked_states);
+        if (blocked_states == 0) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_MIDPATH_NEGATIVE_MISSED";
+            out.path_validation.detail = "the interior obstacle produced no collision along the path";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", out.path_validation.detail.c_str());
+            return false;
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  ✓ [P2B][中段负例-注入] 端点无碰撞、中段被检出 ⇒ 路径内部确实被检查");
+    }
+
+    out.path_validation.status = a1v::CheckStatus::PASSED;
+    out.path_validation.reason_code = "E_OK";
+    out.path_validation.detail =
+        "planned path verified over " + std::to_string(checked_states) + " interpolated states";
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  ✓ [P2B] 联合预抓取路径通过（仅规划，未执行）：%s", out.path_validation.detail.c_str());
+    return true;
+}
 
 void DualArmController::executeApproach()
     {

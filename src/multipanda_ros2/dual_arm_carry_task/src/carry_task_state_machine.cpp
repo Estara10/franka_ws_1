@@ -66,6 +66,40 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<double>("rod_truth_size_min", 0.005);
         this->declare_parameter<double>("rod_truth_size_max", 1.0);
 
+        // A1 P2a: static validity checks (geometry / dual-arm IK / collision).
+        // Off by default so the P1b prepare behaviour is unchanged.
+        this->declare_parameter<bool>("p2a_check", false);
+        this->declare_parameter<double>("p2a_workspace_x_min", 0.30);
+        this->declare_parameter<double>("p2a_workspace_x_max", 0.70);
+        this->declare_parameter<double>("p2a_workspace_y_min", -0.30);
+        this->declare_parameter<double>("p2a_workspace_y_max", 0.30);
+        this->declare_parameter<std::string>(
+            "p2a_workspace_source",
+            "config/a1_scene_sampling.yaml 采样范围按 15° 最大 footprint 外扩后加 80 mm 余量；"
+            "MuJoCo 支撑面为无限 plane，非物理桌面边缘");
+        this->declare_parameter<double>("p2a_support_z", 0.0);
+        this->declare_parameter<bool>("p2a_support_plane", true);
+        this->declare_parameter<std::string>("p2a_support_object_id", "a1_support_plane");
+        this->declare_parameter<bool>("p2a_ground_negative", true);
+        this->declare_parameter<bool>("p2a_hand_aabb_substitution", true);
+        this->declare_parameter<bool>("p2a_hand_negative", true);
+        this->declare_parameter<double>("p2a_support_depth_m", 2.0);
+        this->declare_parameter<bool>("p2b_check", false);
+        this->declare_parameter<std::string>("p2b_planner_id", "PTP");
+        this->declare_parameter<double>("p2b_planning_time_sec", 10.0);
+        this->declare_parameter<int>("p2b_planning_attempts", 5);
+        this->declare_parameter<double>("p2b_max_joint_step_rad", 0.05);
+        this->declare_parameter<bool>("p2b_midpath_negative", true);
+        this->declare_parameter<double>("p2a_resting_z_tol", 0.003);
+        this->declare_parameter<double>("p2a_max_tilt_deg", 2.0);
+        this->declare_parameter<double>("p2a_grasp_offset", 0.15);
+        this->declare_parameter<double>("p2a_eef_base_yaw_deg", 45.0);
+        this->declare_parameter<int>("p2a_ik_attempts", 5);
+        this->declare_parameter<double>("p2a_ik_timeout_sec", 0.05);
+        this->declare_parameter<double>("p2a_ik_pos_tol_m", 0.001);
+        this->declare_parameter<double>("p2a_ik_angle_tol_deg", 0.5);
+        this->declare_parameter<double>("p2a_max_joint_jump_rad", 2.0);
+
         left_arm_group_ = this->get_parameter("left_arm_group").as_string();
         right_arm_group_ = this->get_parameter("right_arm_group").as_string();
         control_mode_ = this->get_parameter("control_mode").as_string();
@@ -90,6 +124,35 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         a1_truth_timeout_sec_ = this->get_parameter("a1_truth_timeout_sec").as_double();
         rod_truth_size_min_ = this->get_parameter("rod_truth_size_min").as_double();
         rod_truth_size_max_ = this->get_parameter("rod_truth_size_max").as_double();
+
+        p2a_check_ = this->get_parameter("p2a_check").as_bool();
+        p2a_workspace_x_min_ = this->get_parameter("p2a_workspace_x_min").as_double();
+        p2a_workspace_x_max_ = this->get_parameter("p2a_workspace_x_max").as_double();
+        p2a_workspace_y_min_ = this->get_parameter("p2a_workspace_y_min").as_double();
+        p2a_workspace_y_max_ = this->get_parameter("p2a_workspace_y_max").as_double();
+        p2a_workspace_source_ = this->get_parameter("p2a_workspace_source").as_string();
+        p2a_support_z_ = this->get_parameter("p2a_support_z").as_double();
+        p2a_support_plane_ = this->get_parameter("p2a_support_plane").as_bool();
+        p2a_support_object_id_ = this->get_parameter("p2a_support_object_id").as_string();
+        p2a_ground_negative_ = this->get_parameter("p2a_ground_negative").as_bool();
+        p2a_hand_aabb_substitution_ = this->get_parameter("p2a_hand_aabb_substitution").as_bool();
+        p2a_hand_negative_ = this->get_parameter("p2a_hand_negative").as_bool();
+        p2a_support_depth_m_ = this->get_parameter("p2a_support_depth_m").as_double();
+        p2b_check_ = this->get_parameter("p2b_check").as_bool();
+        p2b_planner_id_ = this->get_parameter("p2b_planner_id").as_string();
+        p2b_planning_time_sec_ = this->get_parameter("p2b_planning_time_sec").as_double();
+        p2b_planning_attempts_ = this->get_parameter("p2b_planning_attempts").as_int();
+        p2b_max_joint_step_rad_ = this->get_parameter("p2b_max_joint_step_rad").as_double();
+        p2b_midpath_negative_ = this->get_parameter("p2b_midpath_negative").as_bool();
+        p2a_resting_z_tol_ = this->get_parameter("p2a_resting_z_tol").as_double();
+        p2a_max_tilt_deg_ = this->get_parameter("p2a_max_tilt_deg").as_double();
+        p2a_grasp_offset_m_ = this->get_parameter("p2a_grasp_offset").as_double();
+        p2a_eef_base_yaw_deg_ = this->get_parameter("p2a_eef_base_yaw_deg").as_double();
+        p2a_ik_attempts_ = this->get_parameter("p2a_ik_attempts").as_int();
+        p2a_ik_timeout_sec_ = this->get_parameter("p2a_ik_timeout_sec").as_double();
+        p2a_ik_pos_tol_m_ = this->get_parameter("p2a_ik_pos_tol_m").as_double();
+        p2a_ik_angle_tol_deg_ = this->get_parameter("p2a_ik_angle_tol_deg").as_double();
+        p2a_max_joint_jump_rad_ = this->get_parameter("p2a_max_joint_jump_rad").as_double();
 
         // Source resolution. The vision entry keeps working unchanged: leaving
         // rod_pose_source at its default while use_vision is true means vision.
@@ -192,6 +255,8 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         if (rod_pose_source_ == kRodPoseSourceA1Truth) {
             RCLCPP_INFO(this->get_logger(), "  准备模式(prepare_only): %s",
                         prepare_only_ ? "启用（本轮 A1 不运动）" : "禁用");
+            RCLCPP_INFO(this->get_logger(), "  P2a 静态检查(p2a_check): %s",
+                        p2a_check_ ? "启用（几何/双臂 IK/组合碰撞，仍不运动）" : "禁用");
         }
         if (rod_pose_source_ == kRodPoseSourceVision) {
             RCLCPP_INFO(this->get_logger(), "  视觉模式: 启用 (目标: %.3f, %.3f, yaw=%.1f°)",
@@ -298,9 +363,20 @@ void DualArmCarryTask::executeTask()
 int main(int argc, char** argv)
 {
     rclcpp::init(argc, argv);
-    
+
     auto node = std::make_shared<DualArmCarryTask>();
-    
+
+    // A1 P1b 局部修复：来源冲突或未知来源时构造函数已置 ERROR 并提前返回，
+    // 此时 arms_/grippers_ 尚未创建。用简单状态检查明确非零退出，不初始化
+    // MoveIt、不访问未创建的控制器，也不创建 executor 线程。
+    if (node->getCurrentState() == TaskState::ERROR) {
+        RCLCPP_ERROR(node->get_logger(),
+                     "  ✗ 参数无效（rod_pose_source 冲突或未知），未初始化控制器，非零退出");
+        node.reset();
+        rclcpp::shutdown();
+        return 1;
+    }
+
     // 创建多线程执行器
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(node);

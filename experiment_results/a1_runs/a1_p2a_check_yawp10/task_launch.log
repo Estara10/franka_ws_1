@@ -1,0 +1,78 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-12-19-26-36-767956-Estara-239898
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [239979]
+[dual_arm_carry_task_node-1] [INFO] [1791804402.159020399] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169822257] [dual_arm_carry_task]: A1 truth mode enabled: subscribing to /a1_rod_pose_truth (expected_run_id=a1_p2a_check_yawp10)
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169908549] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169922261] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169933052] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169939433] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169944964] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169950757] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169956368] [dual_arm_carry_task]:   杆位姿来源: a1_truth
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169966334] [dual_arm_carry_task]:   准备模式(prepare_only): 启用（本轮 A1 不运动）
+[dual_arm_carry_task_node-1] [INFO] [1791804402.169975968] [dual_arm_carry_task]:   P2a 静态检查(p2a_check): 启用（几何/双臂 IK/组合碰撞，仍不运动）
+[dual_arm_carry_task_node-1] [INFO] [1791804402.180274628] [dual_arm_carry_task]:   A1 真值已冻结: run_id=a1_p2a_check_yawp10 frame=world pos=(0.480000, 0.030000, 0.020654)
+[dual_arm_carry_task_node-1] [INFO] [1791804404.170242484] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791804404.183194126] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.01 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791804404.183261011] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791804404.221917370] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791804404.221948763] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791804404.226579532] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231189043] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231233495] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231256884] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231264979] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231271965] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231278492] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231287768] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231309793] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231317099] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231323271] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231330255] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231337830] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231343828] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231357897] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231366531] [dual_arm_carry_task]:   [A1] MoveIt 规划坐标系: base_link
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231377041] [dual_arm_carry_task]:   [A1] 冻结真值: run_id=a1_p2a_check_yawp10 frame=world pos=(0.480000, 0.030000, 0.020654) size=(0.040, 0.400, 0.040) mass=0.640000 kg
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231414633] [dual_arm_carry_task]:   [A1] 冻结真值 yaw=10.0000° (长轴为杆局部 Y 轴)
+[dual_arm_carry_task_node-1] [INFO] [1791804404.231425545] [dual_arm_carry_task]:   [A1] 坐标处理: world 与 base_link 数值等价（SRDF 固定 virtual_joint + URDF/MuJoCo 基座位置一致），按显式单位变换处理
+[dual_arm_carry_task_node-1] [INFO] [1791804404.250086693] [dual_arm_carry_task]:   [A1] 读回原始值: object_frame='base_link' primitives=1 pose=(0.480000, 0.030000, 0.020654) quat=(0.000000, -0.000000, 0.087156, 0.996195) dims=(0.0400, 0.4000, 0.0400)
+[dual_arm_carry_task_node-1] [INFO] [1791804404.250129882] [dual_arm_carry_task]:   [A1] 写入请求值: object_frame='base_link' pose=(0.480000, 0.030000, 0.020654) quat=(0.000000, -0.000000, 0.087156, 0.996195)
+[dual_arm_carry_task_node-1] [INFO] [1791804404.250168784] [dual_arm_carry_task]:   [A1] 场景读回核对: Δpos=0.0000 mm, Δangle=0.0000°, Δsize=0.000e+00 m (容差 1.0 mm / 0.5° / 1e-06 m)
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255588859] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ----- [P2A] 样本静态有效性检查（不运动）-----
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255680484] [dual_arm_carry_task]:   [P2A][几何] passed (E_OK)
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255688074] [dual_arm_carry_task]:     杆 yaw=10.0000° 倾角=0.0000° 中心 z=0.020654 | footprint x=[0.4256, 0.5344] y=[-0.1704, 0.2304]
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255698629] [dual_arm_carry_task]:     配置工作区 x=[0.300, 0.700] y=[-0.300, 0.300]，最小余量 69.565 mm。来源: config/a1_scene_sampling.yaml 采样范围按 15° 最大 footprint 外扩后加 80 mm 余量；MuJoCo 支撑面为无限 plane，非物理桌面边缘
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255707525] [dual_arm_carry_task]:     说明: MuJoCo 支撑面为无限 plane（dual_scene.xml 的 floor geom，无 pos），上界是配置的研究包络，不是物理桌面边缘
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255712870] [dual_arm_carry_task]:   [P2A][目标] 抓取偏移 0.150 m（沿杆长轴，杆半长 0.200 m），末端基准 yaw 45.0°
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255718771] [dual_arm_carry_task]:     预抓取 z=0.280 抓取 z=0.130（均为腕部 link8 原点高度，非指尖/TCP）
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255723258] [dual_arm_carry_task]:     左(杆 +长轴端) 预抓取=(0.4540, 0.1777, 0.2800) 抓取=(0.4540, 0.1777, 0.1300)
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255729058] [dual_arm_carry_task]:     右(杆 -长轴端) 预抓取=(0.5060, -0.1177, 0.2800) 抓取=(0.5060, -0.1177, 0.1300)
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255736117] [dual_arm_carry_task]:     姿态约定核对: 本构造器 q=(0.887010833, 0.461748613, 0.000000000, 0.000000000) 与 tf2 setRPY(π,0,55.0000°) 角度差 0.000e+00 rad
+[dual_arm_carry_task_node-1] [INFO] [1791804404.255746970] [dual_arm_carry_task]:   [P2A][IK] 末端 link: 左=mj_left_link8 右=mj_right_link8（目标位姿即该 link 的原点位姿）
+[dual_arm_carry_task_node-1] [INFO] [1791804404.256401822] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[dual_arm_carry_task_node-1] [INFO] [1791804404.261108949] [dual_arm_carry_task]:     [pre-grasp] 关节限位余量 0.5533 rad | FK 残差 左=0.0000 mm/0.0000° 右=0.0000 mm/0.0000°
+[dual_arm_carry_task_node-1] [INFO] [1791804404.261162640] [dual_arm_carry_task]:     [pre-grasp] 相对起始状态最大单关节变化 1.9201 rad（上限 2.0000）
+[dual_arm_carry_task_node-1] [INFO] [1791804404.261181864] [dual_arm_carry_task]:     [grasp] 关节限位余量 0.3559 rad | FK 残差 左=0.0000 mm/0.0000° 右=0.0000 mm/0.0000°
+[dual_arm_carry_task_node-1] [INFO] [1791804404.261193608] [dual_arm_carry_task]:     [grasp] 相对起始状态最大单关节变化 2.1252 rad（上限 2.0000）
+[dual_arm_carry_task_node-1] [ERROR] [1791804404.261202203] [dual_arm_carry_task]:     ✗ grasp: largest single-joint change 2.125239 rad exceeds 2.000000 rad
+[dual_arm_carry_task_node-1] [ERROR] [1791804404.261232802] [dual_arm_carry_task]:   ✗ [P2A] 该样本未通过静态有效性检查（几何=passed 说明=E_OK / IK=failed 说明=E_IK_JUMP / 碰撞=NOT_RUN 说明=E_IK_NOT_VALID）
+[dual_arm_carry_task_node-1] [ERROR] [1791804404.261239266] [dual_arm_carry_task]:   ✗ [P2A] 不放宽碰撞规则或容差；该样本按拒绝处理，不得作为可搬运样本使用
+[dual_arm_carry_task_node-1] [INFO] [1791804404.261244102] [dual_arm_carry_task]: ✓ [A1] 准备完成(PREPARED): 真值已冻结且规划场景已同步确认，未执行任何搬运运动
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791804404.461362252] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791804404.461395957] [dual_arm_carry_task]:     ✓ 准备完成（PREPARED）—— 未执行任何搬运运动
+[dual_arm_carry_task_node-1] [INFO] [1791804404.461405660] [dual_arm_carry_task]: 已发布准备完成状态(PREPARED)，不是任务 DONE。
+[dual_arm_carry_task_node-1] [INFO] [1791804404.461410182] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791804404.461414801] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791804404.461419174] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[dual_arm_carry_task_node-1] [INFO] [1791804404.693735838] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 239979]

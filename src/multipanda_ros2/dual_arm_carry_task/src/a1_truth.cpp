@@ -67,11 +67,14 @@ Verdict validateTruth(const TruthPayload& payload,
   if (!finite(payload.size)) {
     return makeVerdict(false, "E_TRUTH_BAD_SIZE", "size has a non-finite component");
   }
-  const double max_component =
-      std::max({std::fabs(payload.size.x), std::fabs(payload.size.y), std::fabs(payload.size.z)});
-  const double min_component =
-      std::min({std::fabs(payload.size.x), std::fabs(payload.size.y), std::fabs(payload.size.z)});
-  if (!(min_component > 0.0) || min_component < min_size_m || max_component > max_size_m) {
+  // A full BOX size must be strictly positive on every axis. Negative sizes
+  // must be rejected, not silently folded by an abs() into a valid geometry.
+  if (!(payload.size.x > 0.0) || !(payload.size.y > 0.0) || !(payload.size.z > 0.0)) {
+    return makeVerdict(false, "E_TRUTH_BAD_SIZE", "size has a non-positive component");
+  }
+  const double max_component = std::max({payload.size.x, payload.size.y, payload.size.z});
+  const double min_component = std::min({payload.size.x, payload.size.y, payload.size.z});
+  if (min_component < min_size_m || max_component > max_size_m) {
     return makeVerdict(false, "E_TRUTH_BAD_SIZE",
                        "rod size outside the accepted range [" + std::to_string(min_size_m) + ", " +
                            std::to_string(max_size_m) + "]");

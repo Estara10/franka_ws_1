@@ -55,6 +55,13 @@ PREPARE_MODE=0
 TRUTH_TOPIC="/a1_rod_pose_truth"
 HOLD_SEC=300
 TASK_TIMEOUT=180
+# A1 P2a: static validity checks (geometry / dual-arm IK / collision) run
+# inside the prepare boundary. Off by default, so P1b behaviour is unchanged.
+P2A_CHECK=0
+# A1 P2b: joint pre-grasp path planning + verification. Planning only, no motion.
+P2B_CHECK=0
+P2A_WORKSPACE=""
+P2A_WORKSPACE_SOURCE=""
 
 usage() {
   cat <<'EOF'
@@ -75,6 +82,21 @@ usage: a1_run_scene.sh [options]
   --truth-topic T       truth topic (default /a1_rod_pose_truth)
   --hold-sec S          how long the truth publisher stays alive (default 300)
   --task-timeout SEC    wall-clock bound for the task reaching PREPARED (default 180)
+  --p2a-check           A1 P2a: after the planning scene is synced, also run the
+                        static geometry / dual-arm IK / combined-collision
+                        checks on the frozen truth. Still no motion. The exit
+                        code then reflects the P2a result, not just PREPARED.
+  --p2a-workspace XMIN XMAX YMIN YMAX
+                        configured research envelope for the complete rod
+                        footprint (metres). The support surface in this scene is
+                        an unbounded MuJoCo plane, so this is a chosen research
+                        region, NOT a physical table edge.
+  --p2a-workspace-source S
+                        provenance text for the envelope above, recorded verbatim
+  --p2b-check           A1 P2b: also plan the dual-arm joint pre-grasp path from
+                        the actual start and re-verify every interpolated state on
+                        the P2a criterion model. Planning only, nothing is
+                        executed. The exit code then follows p2_acceptance.
   --domain-id N         ROS_DOMAIN_ID for this run (default 77)
   --use-rviz            start RViz with the simulator (default: no)
   --headless            run the simulator headless
@@ -99,6 +121,10 @@ while [[ $# -gt 0 ]]; do
     --truth-topic)     TRUTH_TOPIC="$2"; shift 2 ;;
     --hold-sec)        HOLD_SEC="$2"; shift 2 ;;
     --task-timeout)    TASK_TIMEOUT="$2"; shift 2 ;;
+    --p2a-check)       P2A_CHECK=1; shift ;;
+    --p2b-check)       P2B_CHECK=1; P2A_CHECK=1; shift ;;
+    --p2a-workspace)   P2A_WORKSPACE="$2 $3 $4 $5"; shift 5 ;;
+    --p2a-workspace-source) P2A_WORKSPACE_SOURCE="$2"; shift 2 ;;
     --domain-id)       DOMAIN_ID="$2"; shift 2 ;;
     --use-rviz)        USE_RVIZ="true"; shift ;;
     --headless)        HEADLESS="true"; shift ;;
@@ -229,9 +255,32 @@ record_prepare_status() {
     printf '  "ros_domain_id": "%s",\n' "${ROS_DOMAIN_ID}"
     printf '  "truth_published": %s,\n' "$(grep -q 'truth published' "${RUN_DIR}/runner.log" 2>/dev/null && echo true || echo false)"
     printf '  "manifest_present": %s,\n' "$([[ -f "${RUN_DIR}/manifest.json" ]] && echo true || echo false)"
+    printf '  "p2a_check_enabled": %s,\n' "$([[ "${P2A_CHECK}" -eq 1 ]] && echo true || echo false)"
+    printf '  "p2a_result_line": "%s",\n' "$(grep -m1 '\[P2A_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P2A_RESULT\]/[P2A_RESULT]/' | tr -d '"\\')"
+    printf '  "p2a_static_passed": %s,\n' "$(p2a_static_passed && echo true || echo false)"
+    printf '  "p2b_check_enabled": %s,\n' "$([[ "${P2B_CHECK}" -eq 1 ]] && echo true || echo false)"
+    printf '  "p2b_result_line": "%s",\n' "$(grep -m1 '\[P2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P2B_RESULT\]/[P2B_RESULT]/' | tr -d '"\\')"
+    printf '  "p2_acceptance": %s,\n' "$(p2_acceptance_true && echo true || echo false)"
     printf '  "task_log": "task_launch.log"\n'
     printf '}\n'
   } > "${RUN_DIR}/prepare_status.json" 2>/dev/null || true
+}
+
+# True only when the task actually emitted a P2a result with all three static
+# checks passed. Absence of the line is NOT treated as a pass.
+# True only when the task emitted p2_acceptance=true. Missing line is NOT a pass.
+p2_acceptance_true() {
+  local line
+  line="$(grep -m1 '\[P2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null || true)"
+  [[ -n "${line}" ]] || return 1
+  [[ "${line}" == *"p2_acceptance=true"* ]]
+}
+
+p2a_static_passed() {
+  local line
+  line="$(grep -m1 '\[P2A_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null || true)"
+  [[ -n "${line}" ]] || return 1
+  [[ "${line}" == *"geometry=passed"* && "${line}" == *"ik=passed"* && "${line}" == *"collision=passed"* ]]
 }
 
 # Any exit through this trap reports a failure that has not already been
@@ -457,9 +506,21 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
   else
     echo "[prepare] truth published; starting the task in prepare-only mode"
     # The task must not move: rod_pose_source=a1_truth with prepare_only=true.
+    P2A_ARGS=(p2a_check:="$([[ "${P2A_CHECK}" -eq 1 ]] && echo true || echo false)"
+              p2b_check:="$([[ "${P2B_CHECK}" -eq 1 ]] && echo true || echo false)")
+    if [[ -n "${P2A_WORKSPACE}" ]]; then
+      read -r P2A_XMIN P2A_XMAX P2A_YMIN P2A_YMAX <<<"${P2A_WORKSPACE}"
+      P2A_ARGS+=(p2a_workspace_x_min:="${P2A_XMIN}" p2a_workspace_x_max:="${P2A_XMAX}"
+                 p2a_workspace_y_min:="${P2A_YMIN}" p2a_workspace_y_max:="${P2A_YMAX}")
+    fi
+    if [[ -n "${P2A_WORKSPACE_SOURCE}" ]]; then
+      P2A_ARGS+=(p2a_workspace_source:="${P2A_WORKSPACE_SOURCE}")
+    fi
+
     setsid ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
       rod_pose_source:=a1_truth prepare_only:=true expected_run_id:="${RUN_ID}" \
       a1_truth_topic:="${TRUTH_TOPIC}" use_vision:=false \
+      "${P2A_ARGS[@]}" \
       control_mode:=compliant \
       enable_latency_monitor:=false enable_task_metrics_monitor:=false \
       > "${RUN_DIR}/task_launch.log" 2>&1 &
@@ -486,7 +547,49 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     echo "[prepare] task state: ${TASK_STATE}"
     record_prepare_status "${TASK_STATE}"
 
-    if [[ "${TASK_STATE}" == "PREPARED" ]]; then RC=0; else RC=2; fi
+    if [[ "${TASK_STATE}" == "PREPARED" ]]; then
+      RC=0
+      # PREPARED only means the truth was frozen and the scene synced. When the
+      # P2a check is enabled, the exit code reflects the static validity result
+      # so a rejected sample can never look like a passing run.
+      if [[ "${P2A_CHECK}" -eq 1 ]]; then
+        if [[ "${P2B_CHECK}" -eq 1 ]]; then
+          if p2_acceptance_true; then
+            echo "[prepare] P2b: static + joint pre-grasp path checks passed (planning only, not DONE)"
+          else
+            echo "[prepare] P2b path check did NOT pass; see task_launch.log" >&2
+            grep -m1 '\[P2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null >&2 || true
+            record_status "E_P2B_PATH_FAILED" \
+              "the joint pre-grasp path did not pass; sample rejected, no rule or start was changed" \
+              "prepare"
+            RC=5
+          fi
+        elif p2a_static_passed; then
+          echo "[prepare] P2a static checks: geometry/ik/collision all passed"
+        else
+          echo "[prepare] P2a static checks did NOT all pass; see task_launch.log" >&2
+          grep -m1 '\[P2A_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null >&2 || true
+          record_status "E_P2A_STATIC_FAILED" \
+            "P2a geometry/IK/collision did not all pass; sample rejected, no rule or tolerance was relaxed" \
+            "prepare"
+          RC=4
+        fi
+      fi
+    else
+      RC=2
+    fi
+    # P2b: extract the recorded joint path into a CSV next to the log.
+    if [[ -f "${RUN_DIR}/task_launch.log" ]] && grep -q '\[P2B_PATH\]' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+      {
+        grep -m1 '\[P2B_PATH_NAMES\]' "${RUN_DIR}/task_launch.log" \
+          | sed 's/.*\[P2B_PATH_NAMES\] //' | sed 's/^/waypoint,/'
+        grep '\[P2B_PATH\]' "${RUN_DIR}/task_launch.log" | sed 's/.*\[P2B_PATH\] //'
+      } > "${RUN_DIR}/p2b_path.csv" 2>/dev/null || true
+      grep -m1 '\[P2B_START_END\]' "${RUN_DIR}/task_launch.log" 2>/dev/null \
+        | sed 's/.*\[P2B_START_END\] //' > "${RUN_DIR}/p2b_path_summary.txt" 2>/dev/null || true
+      echo "[prepare] wrote p2b_path.csv ($(grep -c '\[P2B_PATH\]' "${RUN_DIR}/task_launch.log") waypoints)"
+    fi
+
     stop_group task "${TASK_PGID}" "${TASK_PID}"
   fi
 

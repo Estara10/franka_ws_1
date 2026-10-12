@@ -1,0 +1,9 @@
+truth publication enabled on /a1_rod_pose_truth (hold 300s)
+preconditions ok: model_valid=1 load_count=1 model_path=/home/lidio/franka_ws_1/install/franka_description/share/franka_description/mujoco/franka/dual_scene.xml
+baseline rod pose: (0.5, 8.35648e-17, 0.0206537)
+truth published: run_id=a1_p2b_path_yawp10d frame=world pos=(0.48, 0.03, 0.0206537)
+scene_state=SCENE_READY_UNVALIDATED outcome_code=SCENE_READY_UNVALIDATED
+manifest: /home/lidio/franka_ws_1/experiment_results/a1_runs/a1_p2b_path_yawp10d/manifest.json
+A1_RESULT {"scene_state": "SCENE_READY_UNVALIDATED", "outcome_code": "SCENE_READY_UNVALIDATED", "evidence_written": true, "truth_published": true, "manifest": "/home/lidio/franka_ws_1/experiment_results/a1_runs/a1_p2b_path_yawp10d/manifest.json"}
+holding for up to 300s so the latched truth can be received
+hold finished

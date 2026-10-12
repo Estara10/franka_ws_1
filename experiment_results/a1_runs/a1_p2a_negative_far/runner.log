@@ -1,0 +1,5 @@
+truth publication enabled on /a1_rod_pose_truth (hold 300s)
+scene_state=SCENE_APPLY_FAILED outcome_code=E_SERVICES_UNAVAILABLE
+manifest: /home/lidio/franka_ws_1/experiment_results/a1_runs/a1_p2a_negative_far/manifest.json
+A1_RESULT {"scene_state": "SCENE_APPLY_FAILED", "outcome_code": "E_SERVICES_UNAVAILABLE", "evidence_written": true, "truth_published": false, "manifest": "/home/lidio/franka_ws_1/experiment_results/a1_runs/a1_p2a_negative_far/manifest.json"}
+[ros2run]: Process exited with failure 2

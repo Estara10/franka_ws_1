@@ -1,0 +1,10 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p2a_check_yawp10f",
+  "stage": "ownership_check",
+  "outcome_code": "E_INSTANCE_ALREADY_PRESENT",
+  "detail": "services already advertised on this ROS domain",
+  "ros_domain_id": "77",
+  "ros_localhost_only": "1",
+  "manifest_present": false
+}

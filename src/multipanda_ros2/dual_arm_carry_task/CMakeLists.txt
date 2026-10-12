@@ -23,6 +23,8 @@ find_package(moveit_msgs REQUIRED)
 find_package(multi_mode_control_msgs REQUIRED)
 find_package(shape_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
+# A1 P2a: locate the simulation's hand collision mesh via the package share dir.
+find_package(ament_index_cpp REQUIRED)
 # A1 P1a: rod body state / simulation info services.
 find_package(mujoco_ros_msgs REQUIRED)
 # A1 P1b: rod pose truth message.
@@ -57,6 +59,16 @@ add_library(a1_sampling src/a1_sampling.cpp)
 # A1 P1b: pure, offline-testable truth handling (validation, latch-once freeze,
 # frame mapping, planning-scene read-back check). No ROS dependency.
 add_library(a1_truth src/a1_truth.cpp)
+
+# A1 P2a: pure, offline-testable sample validity checks (rotated footprint,
+# workspace/support judgement, shared pre-grasp/grasp target construction,
+# joint-limit and residual helpers). No ROS dependency.
+add_library(a1_sample_validator src/a1_sample_validator.cpp)
+target_link_libraries(a1_sample_validator a1_truth)
+
+ament_target_dependencies(a1_sample_validator
+  dual_arm_a1_msgs
+)
 
 # A1 P1a: ROS side -- applies one sampled pose via /set_body_state and writes a
 # manifest. Does not publish truth, does not start the task.
@@ -112,6 +124,11 @@ target_include_directories(a1_truth PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
+target_include_directories(a1_sample_validator PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
 ament_target_dependencies(a1_scene_runner_node
   rclcpp
   mujoco_ros_msgs
@@ -124,9 +141,10 @@ target_link_libraries(a1_scene_runner_node a1_sampling)
 # The task node needs the truth message and the pure truth handling.
 ament_target_dependencies(dual_arm_carry_task_node
   dual_arm_a1_msgs
+  ament_index_cpp
 )
 
-target_link_libraries(dual_arm_carry_task_node a1_truth)
+target_link_libraries(dual_arm_carry_task_node a1_truth a1_sample_validator)
 
 # Install targets
 install(TARGETS
@@ -137,6 +155,7 @@ install(TARGETS
   a1_scene_runner_node
   a1_sampling
   a1_truth
+  a1_sample_validator
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -169,6 +188,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_a1_truth test/test_a1_truth.cpp)
   target_link_libraries(test_a1_truth a1_truth)
+
+  ament_add_gtest(test_a1_sample_validator test/test_a1_sample_validator.cpp)
+  target_link_libraries(test_a1_sample_validator a1_sample_validator)
 endif()
 
 ament_package()

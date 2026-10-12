@@ -27,6 +27,7 @@
 #include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
 #include <dual_arm_a1_msgs/msg/rod_pose_truth.hpp>
 #include "dual_arm_carry_task/a1_truth.hpp"
+#include "dual_arm_carry_task/a1_sample_validator.hpp"
 #include <memory>
 #include <thread>
 #include <chrono>
@@ -107,6 +108,58 @@ public:
     double rod_truth_size_max_ {1.0};
     a1t::TruthLatch a1_truth_latch_;
     rclcpp::Subscription<dual_arm_a1_msgs::msg::RodPoseTruth>::SharedPtr a1_truth_sub_;
+
+    // A1 P2a: static sample validity checks on the frozen truth. Runs inside the
+    // PREPARED boundary and never moves the robot.
+    bool p2a_check_ {false};
+    // Configured research envelope for the complete rotated rod footprint. On
+    // this scene the support surface is an unbounded MuJoCo `plane`, so these
+    // bounds are a chosen research region, NOT a physical table edge. The
+    // source string is recorded verbatim in the result.
+    double p2a_workspace_x_min_ {0.30};
+    double p2a_workspace_x_max_ {0.70};
+    double p2a_workspace_y_min_ {-0.30};
+    double p2a_workspace_y_max_ {0.30};
+    std::string p2a_workspace_source_;
+    double p2a_support_z_ {0.0};
+    double p2a_resting_z_tol_ {0.003};
+    double p2a_max_tilt_deg_ {2.0};
+    // The MuJoCo floor never enters MoveIt, so the support surface is added to
+    // the VERIFICATION scene only. `p2a_ground_negative` injects a deliberate
+    // below-floor state to prove the check can reject a link passing through it.
+    bool p2a_support_plane_ {true};
+    std::string p2a_support_object_id_ {"a1_support_plane"};
+    bool p2a_ground_negative_ {true};
+    // Replace ONLY the two hand links' collision geometry with the conservative
+    // AABB of the simulation's hand_c mesh, in an independently built model. The
+    // original URDF result is always reported alongside as a reference.
+    // Depth of the verification support box below the support plane. A thin
+    // slab would leave deep paths unchecked, so it is a box, not a plate.
+    double p2a_support_depth_m_ {2.0};
+    bool p2a_hand_aabb_substitution_ {true};
+    // Inject an obstacle coincident with the substituted hand box to prove the
+    // replacement geometry still participates in collision checking.
+    bool p2a_hand_negative_ {true};
+
+    // A1 P2b: plan the joint pre-grasp path from the ACTUAL start state and
+    // re-verify it on the P2a criterion model. Planning only -- never executes.
+    bool p2b_check_ {false};
+    std::string p2b_planner_id_ {"PTP"};
+    double p2b_planning_time_sec_ {10.0};
+    int p2b_planning_attempts_ {5};
+    // Max single-joint step used when subdividing each trajectory segment for
+    // collision checking. Recorded, not claimed as a continuous guarantee.
+    double p2b_max_joint_step_rad_ {0.05};
+    bool p2b_midpath_negative_ {true};
+    // Grasp offset along the rod's long axis; A0 uses 0.15.
+    double p2a_grasp_offset_m_ {0.15};
+    // Yaw term of A0's setRPY(pi, 0, pi/4).
+    double p2a_eef_base_yaw_deg_ {45.0};
+    int p2a_ik_attempts_ {5};
+    double p2a_ik_timeout_sec_ {0.05};
+    double p2a_ik_pos_tol_m_ {0.001};
+    double p2a_ik_angle_tol_deg_ {0.5};
+    double p2a_max_joint_jump_rad_ {2.0};
 
     // True when this run takes its rod pose from the A1 truth message.
     bool usesA1Truth() const

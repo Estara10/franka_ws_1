@@ -127,3 +127,85 @@ frame 映射（同名 / world↔base_link / 不支持）、场景读回比对（
 
 `PREPARED` 之后不进入运动，因此**尚未**验证真值输入下的任何轨迹规划或执行；
 yaw 运动泛化、放置评价与样本有效性检查均**未实现**，不得据本轮结果声称 A1 已通过。
+
+---
+
+# 附：P1b 两处局部修复（2026-10-12）
+
+规划器指出的两个无效输入处理缺陷，已局部修复；未进入 P2，未扩展重构。
+
+## 修改内容
+
+**1. 参数拒绝后的空指针路径** — `src/carry_task_state_machine.cpp`（`main`）
+
+构造函数在来源冲突/未知来源时置 `ERROR` 并提前返回，此时 `arms_`/`grippers_` 尚未创建，
+而 `main` 仍会调用 `node->arms_->initialize()`。现在在创建 executor 与线程**之前**加一个
+简单状态检查：
+
+```cpp
+if (node->getCurrentState() == TaskState::ERROR) {
+    RCLCPP_ERROR(node->get_logger(), "  ✗ 参数无效（rod_pose_source 冲突或未知），未初始化控制器，非零退出");
+    node.reset();
+    rclcpp::shutdown();
+    return 1;
+}
+```
+
+即：不创建 executor、不起线程、不初始化 MoveIt、不访问未创建的控制器，直接非零退出
+（无需处理线程 join，因为线程根本未创建）。未建立通用生命周期框架。static / vision /
+a1_truth 三个正常入口的既有行为未改动。
+
+**2. 负尺寸被误接受** — `src/a1_truth.cpp`（`validateTruth`）
+
+原实现对三个分量取 `fabs` 后再比较，`size = (-0.04, 0.40, 0.04)` 会被折算成合法几何而通过。
+现改为：有限性检查后，**逐分量要求严格为正**（`!(x > 0.0) || ...`，同时覆盖负值与 0），
+再用原值检查既有上下界；不取绝对值、不做其他修正。
+
+**3. 新增测试** — `test/test_a1_truth.cpp`
+
+`A1TruthValidate.RejectsNegativeSizeOnEveryAxis`：x / y / z 三个轴各一次负尺寸，均断言
+`E_TRUTH_BAD_SIZE`。原有正尺寸用例（含上下界与退化 0）继续通过。
+
+## 命令、结果与退出码
+
+```bash
+export PATH="/usr/bin:/bin:/usr/local/bin:$PATH"     # 规避 anaconda Python 3.13 遮蔽系统 Python 3.10
+colcon build --packages-select dual_arm_a1_msgs dual_arm_carry_task \
+  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3      # 退出码 0，构建日志 0 warning / 0 error
+colcon test  --packages-select dual_arm_carry_task --ctest-args -R "test_a1_"   # 退出码 0
+```
+
+| 套件 | 例数 | 失败 |
+|---|---|---|
+| `test_a1_sampling` | 26 | 0 |
+| `test_a1_stability` | 16 | 0 |
+| `test_a1_service_faults` | 35 | 0 |
+| `test_a1_truth` | **22**（原 21，+1） | 0 |
+| **合计** | **99** | **0** |
+
+> 构建是否真的重编译已单独核实（上一轮曾误报“无警告”）：`a1_truth.cpp.o` 时间戳 19:10:39
+> 晚于源文件 19:09:35，且新字符串 `non-positive component` 同时存在于 `.o`、`liba1_truth.a`
+> 与链接后的 `test_a1_truth` 中。`colcon test-result --all` 中的 uncrustify / xmllint 失败为
+> **既有**风格检查，涉及未改动的文件，本轮未处理、也未因此改代码。
+
+**参数拒绝路径（不启动 MuJoCo，`ROS_DOMAIN_ID=77 ROS_LOCALHOST_ONLY=1`）**
+
+| 用例 | 命令参数 | 退出码 | 结果 |
+|---|---|---|---|
+| 来源冲突 | `-p rod_pose_source:=a1_truth -p use_vision:=true` | **1** | 打印冲突 ERROR 后非零退出；无 SIGSEGV（非 139）、无 SIGABRT（非 134）、无超时（非 124） |
+| 未知来源 | `-p rod_pose_source:=bogus_source` | **1** | 打印未知来源 ERROR 后非零退出；同上无信号、无超时 |
+
+两次日志都**只有**初始化标题与错误行：既未出现构造函数尾部的“配置参数:”输出（证明在创建
+控制器前已返回），也无 MoveIt 初始化、无 `APPROACH`/`GRASP`、无夹爪/weld/attach 指令。
+无运动是与参数拒绝同一进程内成立的事实（进程在初始化控制器前即退出），不是另跑一次仿真观察所得。
+
+## 未运行项与遗留问题
+
+- **未运行**：非零 yaw 完整准备流程、A0 完整搬运、系统级验收、静态来源回归 —— 本轮按要求不重复。
+  因此本轮**不构成**对运动链路或 prepare 流程的重新验收。
+- **未处理进程**：未清理任何进程（含此前记录的孤儿实例），遵守规则。
+- **遗留（允许后续改进）**：关闭/启动期崩溃（`mujoco_node` `spin_some`、`move_group` segfault）
+  未触及；`controllers` 字段、`compliance_env` 口径未变。
+- **说明（代码级推理，非运行结果）**：旧实现取 `fabs` 后 `(-0.04, 0.40, 0.04)` 会得到
+  `(0.04, 0.40, 0.04)`，落在 `[0.005, 1.0]` 内且 `min > 0`，故会被接受 —— 新增用例在旧代码上
+  会失败。此结论由代码与算术直接推出，**未**通过回退重编译实测。

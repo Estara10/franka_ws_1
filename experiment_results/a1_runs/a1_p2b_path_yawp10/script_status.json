@@ -1,0 +1,10 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p2b_path_yawp10",
+  "stage": "prepare",
+  "outcome_code": "E_P2B_PATH_FAILED",
+  "detail": "the joint pre-grasp path did not pass; sample rejected, no rule or start was changed",
+  "ros_domain_id": "77",
+  "ros_localhost_only": "1",
+  "manifest_present": true
+}

@@ -1,0 +1,10 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p2a_check_yawp10b",
+  "stage": "prepare",
+  "outcome_code": "E_P2A_STATIC_FAILED",
+  "detail": "P2a geometry/IK/collision did not all pass; sample rejected, no rule or tolerance was relaxed",
+  "ros_domain_id": "77",
+  "ros_localhost_only": "1",
+  "manifest_present": true
+}

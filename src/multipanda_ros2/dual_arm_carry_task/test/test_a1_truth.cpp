@@ -135,6 +135,24 @@ TEST(A1TruthValidate, RejectsSizesOutsideTheAcceptedRange)
   }
 }
 
+// A negative size on any axis must be rejected, not folded by an abs() into a
+// valid geometry. Each component is a full BOX dimension, strictly positive.
+TEST(A1TruthValidate, RejectsNegativeSizeOnEveryAxis)
+{
+  const a1t::Vec3 negative[3] = {
+      {-0.04, 0.40, 0.04},
+      {0.04, -0.40, 0.04},
+      {0.04, 0.40, -0.04},
+  };
+  for (const a1t::Vec3& size : negative) {
+    a1t::TruthPayload p = validPayload();
+    p.size = size;
+    const a1t::Verdict v = a1t::validateTruth(p, kRunId, kMinSize, kMaxSize);
+    EXPECT_FALSE(v.ok);
+    EXPECT_EQ(v.reason_code, "E_TRUTH_BAD_SIZE");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Latch-once freeze
 // ---------------------------------------------------------------------------

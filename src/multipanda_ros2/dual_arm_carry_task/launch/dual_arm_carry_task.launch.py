@@ -100,6 +100,27 @@ def launch_setup(context, *args, **kwargs):
                 'prepare_only': LaunchConfiguration('prepare_only'),
                 'a1_truth_topic': LaunchConfiguration('a1_truth_topic'),
                 'a1_truth_timeout_sec': LaunchConfiguration('a1_truth_timeout_sec'),
+                'p2a_check': LaunchConfiguration('p2a_check'),
+                'p2a_workspace_x_min': LaunchConfiguration('p2a_workspace_x_min'),
+                'p2a_workspace_x_max': LaunchConfiguration('p2a_workspace_x_max'),
+                'p2a_workspace_y_min': LaunchConfiguration('p2a_workspace_y_min'),
+                'p2a_workspace_y_max': LaunchConfiguration('p2a_workspace_y_max'),
+                'p2a_workspace_source': LaunchConfiguration('p2a_workspace_source'),
+                'p2a_support_z': LaunchConfiguration('p2a_support_z'),
+                'p2a_support_plane': LaunchConfiguration('p2a_support_plane'),
+                'p2a_support_object_id': LaunchConfiguration('p2a_support_object_id'),
+                'p2a_ground_negative': LaunchConfiguration('p2a_ground_negative'),
+                'p2a_hand_aabb_substitution': LaunchConfiguration('p2a_hand_aabb_substitution'),
+                'p2a_hand_negative': LaunchConfiguration('p2a_hand_negative'),
+                'p2a_support_depth_m': LaunchConfiguration('p2a_support_depth_m'),
+                'p2b_check': LaunchConfiguration('p2b_check'),
+                'p2b_planner_id': LaunchConfiguration('p2b_planner_id'),
+                'p2b_planning_time_sec': LaunchConfiguration('p2b_planning_time_sec'),
+                'p2b_planning_attempts': LaunchConfiguration('p2b_planning_attempts'),
+                'p2b_max_joint_step_rad': LaunchConfiguration('p2b_max_joint_step_rad'),
+                'p2b_midpath_negative': LaunchConfiguration('p2b_midpath_negative'),
+                'p2a_grasp_offset': LaunchConfiguration('p2a_grasp_offset'),
+                'p2a_eef_base_yaw_deg': LaunchConfiguration('p2a_eef_base_yaw_deg'),
                 'use_sim_time': True,
             }
         ]
@@ -302,6 +323,82 @@ def generate_launch_description():
         default_value='20.0',
         description='等待有效 A1 真值的超时（秒），超时即失败且不回退硬编码位姿'
     )
+
+    # --- A1 P2a: static sample validity (geometry / dual-arm IK / collision) ---
+    # Off by default: the P1b prepare behaviour and the A0 entry are unchanged.
+    p2a_check_arg = DeclareLaunchArgument(
+        'p2a_check',
+        default_value='false',
+        description='A1 P2a: 在 PREPARED 之前对冻结真值做几何/双臂 IK/组合碰撞静态检查（不运动）'
+    )
+
+    # The support surface in this scene is an unbounded MuJoCo `plane`
+    # (dual_scene.xml `floor`, no `pos`), so these bounds are a configured
+    # research envelope, NOT a physical table edge. Defaults were derived from
+    # the P1a centre range in config/a1_scene_sampling.yaml inflated by the
+    # largest footprint extent within its +/-15 deg yaw range, plus 80 mm.
+    p2a_workspace_x_min_arg = DeclareLaunchArgument(
+        'p2a_workspace_x_min', default_value='0.30',
+        description='完整杆 footprint 必须位于其内的研究包络 x 下界（米；非物理桌面边缘）')
+    p2a_workspace_x_max_arg = DeclareLaunchArgument(
+        'p2a_workspace_x_max', default_value='0.70',
+        description='完整杆 footprint 必须位于其内的研究包络 x 上界（米；非物理桌面边缘）')
+    p2a_workspace_y_min_arg = DeclareLaunchArgument(
+        'p2a_workspace_y_min', default_value='-0.30',
+        description='完整杆 footprint 必须位于其内的研究包络 y 下界（米；非物理桌面边缘）')
+    p2a_workspace_y_max_arg = DeclareLaunchArgument(
+        'p2a_workspace_y_max', default_value='0.30',
+        description='完整杆 footprint 必须位于其内的研究包络 y 上界（米；非物理桌面边缘）')
+    p2a_workspace_source_arg = DeclareLaunchArgument(
+        'p2a_workspace_source', default_value='config/a1_scene_sampling.yaml 采样范围按 15° 最大 footprint 外扩后加 80 mm 余量；MuJoCo 支撑面为无限 plane，非物理桌面边缘',
+        description='上述包络的来源说明，原样写入日志与记录')
+    p2a_support_z_arg = DeclareLaunchArgument(
+        'p2a_support_z', default_value='0.0',
+        description='支撑面高度（米）；dual_scene.xml 的 floor plane 位于 z=0')
+    p2a_support_plane_arg = DeclareLaunchArgument(
+        'p2a_support_plane', default_value='true',
+        description='在**验证场景**中补齐支撑 plane（MuJoCo floor 不进入 MoveIt）；仅改本地验证场景')
+    p2a_support_object_id_arg = DeclareLaunchArgument(
+        'p2a_support_object_id', default_value='a1_support_plane',
+        description='验证场景中支撑面对象的 id；若场景已存在同名对象则不重复添加')
+    p2a_ground_negative_arg = DeclareLaunchArgument(
+        'p2a_ground_negative', default_value='true',
+        description='注入一个低于支撑面的状态，验证检查确实能拒绝连杆穿地（验证注入，非采样位姿）')
+    p2a_hand_aabb_substitution_arg = DeclareLaunchArgument(
+        'p2a_hand_aabb_substitution', default_value='true',
+        description='在独立验证模型中，仅把两只手掌的碰撞几何替换为 hand_c 网格的保守 AABB；'
+                    '原 URDF 结果仍作对照输出。不修改共享 RobotModel / 全局 URDF')
+    p2a_hand_negative_arg = DeclareLaunchArgument(
+        'p2a_hand_negative', default_value='true',
+        description='注入一个与替换后手掌 AABB 重合的障碍，验证替换几何仍有碰撞作用（验证注入）')
+    p2a_grasp_offset_arg = DeclareLaunchArgument(
+        'p2a_grasp_offset', default_value='0.15',
+        description='抓取点沿杆长轴的偏移（米）；A0 的 final_y_offset 为 0.15')
+    p2a_eef_base_yaw_deg_arg = DeclareLaunchArgument(
+        'p2a_eef_base_yaw_deg', default_value='45.0',
+        description='末端基准 yaw（度），即 A0 setRPY(π,0,π/4) 的 yaw 项；实际 yaw = 杆 yaw + 该值')
+
+    p2a_support_depth_m_arg = DeclareLaunchArgument(
+        'p2a_support_depth_m', default_value='2.0',
+        description='验证用支撑 BOX 向下的深度（米）；顶面仍在 support_z，深板而非 2 cm 薄板')
+
+    # --- A1 P2b: joint pre-grasp path planning and verification (no execution) ---
+    p2b_check_arg = DeclareLaunchArgument(
+        'p2b_check', default_value='false',
+        description='A1 P2b: 从实际起始状态规划双臂联合预抓取路径，并在 P2a 判据场景中完整复检（仅规划，不执行）')
+    p2b_planner_id_arg = DeclareLaunchArgument(
+        'p2b_planner_id', default_value='PTP',
+        description='P2b 使用的 MoveIt 规划器 id')
+    p2b_planning_time_sec_arg = DeclareLaunchArgument(
+        'p2b_planning_time_sec', default_value='10.0', description='单次规划时间上限（秒）')
+    p2b_planning_attempts_arg = DeclareLaunchArgument(
+        'p2b_planning_attempts', default_value='5', description='规划尝试次数上限')
+    p2b_max_joint_step_rad_arg = DeclareLaunchArgument(
+        'p2b_max_joint_step_rad', default_value='0.05',
+        description='路径段细分时的最大单关节步长（rad）；用于离散碰撞采样，非连续保证')
+    p2b_midpath_negative_arg = DeclareLaunchArgument(
+        'p2b_midpath_negative', default_value='true',
+        description='在路径中段注入障碍，证明校验覆盖路径内部（验证注入，非规划器结果）')
 
     enable_latency_monitor_arg = DeclareLaunchArgument(
         'enable_latency_monitor',
@@ -525,6 +622,27 @@ def generate_launch_description():
         prepare_only_arg,
         a1_truth_topic_arg,
         a1_truth_timeout_sec_arg,
+        p2a_check_arg,
+        p2a_workspace_x_min_arg,
+        p2a_workspace_x_max_arg,
+        p2a_workspace_y_min_arg,
+        p2a_workspace_y_max_arg,
+        p2a_workspace_source_arg,
+        p2a_support_z_arg,
+        p2a_support_plane_arg,
+        p2a_support_object_id_arg,
+        p2a_ground_negative_arg,
+        p2a_hand_aabb_substitution_arg,
+        p2a_hand_negative_arg,
+        p2a_support_depth_m_arg,
+        p2b_check_arg,
+        p2b_planner_id_arg,
+        p2b_planning_time_sec_arg,
+        p2b_planning_attempts_arg,
+        p2b_max_joint_step_rad_arg,
+        p2b_midpath_negative_arg,
+        p2a_grasp_offset_arg,
+        p2a_eef_base_yaw_deg_arg,
         enable_latency_monitor_arg,
         latency_topic_arg,
         latency_task_status_topic_arg,
