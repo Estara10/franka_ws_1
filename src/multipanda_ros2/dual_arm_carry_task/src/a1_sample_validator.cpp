@@ -3,11 +3,17 @@
 #include "dual_arm_carry_task/a1_sample_validator.hpp"
 
 #include <algorithm>
+#include <thread>
+#include <functional>
+#include <chrono>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <memory>
+#include <set>
 #include <sstream>
 
 namespace a1v {
@@ -409,6 +415,270 @@ bool isMountingLink(const std::string& name)
 bool isFingerLink(const std::string& name)
 {
   return name.find("finger") != std::string::npos;
+}
+
+// ---------------------------------------------------------------------------
+// Bounded dispatch
+// ---------------------------------------------------------------------------
+
+BoundedExecOutcome runBoundedExec(const std::function<int()>& work,
+                                  const std::function<void()>& on_timeout,
+                                  double timeout_sec,
+                                  double grace_sec,
+                                  double poll_interval_sec)
+{
+  BoundedExecOutcome outcome;
+  constexpr int kPending = -999;
+  constexpr int kException = -998;
+  constexpr long long kNotFinished = -1;
+
+  // Shared, never a stack reference: a detached worker would otherwise write
+  // into a dead frame.
+  auto slot = std::make_shared<std::atomic<int>>(kPending);
+  auto threw = std::make_shared<std::atomic<bool>>(false);
+  // When the worker actually finished, as nanoseconds since `begin`; -1 while it
+  // is still running. Published last, so a non-negative value also implies the
+  // result slot is already written.
+  auto finished_ns = std::make_shared<std::atomic<long long>>(kNotFinished);
+  std::function<int()> captured = work;
+
+  // The budget starts here, BEFORE the worker exists, so the order is explicit:
+  // begin -> deadline -> worker start. The worker receives `begin` by value and
+  // stamps its own completion against it.
+  const auto begin = std::chrono::steady_clock::now();
+  const auto poll =
+      std::chrono::duration<double>(poll_interval_sec > 0.0 ? poll_interval_sec : 0.001);
+  const auto budget =
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::duration<double>(timeout_sec));
+  const auto deadline = begin + budget;
+  outcome.timeout_sec = timeout_sec;
+  const long long budget_ns =
+      static_cast<long long>(std::chrono::duration<double>(budget).count() * 1e9);
+
+  std::thread worker([slot, threw, finished_ns, captured, begin]() mutable {
+    try {
+      slot->store(captured());
+    } catch (...) {
+      threw->store(true);
+      slot->store(kException);
+    }
+    const long long stamp = static_cast<long long>(
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count() * 1e9);
+    finished_ns->store(stamp);  // published last: value is already visible
+  });
+
+  while (finished_ns->load() == kNotFinished && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(poll);
+  }
+
+  const long long finished_stamp = finished_ns->load();
+  if (finished_stamp != kNotFinished) {
+    worker.join();
+    outcome.elapsed_sec =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+    outcome.value = slot->load();
+    outcome.worker_finished = true;
+    outcome.completed_at_sec = static_cast<double>(finished_stamp) / 1e9;
+    if (finished_stamp > budget_ns) {
+      // Finished, but too late. The value is recorded for diagnostics only and
+      // the status stays TIMEOUT: a completed slot is not an in-time result.
+      outcome.status = BoundedExecOutcome::Status::TIMEOUT;
+      return outcome;
+    }
+    outcome.status = threw->load() ? BoundedExecOutcome::Status::EXCEPTION
+                                   : BoundedExecOutcome::Status::COMPLETED;
+    return outcome;
+  }
+
+  // Reaching here means the worker was STILL RUNNING when the budget expired
+  // (a worker that had already finished is handled above, by its own timestamp).
+  // Only a still-running worker needs a stop request; terminate this attempt as
+  // a timeout regardless of what the worker does later.
+  outcome.status = BoundedExecOutcome::Status::TIMEOUT;
+  if (on_timeout) {
+    on_timeout();
+    outcome.stop_requested = true;
+  }
+  const auto grace_deadline =
+      std::chrono::steady_clock::now() +
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::duration<double>(grace_sec));
+  while (finished_ns->load() == kNotFinished && std::chrono::steady_clock::now() < grace_deadline) {
+    std::this_thread::sleep_for(poll);
+  }
+
+  const long long late_stamp = finished_ns->load();
+  outcome.elapsed_sec =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+  if (late_stamp != kNotFinished) {
+    outcome.worker_finished = true;
+    worker.join();
+    // The late value and instant are recorded for diagnostics only; the status
+    // stays TIMEOUT, so a late success can never be read as an in-time one.
+    outcome.value = slot->load();
+    outcome.completed_at_sec = static_cast<double>(late_stamp) / 1e9;
+  } else {
+    // Safe to detach: the worker holds only shared state.
+    worker.detach();
+  }
+  return outcome;
+}
+
+// ---------------------------------------------------------------------------
+// Trajectory structural validation
+// ---------------------------------------------------------------------------
+
+JointNameCheck validateJointNames(const std::vector<std::string>& names,
+                                  const std::vector<std::string>& expected)
+{
+  JointNameCheck r;
+  if (expected.empty()) {
+    r.reason_code = "E_TRAJ_NO_EXPECTED_JOINTS";
+    r.detail = "the expected joint set is empty, so nothing can be verified";
+    return r;
+  }
+
+  std::set<std::string> expected_set(expected.begin(), expected.end());
+  std::set<std::string> seen;
+  for (const std::string& n : names) {
+    if (expected_set.count(n) == 0) {
+      ++r.unknown;
+      if (r.first_unknown.empty()) {
+        r.first_unknown = n;
+      }
+    }
+    if (!seen.insert(n).second) {
+      ++r.duplicates;
+      if (r.first_duplicate.empty()) {
+        r.first_duplicate = n;
+      }
+    }
+  }
+  for (const std::string& e : expected_set) {
+    if (seen.count(e) == 0) {
+      ++r.missing;
+    }
+  }
+
+  if (r.unknown > 0) {
+    r.reason_code = "E_TRAJ_UNKNOWN_JOINT";
+    r.detail = "the plan names " + std::to_string(r.unknown) +
+               " joint(s) outside the expected set, e.g. '" + r.first_unknown + "'";
+    return r;
+  }
+  if (r.duplicates > 0) {
+    r.reason_code = "E_TRAJ_DUPLICATE_JOINT";
+    r.detail = "the plan names '" + r.first_duplicate + "' more than once";
+    return r;
+  }
+  if (r.missing > 0) {
+    r.reason_code = "E_TRAJ_MISSING_JOINT";
+    r.detail = std::to_string(r.missing) +
+               " expected joint(s) are absent from the plan, so part of the robot would "
+               "not be commanded";
+    return r;
+  }
+  r.ok = true;
+  return r;
+}
+
+TimeCheck validateTimeFromStart(const std::vector<double>& times_sec)
+{
+  TimeCheck r;
+  if (times_sec.empty()) {
+    r.reason_code = "E_TIME_EMPTY";
+    r.detail = "the trajectory has no points";
+    return r;
+  }
+  r.first_sec = times_sec.front();
+  r.last_sec = times_sec.back();
+
+  for (std::size_t i = 0; i < times_sec.size(); ++i) {
+    if (!std::isfinite(times_sec[i])) {
+      r.bad_index = i;
+      r.reason_code = "E_TIME_NOT_FINITE";
+      r.detail = "time_from_start at point " + std::to_string(i) + " is not finite";
+      return r;
+    }
+  }
+  if (times_sec.front() < 0.0) {
+    r.reason_code = "E_TIME_NEGATIVE";
+    r.detail = "time_from_start starts negative (" + std::to_string(times_sec.front()) + ")";
+    return r;
+  }
+  if (times_sec.front() > 1e-9) {
+    r.reason_code = "E_TIME_NOT_STARTING_AT_ZERO";
+    r.detail = "the first point is at t=" + std::to_string(times_sec.front()) +
+               " s instead of 0";
+    return r;
+  }
+  for (std::size_t i = 1; i < times_sec.size(); ++i) {
+    if (!(times_sec[i] > times_sec[i - 1])) {
+      r.bad_index = i;
+      r.reason_code = "E_TIME_NOT_INCREASING";
+      r.detail = "time_from_start is not strictly increasing at point " + std::to_string(i) +
+                 " (" + std::to_string(times_sec[i - 1]) + " -> " + std::to_string(times_sec[i]) +
+                 ")";
+      return r;
+    }
+  }
+  r.ok = true;
+  return r;
+}
+
+DerivativeCheck checkDerivativeField(const std::vector<double>& values,
+                                     const std::vector<double>& limits,
+                                     const std::vector<bool>& bounded,
+                                     const std::vector<std::string>& names)
+{
+  DerivativeCheck r;
+  if (values.size() != limits.size() || limits.size() != bounded.size()) {
+    r.reason_code = "E_DERIV_DIM_MISMATCH";
+    r.detail = "field has " + std::to_string(values.size()) + " components but " +
+               std::to_string(limits.size()) + " limits are available";
+    return r;
+  }
+  if (values.empty()) {
+    r.reason_code = "E_DERIV_DIM_MISMATCH";
+    r.detail = "the derivative field is present but empty";
+    return r;
+  }
+
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (!std::isfinite(values[i])) {
+      r.reason_code = "E_DERIV_NOT_FINITE";
+      r.detail = "component " + std::to_string(i) + " (" +
+                 (i < names.size() ? names[i] : std::string("<unnamed>")) + ") is not finite";
+      return r;
+    }
+    if (!bounded[i]) {
+      ++r.unbounded;
+      continue;
+    }
+    ++r.checked;
+    const double lim = std::fabs(limits[i]);
+    if (!(lim > 0.0)) {
+      // A declared limit of zero would be unusable; treat it as undeclared.
+      ++r.unbounded;
+      --r.checked;
+      continue;
+    }
+    const double ratio = std::fabs(values[i]) / lim;
+    if (ratio > r.worst_ratio) {
+      r.worst_ratio = ratio;
+      r.worst_joint = i < names.size() ? names[i] : std::string("<unnamed>");
+    }
+    if (ratio > 1.0) {
+      r.reason_code = "E_DERIV_LIMIT_EXCEEDED";
+      r.detail = "component " + std::to_string(i) + " (" + r.worst_joint + ") = " +
+                 std::to_string(values[i]) + " exceeds the declared limit " +
+                 std::to_string(lim);
+      return r;
+    }
+  }
+  r.ok = true;
+  return r;
 }
 
 // ---------------------------------------------------------------------------

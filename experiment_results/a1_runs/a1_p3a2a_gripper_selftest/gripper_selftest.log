@@ -1,0 +1,7 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-13-20-35-51-935689-Estara-312792
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [312897]
+[dual_arm_carry_task_node-1] [INFO] [1791894957.597103148] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] terminate called after throwing an instance of 'rclcpp::exceptions::ParameterAlreadyDeclaredException'
+[dual_arm_carry_task_node-1]   what():  parameter 'gripper_close_position' has already been declared
+[ERROR] [dual_arm_carry_task_node-1]: process has died [pid 312897, exit code -6, cmd '/home/lidio/franka_ws_1/install/dual_arm_carry_task/lib/dual_arm_carry_task/dual_arm_carry_task_node --ros-args -r __node:=dual_arm_carry_task --params-file /tmp/launch_params_vzky2du_ --params-file /tmp/launch_params_3xyj_p98 --params-file /tmp/launch_params_r0thxx9u --params-file /tmp/launch_params_9_1onl24 --params-file /tmp/launch_params_z4ptgbt_'].

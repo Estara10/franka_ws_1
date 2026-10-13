@@ -18,6 +18,8 @@ const char* to_stage_name(TaskState state)
         case TaskState::PLACE: return "PLACE";
         case TaskState::RETREAT: return "RETREAT";
         case TaskState::PREPARED: return "PREPARED";
+        case TaskState::PREGRASP_REACHED: return "PREGRASP_REACHED";
+        case TaskState::GRIPPER_TEST_DONE: return "GRIPPER_TEST_DONE";
         case TaskState::DONE: return "DONE";
         case TaskState::ERROR: return "ERROR";
         default: return "UNKNOWN";
@@ -90,6 +92,24 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<int>("p2b_planning_attempts", 5);
         this->declare_parameter<double>("p2b_max_joint_step_rad", 0.05);
         this->declare_parameter<bool>("p2b_midpath_negative", true);
+
+        // A1 P3a-1: explicit pre-grasp execution. Off by default.
+        this->declare_parameter<bool>("pregrasp_execute", false);
+        this->declare_parameter<double>("pregrasp_vel_scale", 0.1);
+        this->declare_parameter<double>("pregrasp_acc_scale", 0.1);
+        this->declare_parameter<double>("pregrasp_arrival_pos_tol_m", 0.005);
+        this->declare_parameter<double>("pregrasp_arrival_angle_tol_deg", 2.0);
+        this->declare_parameter<double>("pregrasp_stable_window_sec", 0.3);
+        this->declare_parameter<double>("pregrasp_stable_tol_rad", 0.002);
+        this->declare_parameter<double>("pregrasp_exec_timeout_sec", 90.0);
+        this->declare_parameter<double>("gripper_total_timeout_sec", 20.0);
+        this->declare_parameter<double>("gripper_server_timeout_sec", 10.0);
+        this->declare_parameter<double>("gripper_goal_timeout_sec", 5.0);
+        this->declare_parameter<double>("gripper_result_timeout_sec", 8.0);
+        this->declare_parameter<double>("gripper_max_effort", 100.0);
+        this->declare_parameter<double>("gripper_close_threshold", 0.03);
+        this->declare_parameter<bool>("gripper_selftest", false);
+        this->declare_parameter<double>("gripper_open_position", 0.04);
         this->declare_parameter<double>("p2a_resting_z_tol", 0.003);
         this->declare_parameter<double>("p2a_max_tilt_deg", 2.0);
         this->declare_parameter<double>("p2a_grasp_offset", 0.15);
@@ -144,6 +164,23 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         p2b_planning_attempts_ = this->get_parameter("p2b_planning_attempts").as_int();
         p2b_max_joint_step_rad_ = this->get_parameter("p2b_max_joint_step_rad").as_double();
         p2b_midpath_negative_ = this->get_parameter("p2b_midpath_negative").as_bool();
+        pregrasp_execute_ = this->get_parameter("pregrasp_execute").as_bool();
+        pregrasp_vel_scale_ = this->get_parameter("pregrasp_vel_scale").as_double();
+        pregrasp_acc_scale_ = this->get_parameter("pregrasp_acc_scale").as_double();
+        pregrasp_arrival_pos_tol_m_ = this->get_parameter("pregrasp_arrival_pos_tol_m").as_double();
+        pregrasp_arrival_angle_tol_deg_ =
+            this->get_parameter("pregrasp_arrival_angle_tol_deg").as_double();
+        pregrasp_stable_window_sec_ = this->get_parameter("pregrasp_stable_window_sec").as_double();
+        pregrasp_stable_tol_rad_ = this->get_parameter("pregrasp_stable_tol_rad").as_double();
+        pregrasp_exec_timeout_sec_ = this->get_parameter("pregrasp_exec_timeout_sec").as_double();
+        gripper_total_timeout_sec_ = this->get_parameter("gripper_total_timeout_sec").as_double();
+        gripper_server_timeout_sec_ = this->get_parameter("gripper_server_timeout_sec").as_double();
+        gripper_goal_timeout_sec_ = this->get_parameter("gripper_goal_timeout_sec").as_double();
+        gripper_result_timeout_sec_ = this->get_parameter("gripper_result_timeout_sec").as_double();
+        gripper_max_effort_ = this->get_parameter("gripper_max_effort").as_double();
+        gripper_close_threshold_ = this->get_parameter("gripper_close_threshold").as_double();
+        gripper_selftest_ = this->get_parameter("gripper_selftest").as_bool();
+        gripper_open_position_ = this->get_parameter("gripper_open_position").as_double();
         p2a_resting_z_tol_ = this->get_parameter("p2a_resting_z_tol").as_double();
         p2a_max_tilt_deg_ = this->get_parameter("p2a_max_tilt_deg").as_double();
         p2a_grasp_offset_m_ = this->get_parameter("p2a_grasp_offset").as_double();
@@ -240,6 +277,50 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
                         expected_run_id_.empty() ? "<UNSET>" : expected_run_id_.c_str());
         }
 
+        // A1 P3a-1: the explicit pre-grasp execution entry. Its parameter
+        // combinations are fixed and checked here, so that turning it on can
+        // never silently start the legacy FSM instead.
+        if (gripper_selftest_ && pregrasp_execute_) {
+            RCLCPP_ERROR(this->get_logger(),
+                         "  ✗ gripper_selftest 与 pregrasp_execute 不能同时启用");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (pregrasp_execute_) {
+            if (!prepare_only_) {
+                RCLCPP_ERROR(this->get_logger(),
+                             "  ✗ pregrasp_execute=true 需要 prepare_only=true（仅执行预抓取）。"
+                             "关闭 prepare_only 会运行整套旧 FSM，本轮不开放");
+                setCurrentState(TaskState::ERROR);
+                publish_stage(task_stage_pub_, getCurrentState());
+                return;
+            }
+            if (rod_pose_source_ != kRodPoseSourceA1Truth) {
+                RCLCPP_ERROR(this->get_logger(),
+                             "  ✗ pregrasp_execute=true 需要 rod_pose_source=a1_truth（当前 %s）",
+                             rod_pose_source_.c_str());
+                setCurrentState(TaskState::ERROR);
+                publish_stage(task_stage_pub_, getCurrentState());
+                return;
+            }
+            if (use_vision_) {
+                RCLCPP_ERROR(this->get_logger(),
+                             "  ✗ pregrasp_execute=true 需要 use_vision=false");
+                setCurrentState(TaskState::ERROR);
+                publish_stage(task_stage_pub_, getCurrentState());
+                return;
+            }
+            if (!p2a_check_ || !p2b_check_) {
+                RCLCPP_ERROR(this->get_logger(),
+                             "  ✗ pregrasp_execute=true 需要 p2a_check=true 且 p2b_check=true"
+                             "（只执行本轮校验过的轨迹）");
+                setCurrentState(TaskState::ERROR);
+                publish_stage(task_stage_pub_, getCurrentState());
+                return;
+            }
+        }
+
         setCurrentState(TaskState::INIT);
         publish_stage(task_stage_pub_, getCurrentState());
         grippers_ = std::make_shared<GripperController>(this);
@@ -256,7 +337,11 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             RCLCPP_INFO(this->get_logger(), "  准备模式(prepare_only): %s",
                         prepare_only_ ? "启用（本轮 A1 不运动）" : "禁用");
             RCLCPP_INFO(this->get_logger(), "  P2a 静态检查(p2a_check): %s",
-                        p2a_check_ ? "启用（几何/双臂 IK/组合碰撞，仍不运动）" : "禁用");
+                        p2a_check_ ? "启用（几何/双臂 IK/组合碰撞）" : "禁用");
+            RCLCPP_INFO(this->get_logger(), "  P2b 路径检查(p2b_check): %s",
+                        p2b_check_ ? "启用（联合预抓取路径规划与校验）" : "禁用");
+            RCLCPP_INFO(this->get_logger(), "  预抓取执行(pregrasp_execute): %s",
+                        pregrasp_execute_ ? "启用（执行本轮校验过的同一 Plan，到位即停）" : "禁用");
         }
         if (rod_pose_source_ == kRodPoseSourceVision) {
             RCLCPP_INFO(this->get_logger(), "  视觉模式: 启用 (目标: %.3f, %.3f, yaw=%.1f°)",
@@ -278,7 +363,8 @@ void DualArmCarryTask::executeTask()
         while (rclcpp::ok()) {
             const TaskState state = getCurrentState();
             if (state == TaskState::DONE || state == TaskState::ERROR ||
-                state == TaskState::PREPARED) {
+                state == TaskState::PREPARED || state == TaskState::PREGRASP_REACHED ||
+                state == TaskState::GRIPPER_TEST_DONE) {
                 break;
             }
 
@@ -326,7 +412,27 @@ void DualArmCarryTask::executeTask()
         }
         
         const TaskState final_state = getCurrentState();
-        if (final_state == TaskState::PREPARED) {
+        if (final_state == TaskState::GRIPPER_TEST_DONE) {
+            publish_stage(task_stage_pub_, TaskState::GRIPPER_TEST_DONE);
+            RCLCPP_INFO(get_logger(), "\n========================================");
+            RCLCPP_INFO(get_logger(), "    ✓ 夹爪空载开合测试结束（GRIPPER_TEST_DONE）");
+            std_msgs::msg::String msg;
+            msg.data = "GRIPPER_TEST_DONE";
+            task_status_pub_->publish(msg);
+            RCLCPP_INFO(get_logger(), "========================================\n");
+        } else if (final_state == TaskState::PREGRASP_REACHED) {
+            // A1 P3a-1: the pre-grasp motion ran and the arms are measured at the
+            // target. This is its own stage result -- deliberately NOT task DONE,
+            // because nothing was grasped or transported.
+            publish_stage(task_stage_pub_, TaskState::PREGRASP_REACHED);
+            RCLCPP_INFO(get_logger(), "\n========================================");
+            RCLCPP_INFO(get_logger(), "    ✓ 预抓取到位（PREGRASP_REACHED）—— 未下降、未抓取、未搬运");
+            std_msgs::msg::String msg;
+            msg.data = "PREGRASP_REACHED";
+            task_status_pub_->publish(msg);
+            RCLCPP_INFO(get_logger(), "已发布预抓取到位状态(PREGRASP_REACHED)，不是任务 DONE。");
+            RCLCPP_INFO(get_logger(), "========================================\n");
+        } else if (final_state == TaskState::PREPARED) {
             // A1 P1b: preparation finished. This is deliberately NOT reported as
             // DONE -- nothing has been carried. It only means the truth input was
             // frozen and the planning scene was synchronised and verified.
@@ -371,7 +477,8 @@ int main(int argc, char** argv)
     // MoveIt、不访问未创建的控制器，也不创建 executor 线程。
     if (node->getCurrentState() == TaskState::ERROR) {
         RCLCPP_ERROR(node->get_logger(),
-                     "  ✗ 参数无效（rod_pose_source 冲突或未知），未初始化控制器，非零退出");
+                     "  ✗ 参数组合无效（构造期已拒绝，原因见上方 ERROR），"
+                     "未初始化控制器，非零退出");
         node.reset();
         rclcpp::shutdown();
         return 1;

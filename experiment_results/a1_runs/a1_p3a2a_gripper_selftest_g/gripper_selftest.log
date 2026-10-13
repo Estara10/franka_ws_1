@@ -1,0 +1,67 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-13-20-45-05-710116-Estara-325426
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [325490]
+[dual_arm_carry_task_node-1] [INFO] [1791895511.068945950] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791895511.072086621] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791895511.072130637] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791895511.072146255] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791895511.072159087] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791895511.072171171] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791895511.072183764] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1791895511.072205614] [dual_arm_carry_task]:   杆位姿来源: static
+[dual_arm_carry_task_node-1] [INFO] [1791895513.072547038] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791895513.075655683] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.002 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791895513.075720537] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791895513.093699536] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791895513.093726524] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791895513.096310044] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099032982] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099062690] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099077131] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099080273] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099084010] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099087184] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099091851] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099101352] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099104401] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099107235] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099110822] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099114195] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099116916] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099131600] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099135722] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ----- [P3A-2A] 夹爪空载开合测试: 打开 -> 空载闭合 -> 打开（机械臂不动，不发布 weld、不 attach）-----
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099139541] [dual_arm_carry_task]:   [P3A-2A] 命令单位为**单指位移**：打开 0.0400（服务器目标开口 0.0800 m，即最大开口）/ 闭合 0.0100（目标开口 0.0200 m）
+[dual_arm_carry_task_node-1] [INFO] [1791895513.099148624] [dual_arm_carry_task]:   [夹爪] 双臂指令 0.0400（单指位移；服务器目标开口 = 2×该值 = 0.0800 m），总预算 20.0 s，打开
+[dual_arm_carry_task_node-1] [INFO] [1791895513.103047871] [dual_arm_carry_task]:   [夹爪] 创建并复用 左 action 客户端: /mj_left_gripper_sim_node/gripper_action
+[dual_arm_carry_task_node-1] [INFO] [1791895513.905364905] [dual_arm_carry_task]:   [夹爪] 创建并复用 右 action 客户端: /mj_right_gripper_sim_node/gripper_action
+[dual_arm_carry_task_node-1] [INFO] [1791895514.704456811] [dual_arm_carry_task]:   [夹爪] 打开 left  | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 gap=0.0876 m effort=0.00 | E_OK succeeded; gap 0.087561 m vs commanded 0.080000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791895514.704618173] [dual_arm_carry_task]:   [夹爪] 打开 right | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 gap=0.0876 m effort=0.00 | E_OK succeeded; gap 0.087561 m vs commanded 0.080000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791895514.704630392] [dual_arm_carry_task]:   [夹爪] 双臂总用时 1.605 s（总预算 20.0 s，阶段预算各自独立计入总预算）
+[dual_arm_carry_task_node-1] [INFO] [1791895514.705308243] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[dual_arm_carry_task_node-1] [INFO] [1791895514.716886658] [dual_arm_carry_task]:   [P3A-2A] open 实测指关节: 左=0.0000 m 右=0.0000 m（单指位移，关节范围 [0.0000, 0.0400]）⇒ 实测总开口 左=0.0000 右=0.0000 m
+[dual_arm_carry_task_node-1] [INFO] [1791895514.716966531] [dual_arm_carry_task]:   [夹爪] 双臂指令 0.0100（单指位移；服务器目标开口 = 2×该值 = 0.0200 m），总预算 20.0 s，闭合
+[dual_arm_carry_task_node-1] [INFO] [1791895517.079888563] [dual_arm_carry_task]:   [夹爪] 闭合 left  | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 gap=-0.0142 m effort=0.00 | E_OK succeeded; gap -0.014228 m vs commanded 0.020000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791895517.079963061] [dual_arm_carry_task]:   [夹爪] 闭合 right | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 gap=-0.0142 m effort=0.00 | E_OK succeeded; gap -0.014233 m vs commanded 0.020000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791895517.079991933] [dual_arm_carry_task]:   [夹爪] 双臂总用时 2.363 s（总预算 20.0 s，阶段预算各自独立计入总预算）
+[dual_arm_carry_task_node-1] [INFO] [1791895517.080190422] [dual_arm_carry_task]:   [P3A-2A] empty_close 实测指关节: 左=0.0000 m 右=0.0000 m（单指位移，关节范围 [0.0000, 0.0400]）⇒ 实测总开口 左=0.0000 右=0.0000 m
+[dual_arm_carry_task_node-1] [INFO] [1791895517.080245869] [dual_arm_carry_task]:   [夹爪] 双臂指令 0.0400（单指位移；服务器目标开口 = 2×该值 = 0.0800 m），总预算 20.0 s，打开
+[dual_arm_carry_task_node-1] [INFO] [1791895518.977490527] [dual_arm_carry_task]:   [夹爪] 打开 left  | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 gap=-0.0139 m effort=0.00 | E_OK succeeded; gap -0.013944 m vs commanded 0.080000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791895518.977535877] [dual_arm_carry_task]:   [夹爪] 打开 right | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 gap=-0.0139 m effort=0.00 | E_OK succeeded; gap -0.013935 m vs commanded 0.080000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791895518.977546536] [dual_arm_carry_task]:   [夹爪] 双臂总用时 1.897 s（总预算 20.0 s，阶段预算各自独立计入总预算）
+[dual_arm_carry_task_node-1] [INFO] [1791895518.977906418] [dual_arm_carry_task]:   [P3A-2A] reopen 实测指关节: 左=0.0000 m 右=0.0000 m（单指位移，关节范围 [0.0000, 0.0400]）⇒ 实测总开口 左=0.0000 右=0.0000 m
+[dual_arm_carry_task_node-1] [INFO] [1791895518.977926565] [dual_arm_carry_task]: [GRIPPER_RESULT] state=GRIPPER_TEST_DONE failed_step=- open_cmd=0.0400 close_cmd=0.0100 arm_motion=none weld=0 attach=0
+[dual_arm_carry_task_node-1] [INFO] [1791895518.977935435] [dual_arm_carry_task]:   ✓ [P3A-2A] 空载开合完成。**空载成功不是抓取成功**；接触导致的停止语义留待下一阶段结合物体验证
+[dual_arm_carry_task_node-1] [INFO] [1791895519.178062127] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791895519.178108887] [dual_arm_carry_task]:     ✓ 夹爪空载开合测试结束（GRIPPER_TEST_DONE）
+[dual_arm_carry_task_node-1] [INFO] [1791895519.178129193] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791895519.178141785] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791895519.178152954] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[dual_arm_carry_task_node-1] [INFO] [1791895520.657444177] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 325490]

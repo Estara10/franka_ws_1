@@ -113,6 +113,23 @@ class GripperSimActionServer : public rclcpp::Node {
   franka::GripperState getGripperState();
   void publishGripperState();
 
+  /// Writes the actuator command for a desired TOTAL gap.
+  ///
+  /// The model's gripper actuator is a position actuator over the fixed tendon
+  /// `0.5*q1 + 0.5*q2`, i.e. its control input is in metres of PER-FINGER
+  /// displacement (equal to the tendon length when the fingers are symmetric),
+  /// with ctrlrange [0, 0.08] and a joint range of [0, 0.04]. Commanding the
+  /// 0-255 value the previous code used therefore saturated the actuator for
+  /// every command.
+  void writeGapCommand(double gap_m);
+
+  /// Real total gap measured from the finger joint feedback, not from a model.
+  double measuredGap() const;
+
+  /// Bounded, feedback-driven move. Returns true only when the measured gap
+  /// reached `width` within `tol`, or a cancel/timeout ended it.
+  bool driveToGap(double width, double speed, double tol, bool stop_on_contact);
+
   /// stops the gripper and writes the result into the response
   /// @param[out] response  will be updated with the success status and error message
   void stopServiceCallback(const std::shared_ptr<Trigger::Response>& response);

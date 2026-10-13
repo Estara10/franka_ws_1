@@ -1,0 +1,46 @@
+header:
+  stamp:
+    sec: 1791895271
+    nanosec: 71316853
+  frame_id: ''
+name:
+- mj_left_joint1
+- mj_left_joint2
+- mj_left_joint3
+- mj_left_joint4
+- mj_left_joint5
+- mj_left_joint6
+- mj_left_joint7
+- mj_right_joint1
+- mj_right_joint2
+- mj_right_joint3
+- mj_right_joint4
+- mj_right_joint5
+- mj_right_joint6
+- mj_right_joint7
+- mj_left_finger_joint1
+- mj_left_finger_joint2
+- mj_right_finger_joint1
+- mj_right_finger_joint2
+position:
+- 0.0
+- 0.0
+- 0.0
+- -1.5708
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- -1.5708
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+velocity: []
+effort: []
+---

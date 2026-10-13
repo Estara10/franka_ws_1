@@ -160,28 +160,16 @@ void GripperSimActionServer::executeHoming(const std::shared_ptr<GoalHandleHomin
   executeCommand(goal_handle, Task::kHoming, kCommand);
 }
 bool GripperSimActionServer::simGripperHoming(){
-  // homing: The gripper closes, then opens to the maximum width.
-  double cur_width;
-  double max_width;
-  {
-    std::lock_guard<std::mutex> lock(gripper_state_mutex_);
-    cur_width = current_gripper_state_.width;
-    max_width = current_gripper_state_.max_width;
+  // Homing: close, then open to the maximum width. Both stages are now
+  // feedback-driven and share the same unit contract as every other command.
+  constexpr double kMaxWidth = 0.08;
+  if(!driveToGap(0.0, default_speed_, 0.002, false) && !is_canceled_){
+    return false;
   }
-  while(cur_width > 0.001 && !is_canceled_){
-    // max width = 0.08
-    // command = [0, 255], 255 = open
-    // 1 ~ 0.0003138
-    cur_width = cur_width - (default_speed_ * dt);
-    gripper_states_ptr_->at(0) = std::max(0.0, cur_width / 0.0003137);
-    std::this_thread::sleep_for(std::chrono::duration<double>(dt));
+  if(is_canceled_){
+    return false;
   }
-  while(cur_width < max_width && !is_canceled_){
-    cur_width = cur_width + (default_speed_ * dt);
-    gripper_states_ptr_->at(0) = std::min(255.0, cur_width / 0.0003137);
-    std::this_thread::sleep_for(std::chrono::duration<double>(dt));
-  }
-  return true;
+  return driveToGap(kMaxWidth, default_speed_, 0.002, false);
 }
 
 void GripperSimActionServer::executeMove(const std::shared_ptr<GoalHandleMove>& goal_handle) {
@@ -192,39 +180,7 @@ void GripperSimActionServer::executeMove(const std::shared_ptr<GoalHandleMove>& 
   executeCommand(goal_handle, Task::kMove, command);
 }
 bool GripperSimActionServer::simGripperMove(double width, double speed){
-  double cur_width;
-  double max_width;
-  {
-    std::lock_guard<std::mutex> lock(gripper_state_mutex_);
-    cur_width = current_gripper_state_.width;
-    max_width = current_gripper_state_.max_width;
-  }
-  double cur_speed = speed <= 0.0 ? default_speed_ : speed;
-  double dist = std::min(max_width, width) - cur_width;
-  double sgn = dist < 0 ? -1.0 : 1.0;
-  int max_count = std::abs(dist / (cur_speed * dt));
-  
-  RCLCPP_INFO(this->get_logger(), "[simGripperMove] target=%.4f, cur_width=%.4f, dist=%.4f, max_count=%d, at(1)=%.4f",
-              width, cur_width, dist, max_count, gripper_states_ptr_->at(1));
-  
-  for(int count=0; count<max_count; count++){
-    if(is_canceled_){
-      break;
-    }
-    cur_width = cur_width + (sgn * cur_speed * dt);
-    double ctrl_value = std::min(std::max(0.0, cur_width / 0.0003137), 255.0);
-    gripper_states_ptr_->at(0) = ctrl_value;
-    
-    if(count % 10 == 0 || count == max_count - 1){
-      RCLCPP_DEBUG(this->get_logger(), "[simGripperMove] count=%d/%d, ctrl=%.1f, at(1)=%.4f",
-                   count, max_count, ctrl_value, gripper_states_ptr_->at(1));
-    }
-    std::this_thread::sleep_for(std::chrono::duration<double>(dt));
-  }
-  
-  RCLCPP_INFO(this->get_logger(), "[simGripperMove] DONE: final at(0)=%.1f, at(1)=%.4f",
-              gripper_states_ptr_->at(0), gripper_states_ptr_->at(1));
-  return true;
+  return driveToGap(width, speed, 0.002, false);
 }
 
 void GripperSimActionServer::executeGrasp(const std::shared_ptr<GoalHandleGrasp>& goal_handle) {
@@ -235,31 +191,14 @@ void GripperSimActionServer::executeGrasp(const std::shared_ptr<GoalHandleGrasp>
   };
   executeCommand(goal_handle, Task::kGrasp, command);
 }
-bool GripperSimActionServer::simGripperGrasp(double width, double speed, double /*force*/, 
+bool GripperSimActionServer::simGripperGrasp(double width, double speed, double /*force*/,
                                               double /*epsilon_inner*/, double /*epsilon_outer*/){
-  // same as move, except max_count+50 to ensure "proper" grasping.
-  // epsilon_inner and epsilon_outer are not used, since they are just confusing.
-  // force is not really implemented either, since the real franka doesn't implement that...
-  double cur_width;
-  double max_width;
-  {
-    std::lock_guard<std::mutex> lock(gripper_state_mutex_);
-    cur_width = current_gripper_state_.width;
-    max_width = current_gripper_state_.max_width;
-  }
-  double cur_speed = speed <= 0.0 ? default_speed_ : speed;
-  double dist = std::min(max_width, width) - cur_width;
-  double sgn = dist < 0 ? -1.0 : 1.0;
-  int max_count = std::abs(dist / (cur_speed * dt)) + 50;
-  for(int count=0; count<max_count; count++){
-    if(is_canceled_){
-      break;
-    }
-    cur_width = cur_width + (sgn * cur_speed * dt);
-    gripper_states_ptr_->at(0) = std::min(std::max(0.0, cur_width / 0.0003137), 255.0);
-    std::this_thread::sleep_for(std::chrono::duration<double>(dt));
-  }
-  return true;
+  // force / epsilon remain unimplemented (the real gripper does not expose
+  // them), so no effort estimate is claimed here. Contact semantics are
+  // deferred to the object-validation phase. The extra "+50" open-loop steps
+  // that could overshoot the target are gone: the loop is bounded by the
+  // distance and stops on real finger feedback.
+  return driveToGap(width, speed, 0.002, true);
 }
 
 void GripperSimActionServer::onExecuteGripperCommand(
@@ -367,10 +306,65 @@ void GripperSimActionServer::stopServiceCallback(const std::shared_ptr<Trigger::
 
 bool GripperSimActionServer::simGripperStop(){
   is_canceled_ = true;
-  std::lock_guard<std::mutex> lock(gripper_state_mutex_);
-  gripper_states_ptr_->at(0) = current_gripper_state_.width / 0.0003137;
+  // Hold the last measured opening, in the same per-finger metre units as every
+  // other command (no 0-255 conversion).
+  writeGapCommand(measuredGap());
   std::cout << "Should stop " << std::endl;
   return true;
+}
+
+void GripperSimActionServer::writeGapCommand(double gap_m){
+  // The actuator is a position actuator driving the fixed tendon
+  //   0.5*q1 + 0.5*q2
+  // so its control input is in metres of PER-FINGER displacement (equal to the
+  // tendon length for symmetric fingers), NOT a 0-255 value. ctrlrange is
+  // [0, 0.08] but the joints only reach 0.04, so the command is clamped there.
+  constexpr double kMaxPerFinger = 0.04;
+  double per_finger = std::isfinite(gap_m) ? gap_m / 2.0 : 0.0;
+  per_finger = std::min(std::max(0.0, per_finger), kMaxPerFinger);
+  std::lock_guard<std::mutex> lock(gripper_state_mutex_);
+  gripper_states_ptr_->at(0) = per_finger;
+}
+
+double GripperSimActionServer::measuredGap() const {
+  // at(1) is written by FrankaMjHardwareSystem::read() from the real MuJoCo
+  // finger qpos, so this is measured feedback rather than a virtual model.
+  const double per_finger = gripper_states_ptr_->at(1);
+  if(!std::isfinite(per_finger)){
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return per_finger * 2.0;
+}
+
+bool GripperSimActionServer::driveToGap(double width, double speed, double tol, bool /*stop_on_contact*/){
+  constexpr double kMaxWidth = 0.08;
+  const double target = std::isfinite(width) ? std::min(std::max(0.0, width), kMaxWidth) : 0.0;
+  const double cur_speed = speed <= 0.0 ? default_speed_ : speed;
+  // Bounded step count derived from the distance, deliberately WITHOUT the
+  // extra +50 open-loop steps that could overshoot the target.
+  const double step = std::max(cur_speed * dt, 1e-4);
+  const int max_steps = static_cast<int>(std::abs(target - measuredGap()) / step) + 20;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+
+  for(int count = 0; count < max_steps; ++count){
+    if(is_canceled_){
+      return false;  // cancelled: never reported as reaching the target
+    }
+    if(std::chrono::steady_clock::now() > deadline){
+      RCLCPP_WARN(this->get_logger(),
+                  "[driveToGap] timed out after %d steps; measured gap %.4f, target %.4f",
+                  count, measuredGap(), target);
+      return false;
+    }
+    writeGapCommand(target);
+    std::this_thread::sleep_for(std::chrono::duration<double>(dt));
+    const double now_gap = measuredGap();
+    if(std::isfinite(now_gap) && std::abs(now_gap - target) <= tol){
+      return true;  // success is decided by the REAL finger feedback
+    }
+  }
+  const double final_gap = measuredGap();
+  return std::isfinite(final_gap) && std::abs(final_gap - target) <= tol;
 }
 
 franka::GripperState GripperSimActionServer::getGripperState(){

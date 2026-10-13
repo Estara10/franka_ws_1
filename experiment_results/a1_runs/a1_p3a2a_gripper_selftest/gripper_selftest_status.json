@@ -1,0 +1,7 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p3a2a_gripper_selftest",
+  "mode": "gripper_selftest",
+  "result_line": "",
+  "reached": false
+}

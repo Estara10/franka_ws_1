@@ -7,6 +7,12 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <thread>
+#include <stdexcept>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -531,6 +537,325 @@ TEST(A1SamplePath, InterpolationHitsBothEndsAndIsClamped)
 
   // Mismatched dimensions must not silently produce a wrong-length state.
   EXPECT_TRUE(a1v::interpolateJoints({1.0}, {1.0, 2.0}, 0.5).empty());
+}
+
+// ---------------------------------------------------------------------------
+// Trajectory structural validation (P3a-1)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::vector<std::string> dualArmJoints()
+{
+  std::vector<std::string> v;
+  for (int i = 1; i <= 7; ++i) {
+    v.push_back("mj_left_joint" + std::to_string(i));
+  }
+  for (int i = 1; i <= 7; ++i) {
+    v.push_back("mj_right_joint" + std::to_string(i));
+  }
+  return v;
+}
+
+}  // namespace
+
+TEST(A1SampleTrajNames, AcceptsBothArmsNamedExactlyOnce)
+{
+  const auto expected = dualArmJoints();
+  ASSERT_EQ(expected.size(), 14u);
+  const a1v::JointNameCheck r = a1v::validateJointNames(expected, expected);
+  EXPECT_TRUE(r.ok) << r.reason_code << ": " << r.detail;
+  EXPECT_EQ(r.missing, 0u);
+  EXPECT_EQ(r.duplicates, 0u);
+  EXPECT_EQ(r.unknown, 0u);
+}
+
+// Dropping one arm's joints would leave half the robot uncommanded.
+TEST(A1SampleTrajNames, RejectsAMissingJoint)
+{
+  auto given = dualArmJoints();
+  given.erase(given.begin() + 3);  // drop mj_left_joint4
+  const a1v::JointNameCheck r = a1v::validateJointNames(given, dualArmJoints());
+  EXPECT_FALSE(r.ok);
+  EXPECT_EQ(r.reason_code, "E_TRAJ_MISSING_JOINT");
+  EXPECT_EQ(r.missing, 1u);
+}
+
+TEST(A1SampleTrajNames, RejectsDuplicatesAndUnknownNames)
+{
+  auto dup = dualArmJoints();
+  dup[7] = dup[0];  // repeat mj_left_joint1, losing a right-arm joint
+  const a1v::JointNameCheck r = a1v::validateJointNames(dup, dualArmJoints());
+  EXPECT_FALSE(r.ok);
+  EXPECT_EQ(r.reason_code, "E_TRAJ_DUPLICATE_JOINT");
+  EXPECT_EQ(r.first_duplicate, "mj_left_joint1");
+
+  auto unknown = dualArmJoints();
+  unknown[2] = "mj_left_joint99";
+  const a1v::JointNameCheck r2 = a1v::validateJointNames(unknown, dualArmJoints());
+  EXPECT_FALSE(r2.ok);
+  EXPECT_EQ(r2.reason_code, "E_TRAJ_UNKNOWN_JOINT");
+  EXPECT_EQ(r2.first_unknown, "mj_left_joint99");
+}
+
+TEST(A1SampleTrajNames, RejectsAnEmptyExpectationRatherThanAcceptingAnything)
+{
+  const a1v::JointNameCheck r = a1v::validateJointNames({"a"}, {});
+  EXPECT_FALSE(r.ok);
+  EXPECT_EQ(r.reason_code, "E_TRAJ_NO_EXPECTED_JOINTS");
+}
+
+TEST(A1SampleTrajTime, AcceptsAStrictlyIncreasingFiniteSequenceStartingAtZero)
+{
+  const a1v::TimeCheck r = a1v::validateTimeFromStart({0.0, 0.5, 1.25, 2.0});
+  EXPECT_TRUE(r.ok) << r.reason_code << ": " << r.detail;
+  EXPECT_DOUBLE_EQ(r.first_sec, 0.0);
+  EXPECT_DOUBLE_EQ(r.last_sec, 2.0);
+}
+
+TEST(A1SampleTrajTime, RejectsNonMonotonicAndNonFiniteTimes)
+{
+  {
+    const a1v::TimeCheck r = a1v::validateTimeFromStart({0.0, 1.0, 1.0, 2.0});
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_TIME_NOT_INCREASING");
+    EXPECT_EQ(r.bad_index, 2u);
+  }
+  {
+    const a1v::TimeCheck r = a1v::validateTimeFromStart({0.0, 1.0, 0.5});
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_TIME_NOT_INCREASING");
+  }
+  {
+    const a1v::TimeCheck r = a1v::validateTimeFromStart({0.0, std::nan(""), 2.0});
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_TIME_NOT_FINITE");
+  }
+  {
+    const a1v::TimeCheck r = a1v::validateTimeFromStart({0.0, std::numeric_limits<double>::infinity()});
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_TIME_NOT_FINITE");
+  }
+}
+
+TEST(A1SampleTrajTime, RejectsEmptyNegativeAndNonZeroStart)
+{
+  EXPECT_EQ(a1v::validateTimeFromStart({}).reason_code, "E_TIME_EMPTY");
+  EXPECT_EQ(a1v::validateTimeFromStart({-0.1, 0.5}).reason_code, "E_TIME_NEGATIVE");
+  // A first point that does not start at zero means the offsets are relative to
+  // something other than the execution start.
+  const a1v::TimeCheck r = a1v::validateTimeFromStart({0.4, 0.9});
+  EXPECT_FALSE(r.ok);
+  EXPECT_EQ(r.reason_code, "E_TIME_NOT_STARTING_AT_ZERO");
+}
+
+// ---------------------------------------------------------------------------
+// Bounded dispatch: late results stay safe and never become a success
+// ---------------------------------------------------------------------------
+
+TEST(A1SampleBoundedExec, ReturnsTheValueWhenTheWorkerFinishesInTime)
+{
+  int stops = 0;
+  const a1v::BoundedExecOutcome r =
+      a1v::runBoundedExec([]() { return 1; }, [&stops]() { ++stops; }, 1.0, 0.5, 0.005);
+  EXPECT_EQ(r.status, a1v::BoundedExecOutcome::Status::COMPLETED);
+  EXPECT_EQ(r.value, 1);
+  EXPECT_TRUE(r.worker_finished);
+  EXPECT_FALSE(r.stop_requested);  // the timeout path was never taken
+  EXPECT_EQ(stops, 0);
+}
+
+TEST(A1SampleBoundedExec, ReportsExceptionsAsFailureNotCompletion)
+{
+  const a1v::BoundedExecOutcome r = a1v::runBoundedExec(
+      []() -> int { throw std::runtime_error("boom"); }, []() {}, 1.0, 0.2, 0.005);
+  EXPECT_EQ(r.status, a1v::BoundedExecOutcome::Status::EXCEPTION);
+  EXPECT_TRUE(r.worker_finished);
+}
+
+// A success that arrives after the timeout must NOT be reported as an in-time
+// success -- that is what keeps a late result from becoming PREGRASP_REACHED.
+TEST(A1SampleBoundedExec, ALateSuccessIsStillReportedAsTimeout)
+{
+  int stops = 0;
+  const auto begin = std::chrono::steady_clock::now();
+  const a1v::BoundedExecOutcome r = a1v::runBoundedExec(
+      []() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+        return 1;  // MoveIt SUCCESS, but too late
+      },
+      [&stops]() { ++stops; }, 0.02, 1.0, 0.005);
+  const double elapsed =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+
+  EXPECT_EQ(r.status, a1v::BoundedExecOutcome::Status::TIMEOUT);
+  EXPECT_EQ(r.value, 1);                // the late value is recorded ...
+  EXPECT_GE(r.elapsed_sec, 0.02);       // ... but only after the bound expired
+  EXPECT_LT(elapsed, 1.0);
+  EXPECT_TRUE(r.stop_requested);        // a stop was requested on timeout
+  EXPECT_TRUE(r.worker_finished);       // it ended inside the grace period
+}
+
+// The worker outliving both the timeout and the grace period must be safe: it
+// writes to shared state, never to a dead stack frame.
+TEST(A1SampleBoundedExec, AWorkerOutlivingTheGracePeriodIsSafeAndDetached)
+{
+  auto late_writer_ran = std::make_shared<std::atomic<bool>>(false);
+  int stops = 0;
+  {
+    const a1v::BoundedExecOutcome r = a1v::runBoundedExec(
+        [late_writer_ran]() {
+          std::this_thread::sleep_for(std::chrono::milliseconds(250));
+          late_writer_ran->store(true);  // writes to shared state after our scope
+          return 1;
+        },
+        [&stops]() { ++stops; }, 0.02, 0.05, 0.005);
+    EXPECT_EQ(r.status, a1v::BoundedExecOutcome::Status::TIMEOUT);
+    EXPECT_TRUE(r.stop_requested);
+    EXPECT_FALSE(r.worker_finished);  // detached rather than joined
+  }
+  // The shared slot and this flag both outlive the call; the late write lands
+  // safely. (A stack-captured result would be a use-after-scope here.)
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  EXPECT_TRUE(late_writer_ran->load());
+  EXPECT_EQ(stops, 1);
+}
+
+// The deadline must be judged from the worker's own completion instant, not
+// from when the polling loop woke up. Here the worker finishes AFTER the budget
+// but BEFORE the next poll wake-up, so a naive "is the slot filled?" check would
+// report COMPLETED. It must stay TIMEOUT.
+TEST(A1SampleBoundedExec, AResultCompletingAfterTheDeadlineButBeforeTheNextPollIsTimeout)
+{
+  int stops = 0;
+  const a1v::BoundedExecOutcome r = a1v::runBoundedExec(
+      []() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        return 1;  // MoveIt SUCCESS, but past the 10 ms budget
+      },
+      [&stops]() { ++stops; }, 0.010, 1.0, 0.050);
+
+  EXPECT_EQ(r.status, a1v::BoundedExecOutcome::Status::TIMEOUT);
+  EXPECT_EQ(r.value, 1);  // late value kept for diagnostics only
+  EXPECT_GT(r.completed_at_sec, r.timeout_sec);  // finished after the budget
+  EXPECT_GE(r.completed_at_sec, 0.020);
+  EXPECT_TRUE(r.worker_finished);
+  EXPECT_GE(r.elapsed_sec, 0.050);   // observed only at the next poll wake-up
+  EXPECT_GT(r.elapsed_sec, r.completed_at_sec);
+  // The worker had already ended, so a stop is neither needed nor requested --
+  // only a still-running worker gets one. The status is TIMEOUT regardless.
+  EXPECT_FALSE(r.stop_requested);
+  EXPECT_EQ(stops, 0);
+}
+
+// The mirror image: the worker finishes well inside the budget, but the long
+// poll interval means it is only noticed much later. That must NOT be turned
+// into a timeout by the late observation.
+TEST(A1SampleBoundedExec, AnOnTimeResultObservedLateIsStillCompleted)
+{
+  int stops = 0;
+  const a1v::BoundedExecOutcome r = a1v::runBoundedExec(
+      []() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        return 1;
+      },
+      [&stops]() { ++stops; }, 1.0, 0.5, 0.200);
+
+  EXPECT_EQ(r.status, a1v::BoundedExecOutcome::Status::COMPLETED);
+  EXPECT_EQ(r.value, 1);
+  EXPECT_LE(r.completed_at_sec, r.timeout_sec);  // finished inside the budget
+  EXPECT_TRUE(r.worker_finished);
+  EXPECT_FALSE(r.stop_requested);                // never entered the stop path
+  EXPECT_EQ(stops, 0);
+  // It was observed at the poll wake-up, well after it actually finished.
+  EXPECT_GT(r.elapsed_sec, r.completed_at_sec);
+}
+
+TEST(A1SampleBoundedExec, ZeroTimeoutStillRequestsStopAndDoesNotHang)
+{
+  const auto begin = std::chrono::steady_clock::now();
+  const a1v::BoundedExecOutcome r = a1v::runBoundedExec(
+      []() { std::this_thread::sleep_for(std::chrono::milliseconds(60)); return 7; }, []() {},
+      0.0, 0.005, 0.002);
+  const double elapsed =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+  EXPECT_EQ(r.status, a1v::BoundedExecOutcome::Status::TIMEOUT);
+  EXPECT_LT(elapsed, 1.0);  // bounded, no unbounded join
+}
+
+// ---------------------------------------------------------------------------
+// Final dispatched velocity / acceleration fields
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::vector<std::string> twoJoints() { return {"j1", "j2"}; }
+
+}  // namespace
+
+TEST(A1SampleDerivative, AcceptsAFieldInsideTheDeclaredLimits)
+{
+  const a1v::DerivativeCheck r =
+      a1v::checkDerivativeField({0.5, -1.0}, {1.0, 2.0}, {true, true}, twoJoints());
+  EXPECT_TRUE(r.ok) << r.reason_code << ": " << r.detail;
+  EXPECT_EQ(r.checked, 2u);
+  EXPECT_EQ(r.unbounded, 0u);
+  EXPECT_NEAR(r.worst_ratio, 0.5, 1e-12);
+}
+
+// A joint with no declared limit must be counted, never treated as a zero
+// limit and never claimed as compliant.
+TEST(A1SampleDerivative, CountsUndeclaredLimitsInsteadOfAssumingZero)
+{
+  const a1v::DerivativeCheck r =
+      a1v::checkDerivativeField({0.5, 9.0}, {1.0, 0.0}, {true, false}, twoJoints());
+  EXPECT_TRUE(r.ok);
+  EXPECT_EQ(r.checked, 1u);
+  EXPECT_EQ(r.unbounded, 1u);
+
+  // A declared-but-zero limit is unusable, so it is treated as undeclared too.
+  const a1v::DerivativeCheck z =
+      a1v::checkDerivativeField({0.5}, {0.0}, {true}, {"j1"});
+  EXPECT_TRUE(z.ok);
+  EXPECT_EQ(z.unbounded, 1u);
+  EXPECT_EQ(z.checked, 0u);
+}
+
+TEST(A1SampleDerivative, RejectsNonFiniteOversizedAndMismatchedFields)
+{
+  {
+    const a1v::DerivativeCheck r =
+        a1v::checkDerivativeField({1.5, 0.0}, {1.0, 1.0}, {true, true}, twoJoints());
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_DERIV_LIMIT_EXCEEDED");
+  }
+  {
+    const a1v::DerivativeCheck r =
+        a1v::checkDerivativeField({std::nan(""), 0.0}, {1.0, 1.0}, {true, true}, twoJoints());
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_DERIV_NOT_FINITE");
+  }
+  {
+    // Dimensions must match the joint names; a short field would leave joints
+    // unchecked while looking valid.
+    const a1v::DerivativeCheck r = a1v::checkDerivativeField({1.0}, {1.0, 1.0}, {true, true},
+                                                             twoJoints());
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_DERIV_DIM_MISMATCH");
+  }
+  {
+    const a1v::DerivativeCheck r =
+        a1v::checkDerivativeField({}, {1.0}, {true}, {"j1"});
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_DERIV_DIM_MISMATCH");
+  }
+  {
+    // Negative limits are compared by magnitude.
+    const a1v::DerivativeCheck r =
+        a1v::checkDerivativeField({-1.5}, {-1.0}, {true}, {"j1"});
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(r.reason_code, "E_DERIV_LIMIT_EXCEEDED");
+  }
 }
 
 // ---------------------------------------------------------------------------

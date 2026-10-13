@@ -1,0 +1,3 @@
+[INFO] [1791893191.489529496] [_ros2cli_295893]: waiting for service /controller_manager/list_controllers to become available...
+[92mdual_panda_arm_controller           [0m joint_trajectory_controller/JointTrajectoryController         [92mactive[0m
+[92mforce_torque_sensor_broadcaster_left[0m force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster  [92mactive[0m

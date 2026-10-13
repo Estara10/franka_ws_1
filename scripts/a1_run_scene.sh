@@ -60,6 +60,10 @@ TASK_TIMEOUT=180
 P2A_CHECK=0
 # A1 P2b: joint pre-grasp path planning + verification. Planning only, no motion.
 P2B_CHECK=0
+# A1 P3a-1: execute the verified pre-grasp plan, then stop. Implies --p2b-check.
+PREGRASP_EXECUTE=0
+# A1 P3a-2a: gripper interface check -- one empty-load open/close/open cycle.
+GRIPPER_SELFTEST=0
 P2A_WORKSPACE=""
 P2A_WORKSPACE_SOURCE=""
 
@@ -93,6 +97,12 @@ usage: a1_run_scene.sh [options]
                         region, NOT a physical table edge.
   --p2a-workspace-source S
                         provenance text for the envelope above, recorded verbatim
+  --gripper-selftest    A1 P3a-2a: start one simulator and run a single dual-gripper
+                        open -> empty close -> open cycle at the arm's default start
+                        pose. The arms are not commanded; no weld/attach.
+  --pregrasp-execute    A1 P3a-1: also EXECUTE the same plan P2b just verified and
+                        stop on arrival (no descent, no grasp, no carry). Implies
+                        --p2b-check. Exit code follows the P3A result.
   --p2b-check           A1 P2b: also plan the dual-arm joint pre-grasp path from
                         the actual start and re-verify every interpolated state on
                         the P2a criterion model. Planning only, nothing is
@@ -123,6 +133,8 @@ while [[ $# -gt 0 ]]; do
     --task-timeout)    TASK_TIMEOUT="$2"; shift 2 ;;
     --p2a-check)       P2A_CHECK=1; shift ;;
     --p2b-check)       P2B_CHECK=1; P2A_CHECK=1; shift ;;
+    --pregrasp-execute) PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1; shift ;;
+    --gripper-selftest) GRIPPER_SELFTEST=1; shift ;;
     --p2a-workspace)   P2A_WORKSPACE="$2 $3 $4 $5"; shift 5 ;;
     --p2a-workspace-source) P2A_WORKSPACE_SOURCE="$2"; shift 2 ;;
     --domain-id)       DOMAIN_ID="$2"; shift 2 ;;
@@ -261,6 +273,9 @@ record_prepare_status() {
     printf '  "p2b_check_enabled": %s,\n' "$([[ "${P2B_CHECK}" -eq 1 ]] && echo true || echo false)"
     printf '  "p2b_result_line": "%s",\n' "$(grep -m1 '\[P2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P2B_RESULT\]/[P2B_RESULT]/' | tr -d '"\\')"
     printf '  "p2_acceptance": %s,\n' "$(p2_acceptance_true && echo true || echo false)"
+    printf '  "pregrasp_execute_enabled": %s,\n' "$([[ "${PREGRASP_EXECUTE}" -eq 1 ]] && echo true || echo false)"
+    printf '  "p3a_result_line": "%s",\n' "$(grep -m1 '\[P3A_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P3A_RESULT\]/[P3A_RESULT]/' | tr -d '"\\')"
+    printf '  "pregrasp_reached": %s,\n' "$(pregrasp_reached && echo true || echo false)"
     printf '  "task_log": "task_launch.log"\n'
     printf '}\n'
   } > "${RUN_DIR}/prepare_status.json" 2>/dev/null || true
@@ -269,6 +284,14 @@ record_prepare_status() {
 # True only when the task actually emitted a P2a result with all three static
 # checks passed. Absence of the line is NOT treated as a pass.
 # True only when the task emitted p2_acceptance=true. Missing line is NOT a pass.
+# True only when the task reported PREGRASP_REACHED. Absence is NOT arrival.
+pregrasp_reached() {
+  local line
+  line="$(grep -m1 '\[P3A_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null || true)"
+  [[ -n "${line}" ]] || return 1
+  [[ "${line}" == *"state=PREGRASP_REACHED"* ]]
+}
+
 p2_acceptance_true() {
   local line
   line="$(grep -m1 '\[P2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null || true)"
@@ -395,7 +418,10 @@ fi
 
 # --- Ownership: refuse to run alongside an instance we do not own ------------
 # Discovery calls are bounded: an unreachable or wedged graph must not hang.
-EXISTING="$(timeout "${HELPER_TIMEOUT}" ros2 service list 2>/dev/null || true)"
+# --no-daemon: the CLI discovery daemon can retain entries for an instance that
+# already died (e.g. after a crash), which would make this guard refuse a run
+# when nothing is actually listening. Live discovery is what this check needs.
+EXISTING="$(timeout "${HELPER_TIMEOUT}" ros2 service list --no-daemon 2>/dev/null || true)"
 if grep -qE "^/(set_body_state|get_body_state|get_sim_info)$" <<<"${EXISTING}"; then
   echo "error: a simulation instance already answers on ROS_DOMAIN_ID=${ROS_DOMAIN_ID}:" >&2
   grep -E "^/(set_body_state|get_body_state|get_sim_info)$" <<<"${EXISTING}" >&2
@@ -471,6 +497,52 @@ fi
 # runner applies the pose and publishes the settled truth, the task receives and
 # freezes it and confirms the planning scene. No second simulation is started and
 # the rod is never written twice.
+# --- A1 P3a-2a: minimal explicit gripper empty-load cycle -------------------
+if [[ "${GRIPPER_SELFTEST}" -eq 1 ]]; then
+  echo "[gripper] empty-load cycle: open -> close -> open (arms idle)"
+  # The node itself waits (bounded) for the action servers, so no CLI discovery
+  # race is introduced here.
+  setsid ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py \
+    gripper_selftest:=true \
+    control_mode:=compliant \
+    enable_latency_monitor:=false enable_task_metrics_monitor:=false \
+    > "${RUN_DIR}/gripper_selftest.log" 2>&1 &
+  TASK_PID=$!
+  sleep 1
+  TASK_PGID="$(ps -o pgid= -p "${TASK_PID}" 2>/dev/null | tr -d ' ' || true)"
+
+  DEADLINE=$((SECONDS + TASK_TIMEOUT))
+  GRIPPER_STATE=""
+  while (( SECONDS < DEADLINE )); do
+    if grep -q '\[GRIPPER_RESULT\]' "${RUN_DIR}/gripper_selftest.log" 2>/dev/null; then
+      GRIPPER_STATE="$(grep -m1 -o 'state=[A-Z_]*' "${RUN_DIR}/gripper_selftest.log" | head -1)"
+      break
+    fi
+    if ! kill -0 "${TASK_PID}" 2>/dev/null; then GRIPPER_STATE="state=PROCESS_EXITED"; break; fi
+    sleep 1
+  done
+  [[ -z "${GRIPPER_STATE}" ]] && GRIPPER_STATE="state=TIMEOUT"
+  # Raw evidence: what the simulator actually publishes for the finger joints.
+  timeout "${HELPER_TIMEOUT}" ros2 topic echo --once /joint_states \
+    > "${RUN_DIR}/joint_states_after_cycle.txt" 2>/dev/null || true
+  echo "[gripper] ${GRIPPER_STATE}"
+  grep -m1 '\[GRIPPER_RESULT\]' "${RUN_DIR}/gripper_selftest.log" 2>/dev/null || true
+  {
+    printf '{\n  "written_by": "scripts/a1_run_scene.sh",\n'
+    printf '  "run_id": "%s",\n  "mode": "gripper_selftest",\n' "${RUN_ID}"
+    printf '  "result_line": "%s",\n' "$(grep -m1 '\[GRIPPER_RESULT\]' "${RUN_DIR}/gripper_selftest.log" 2>/dev/null | sed 's/.*\[GRIPPER_RESULT\]/[GRIPPER_RESULT]/' | tr -d '"\\')"
+    printf '  "reached": %s\n' "$([[ "${GRIPPER_STATE}" == "state=GRIPPER_TEST_DONE" ]] && echo true || echo false)"
+    printf '}\n'
+  } > "${RUN_DIR}/gripper_selftest_status.json" 2>/dev/null || true
+
+  if [[ "${GRIPPER_STATE}" == "state=GRIPPER_TEST_DONE" ]]; then RC=0; else RC=7; fi
+  stop_group task "${TASK_PGID}" "${TASK_PID}"
+  stop_group sim "${SIM_PGID}" "${SIM_PID}"
+  SIM_PID=""; SIM_PGID=""
+  echo "gripper selftest exit code: ${RC}"
+  exit "${RC}"
+fi
+
 if [[ "${PREPARE_MODE}" -eq 1 ]]; then
   echo "[prepare] A1 P1b prepare mode: apply -> publish truth -> task freeze -> scene sync"
   RUNNER_ARGS=("${NODE_ARGS[@]}" --publish-truth --truth-topic "${TRUTH_TOPIC}" --hold-sec "${HOLD_SEC}")
@@ -507,7 +579,8 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     echo "[prepare] truth published; starting the task in prepare-only mode"
     # The task must not move: rod_pose_source=a1_truth with prepare_only=true.
     P2A_ARGS=(p2a_check:="$([[ "${P2A_CHECK}" -eq 1 ]] && echo true || echo false)"
-              p2b_check:="$([[ "${P2B_CHECK}" -eq 1 ]] && echo true || echo false)")
+              p2b_check:="$([[ "${P2B_CHECK}" -eq 1 ]] && echo true || echo false)"
+              pregrasp_execute:="$([[ "${PREGRASP_EXECUTE}" -eq 1 ]] && echo true || echo false)")
     if [[ -n "${P2A_WORKSPACE}" ]]; then
       read -r P2A_XMIN P2A_XMAX P2A_YMIN P2A_YMAX <<<"${P2A_WORKSPACE}"
       P2A_ARGS+=(p2a_workspace_x_min:="${P2A_XMIN}" p2a_workspace_x_max:="${P2A_XMAX}"
@@ -538,6 +611,10 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
       if grep -q "已发布任务失败状态(ERROR)" "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="ERROR"; break
       fi
+      # A1 P3a-1 terminal state: pre-grasp reached (its own stage result).
+      if grep -q "已发布预抓取到位状态(PREGRASP_REACHED)" "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+        TASK_STATE="PREGRASP_REACHED"; break
+      fi
       if ! kill -0 "${TASK_PID}" 2>/dev/null; then
         TASK_STATE="TASK_PROCESS_EXITED"; break
       fi
@@ -547,7 +624,17 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     echo "[prepare] task state: ${TASK_STATE}"
     record_prepare_status "${TASK_STATE}"
 
-    if [[ "${TASK_STATE}" == "PREPARED" ]]; then
+    if [[ "${TASK_STATE}" == "PREGRASP_REACHED" ]]; then
+      RC=0
+      if pregrasp_reached; then
+        echo "[prepare] P3a-1: PREGRASP_REACHED (pre-grasp only; no grasp, no carry)"
+      else
+        echo "[prepare] P3a-1 reported a terminal state but no PREGRASP_REACHED result" >&2
+        record_status "E_P3A_NOT_REACHED" \
+          "pre-grasp execution ended without reporting arrival" "prepare"
+        RC=6
+      fi
+    elif [[ "${TASK_STATE}" == "PREPARED" ]]; then
       RC=0
       # PREPARED only means the truth was frozen and the scene synced. When the
       # P2a check is enabled, the exit code reflects the static validity result
@@ -563,6 +650,17 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
               "the joint pre-grasp path did not pass; sample rejected, no rule or start was changed" \
               "prepare"
             RC=5
+          fi
+        elif [[ "${PREGRASP_EXECUTE}" -eq 1 ]]; then
+          if pregrasp_reached; then
+            echo "[prepare] P3a-1: PREGRASP_REACHED (pre-grasp only, not a grasp or carry)"
+          else
+            echo "[prepare] P3a-1 did NOT reach the pre-grasp target; see task_launch.log" >&2
+            grep -m1 '\[P3A_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null >&2 || true
+            record_status "E_P3A_NOT_REACHED" \
+              "pre-grasp execution did not reach the target; reported as failure, nothing retried" \
+              "prepare"
+            RC=6
           fi
         elif p2a_static_passed; then
           echo "[prepare] P2a static checks: geometry/ik/collision all passed"

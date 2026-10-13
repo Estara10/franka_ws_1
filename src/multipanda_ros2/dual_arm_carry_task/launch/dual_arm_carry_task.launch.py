@@ -119,6 +119,16 @@ def launch_setup(context, *args, **kwargs):
                 'p2b_planning_attempts': LaunchConfiguration('p2b_planning_attempts'),
                 'p2b_max_joint_step_rad': LaunchConfiguration('p2b_max_joint_step_rad'),
                 'p2b_midpath_negative': LaunchConfiguration('p2b_midpath_negative'),
+                'pregrasp_execute': LaunchConfiguration('pregrasp_execute'),
+                'pregrasp_vel_scale': LaunchConfiguration('pregrasp_vel_scale'),
+                'pregrasp_acc_scale': LaunchConfiguration('pregrasp_acc_scale'),
+                'pregrasp_arrival_pos_tol_m': LaunchConfiguration('pregrasp_arrival_pos_tol_m'),
+                'pregrasp_arrival_angle_tol_deg': LaunchConfiguration('pregrasp_arrival_angle_tol_deg'),
+                'pregrasp_exec_timeout_sec': LaunchConfiguration('pregrasp_exec_timeout_sec'),
+                'gripper_total_timeout_sec': LaunchConfiguration('gripper_total_timeout_sec'),
+                'gripper_max_effort': LaunchConfiguration('gripper_max_effort'),
+                'gripper_selftest': LaunchConfiguration('gripper_selftest'),
+                'gripper_open_position': LaunchConfiguration('gripper_open_position'),
                 'p2a_grasp_offset': LaunchConfiguration('p2a_grasp_offset'),
                 'p2a_eef_base_yaw_deg': LaunchConfiguration('p2a_eef_base_yaw_deg'),
                 'use_sim_time': True,
@@ -400,6 +410,41 @@ def generate_launch_description():
         'p2b_midpath_negative', default_value='true',
         description='在路径中段注入障碍，证明校验覆盖路径内部（验证注入，非规划器结果）')
 
+    # --- A1 P3a-1: execute the verified pre-grasp plan, then stop ---
+    pregrasp_execute_arg = DeclareLaunchArgument(
+        'pregrasp_execute', default_value='false',
+        description='A1 P3a-1: 执行本轮 P2b 刚校验过的**同一** Plan 并实测到位，然后停止。'
+                    '需要 rod_pose_source=a1_truth、use_vision=false、prepare_only=true、'
+                    'p2a_check=true、p2b_check=true；不进入旧 FSM，不下降/不抓取')
+    pregrasp_vel_scale_arg = DeclareLaunchArgument(
+        'pregrasp_vel_scale', default_value='0.1', description='预抓取执行的速度缩放（保守）')
+    pregrasp_acc_scale_arg = DeclareLaunchArgument(
+        'pregrasp_acc_scale', default_value='0.1', description='预抓取执行的加速度缩放（保守）')
+    pregrasp_arrival_pos_tol_m_arg = DeclareLaunchArgument(
+        'pregrasp_arrival_pos_tol_m', default_value='0.005', description='到位位置容差（米）')
+    pregrasp_arrival_angle_tol_deg_arg = DeclareLaunchArgument(
+        'pregrasp_arrival_angle_tol_deg', default_value='2.0', description='到位姿态容差（度）')
+    pregrasp_exec_timeout_sec_arg = DeclareLaunchArgument(
+        'pregrasp_exec_timeout_sec', default_value='90.0',
+        description='执行的有界等待上限（秒）；超时即失败，不重试、不继续')
+
+    # --- A1 P3a-2a: gripper interface + empty-load cycle ---
+    gripper_total_timeout_sec_arg = DeclareLaunchArgument(
+        'gripper_total_timeout_sec', default_value='20.0',
+        description='夹爪一次双臂开合的总时间预算（秒）；各阶段预算另行夹取到该总预算内')
+    gripper_max_effort_arg = DeclareLaunchArgument(
+        'gripper_max_effort', default_value='100.0', description='夹爪 command.max_effort（N）')
+    gripper_selftest_arg = DeclareLaunchArgument(
+        'gripper_selftest', default_value='false',
+        description='A1 P3a-2a: 只做一次双夹爪"打开→空载闭合→打开"，机械臂不动、不 weld/attach')
+    gripper_open_position_arg = DeclareLaunchArgument(
+        'gripper_open_position', default_value='0.04',
+        description='张开命令：单指位移（米）；服务器目标开口 = 2×该值')
+    # NOTE: no gripper_close_position launch argument on purpose. The node
+    # already declares that parameter (A0 default 0.010); passing it from here
+    # would silently change the existing closing behaviour. The empty-load cycle
+    # reuses the node's existing value.
+
     enable_latency_monitor_arg = DeclareLaunchArgument(
         'enable_latency_monitor',
         default_value='true',
@@ -641,6 +686,16 @@ def generate_launch_description():
         p2b_planning_attempts_arg,
         p2b_max_joint_step_rad_arg,
         p2b_midpath_negative_arg,
+        pregrasp_execute_arg,
+        pregrasp_vel_scale_arg,
+        pregrasp_acc_scale_arg,
+        pregrasp_arrival_pos_tol_m_arg,
+        pregrasp_arrival_angle_tol_deg_arg,
+        pregrasp_exec_timeout_sec_arg,
+        gripper_total_timeout_sec_arg,
+        gripper_max_effort_arg,
+        gripper_selftest_arg,
+        gripper_open_position_arg,
         p2a_grasp_offset_arg,
         p2a_eef_base_yaw_deg_arg,
         enable_latency_monitor_arg,

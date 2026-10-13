@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -227,6 +228,109 @@ std::size_t subdivisionsFor(double max_joint_delta_rad, double max_step_rad);
 std::vector<double> interpolateJoints(const std::vector<double>& a,
                                       const std::vector<double>& b,
                                       double t);
+
+// ---------------------------------------------------------------------------
+// Bounded dispatch (A1 P3a-1)
+// ---------------------------------------------------------------------------
+
+// Result of a bounded, dispatched call.
+//
+// `worker_finished` says whether the worker ended inside the grace period after
+// the timeout. A worker that did not is detached; it stays safe because every
+// value it touches is shared, but it must NOT influence the verdict afterwards.
+struct BoundedExecOutcome {
+  enum class Status { COMPLETED, TIMEOUT, EXCEPTION };
+  Status status {Status::TIMEOUT};
+  int value {0};
+  bool stop_requested {false};
+  bool worker_finished {false};
+  double elapsed_sec {0.0};
+  // When the worker actually finished, in seconds from the moment the bounded
+  // call began; -1 when it never finished. Whether the result counts as in time
+  // is decided from THIS instant, never from when the polling loop happened to
+  // wake up.
+  double completed_at_sec {-1.0};
+  double timeout_sec {0.0};
+};
+
+// Runs `work` on a worker thread and waits at most `timeout_sec` for it.
+//
+// Ownership is the point: the worker's result slot, and everything else it
+// touches, is shared rather than a stack reference, so a worker that outlives
+// the wait cannot write to freed memory.
+//
+// Timeliness is decided by the worker's own completion instant, recorded before
+// the deadline check:
+//   * a worker that finished within the budget counts as COMPLETED even if the
+//     polling loop only noticed it much later (a long poll interval must not
+//     turn an on-time result into a timeout);
+//   * a worker that finished after the budget stays TIMEOUT even though its
+//     value is present by the time the loop observes it (a completed slot is
+//     not by itself evidence of an in-time result).
+// A stop is only requested while the worker is still running; a late result
+// that already ended needs no stop request and still reports TIMEOUT.
+BoundedExecOutcome runBoundedExec(const std::function<int()>& work,
+                                  const std::function<void()>& on_timeout,
+                                  double timeout_sec,
+                                  double grace_sec,
+                                  double poll_interval_sec = 0.01);
+
+// ---------------------------------------------------------------------------
+// Trajectory structural validation (A1 P3a-1)
+// ---------------------------------------------------------------------------
+
+struct JointNameCheck {
+  bool ok {false};
+  std::string reason_code;
+  std::string detail;
+  std::size_t missing {0};
+  std::size_t duplicates {0};
+  std::size_t unknown {0};
+  std::string first_unknown;
+  std::string first_duplicate;
+};
+
+// The plan must name every expected joint exactly once: no missing joint (which
+// would silently drop one arm), no duplicate, and nothing outside the expected
+// set (which would mean the plan is for a different robot).
+JointNameCheck validateJointNames(const std::vector<std::string>& names,
+                                  const std::vector<std::string>& expected);
+
+struct TimeCheck {
+  bool ok {false};
+  std::string reason_code;
+  std::string detail;
+  double first_sec {0.0};
+  double last_sec {0.0};
+  std::size_t bad_index {0};
+};
+
+// time_from_start must be finite, non-negative and strictly increasing, and the
+// first point must sit at t = 0.
+TimeCheck validateTimeFromStart(const std::vector<double>& times_sec);
+
+struct DerivativeCheck {
+  bool ok {false};
+  std::string reason_code;
+  std::string detail;
+  // Joints whose limit is not declared in the model. They are skipped and
+  // counted -- never treated as a zero limit, and never reported as compliant.
+  std::size_t unbounded {0};
+  std::size_t checked {0};
+  double worst_ratio {0.0};
+  std::string worst_joint;
+};
+
+// Validates one trajectory point's velocity (or acceleration) field.
+//
+// A non-finite component always fails. A joint with no declared limit is
+// skipped and counted in `unbounded`; the caller must report that rather than
+// claim the field was fully checked. `limits` is the absolute limit per joint,
+// taken from the model actually in use -- never invented.
+DerivativeCheck checkDerivativeField(const std::vector<double>& values,
+                                     const std::vector<double>& limits,
+                                     const std::vector<bool>& bounded,
+                                     const std::vector<std::string>& names);
 
 // ---------------------------------------------------------------------------
 // Local hand-model substitution (A1 P2a)

@@ -25,6 +25,8 @@ find_package(shape_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
 # A1 P2a: locate the simulation's hand collision mesh via the package share dir.
 find_package(ament_index_cpp REQUIRED)
+# A1 P3a-1: verify which controllers are active before commanding motion.
+find_package(controller_manager_msgs REQUIRED)
 # A1 P1a: rod body state / simulation info services.
 find_package(mujoco_ros_msgs REQUIRED)
 # A1 P1b: rod pose truth message.
@@ -59,6 +61,14 @@ add_library(a1_sampling src/a1_sampling.cpp)
 # A1 P1b: pure, offline-testable truth handling (validation, latch-once freeze,
 # frame mapping, planning-scene read-back check). No ROS dependency.
 add_library(a1_truth src/a1_truth.cpp)
+
+# A1 P3a-2a: gripper action protocol semantics (units, result classification,
+# late-acceptance decision). No ROS dependency.
+add_library(gripper_protocol src/gripper_protocol.cpp)
+target_include_directories(gripper_protocol PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 
 # A1 P2a: pure, offline-testable sample validity checks (rotated footprint,
 # workspace/support judgement, shared pre-grasp/grasp target construction,
@@ -142,9 +152,10 @@ target_link_libraries(a1_scene_runner_node a1_sampling)
 ament_target_dependencies(dual_arm_carry_task_node
   dual_arm_a1_msgs
   ament_index_cpp
+  controller_manager_msgs
 )
 
-target_link_libraries(dual_arm_carry_task_node a1_truth a1_sample_validator)
+target_link_libraries(dual_arm_carry_task_node a1_truth a1_sample_validator gripper_protocol)
 
 # Install targets
 install(TARGETS
@@ -156,6 +167,7 @@ install(TARGETS
   a1_sampling
   a1_truth
   a1_sample_validator
+  gripper_protocol
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -191,6 +203,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_a1_sample_validator test/test_a1_sample_validator.cpp)
   target_link_libraries(test_a1_sample_validator a1_sample_validator)
+
+  ament_add_gtest(test_gripper_protocol test/test_gripper_protocol.cpp)
+  target_link_libraries(test_gripper_protocol gripper_protocol)
 endif()
 
 ament_package()

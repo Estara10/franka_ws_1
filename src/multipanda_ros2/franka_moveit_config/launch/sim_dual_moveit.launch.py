@@ -334,8 +334,12 @@ def generate_launch_description():
     # Joint state publisher setup
     jsp_source_list = [concatenate_ns('', 'joint_states', True)]
     if(load_gripper):
-        jsp_source_list.append(concatenate_ns('', 'mj_left_gripper_sim_node/joint_states/joint_states', True))
-        jsp_source_list.append(concatenate_ns('', 'mj_right_gripper_sim_node/joint_states/joint_states', True))
+        # The gripper servers publish on ~/joint_states, i.e.
+        # /mj_<side>_gripper_sim_node/joint_states. The previous doubled
+        # ".../joint_states/joint_states" named non-existent topics, so the finger
+        # states never reached the global /joint_states.
+        jsp_source_list.append(concatenate_ns('', 'mj_left_gripper_sim_node/joint_states', True))
+        jsp_source_list.append(concatenate_ns('', 'mj_right_gripper_sim_node/joint_states', True))
 
     joint_state_publisher = Node( # RVIZ dependency
             package='joint_state_publisher',

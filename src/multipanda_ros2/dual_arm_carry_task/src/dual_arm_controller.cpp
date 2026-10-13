@@ -12,6 +12,7 @@
 #include <vector>
 #include <moveit/collision_detection/collision_matrix.h>
 #include <moveit_msgs/srv/get_planning_scene.hpp>
+#include <controller_manager_msgs/srv/list_controllers.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <srdfdom/model.h>
 #include <urdf_parser/urdf_parser.h>
@@ -913,11 +914,85 @@ void DualArmController::publishAluminumRod()
         }
     }
 
+void DualArmController::runGripperSelftest()
+    {
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "\n----- [P3A-2A] 夹爪空载开合测试: 打开 -> 空载闭合 -> 打开"
+                    "（机械臂不动，不发布 weld、不 attach）-----");
+        const double open_pos = ctx_->gripper_open_position_;
+        const double close_pos = ctx_->gripper_close_pos_;
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2A] 命令单位为**单指位移**：打开 %.4f（服务器目标开口 %.4f m，"
+                    "即最大开口）/ 闭合 %.4f（目标开口 %.4f m）",
+                    open_pos, 2.0 * open_pos, close_pos, 2.0 * close_pos);
+
+        // The finger joints are prismatic with limits [0.0, 0.04] and their
+        // position IS the per-finger displacement, so they can be compared
+        // directly with command.position. The server's reported `position` is a
+        // separate internal width model and is recorded alongside, not instead.
+        auto logFingerJoints = [&](const char* label) {
+            const moveit::core::RobotStatePtr st = ctx_->dual_arm_->getCurrentState();
+            std::string vars;
+            for (const std::string& v : st->getVariableNames()) {
+                vars += " " + v;
+            }
+            const bool has_fingers = vars.find("finger_joint1") != std::string::npos;
+            if (!has_fingers) {
+                RCLCPP_WARN(ctx_->get_logger(),
+                            "  [P3A-2A] %s: 机器人模型中不含 finger_joint，无法读取实测指关节",
+                            label);
+                return;
+            }
+            st->update();
+            const double l = st->getVariablePosition("mj_left_finger_joint1");
+            const double r = st->getVariablePosition("mj_right_finger_joint1");
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P3A-2A] %s 实测指关节: 左=%.4f m 右=%.4f m（单指位移，"
+                        "关节范围 [0.0000, 0.0400]）⇒ 实测总开口 左=%.4f 右=%.4f m",
+                        label, l, r, 2.0 * l, 2.0 * r);
+        };
+
+        const char* step = "open";
+        bool ok = ctx_->grippers_->controlDualGrippers(open_pos);
+        logFingerJoints("open");
+        if (ok) {
+            step = "empty_close";
+            ok = ctx_->grippers_->controlDualGrippers(close_pos);
+            logFingerJoints("empty_close");
+        }
+        if (ok) {
+            step = "reopen";
+            ok = ctx_->grippers_->controlDualGrippers(open_pos);
+            logFingerJoints("reopen");
+        }
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "[GRIPPER_RESULT] state=%s failed_step=%s open_cmd=%.4f close_cmd=%.4f "
+                    "arm_motion=none weld=0 attach=0",
+                    ok ? "GRIPPER_TEST_DONE" : "FAILED", ok ? "-" : step, open_pos, close_pos);
+        if (ok) {
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  ✓ [P3A-2A] 空载开合完成。**空载成功不是抓取成功**；"
+                        "接触导致的停止语义留待下一阶段结合物体验证");
+            ctx_->setCurrentState(TaskState::GRIPPER_TEST_DONE);
+        } else {
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2A] 空载开合在步骤 '%s' 失败，停止本轮", step);
+            ctx_->setCurrentState(TaskState::ERROR);
+        }
+    }
+
 void DualArmController::executeInit()
     {
         RCLCPP_INFO(ctx_->get_logger(), "[状态: INIT] 初始化...");
 
         try {
+            // A1 P3a-2a: minimal explicit empty-load entry. It short-circuits
+            // INIT, so no arm trajectory, weld or attach can be reached.
+            if (ctx_->gripper_selftest_) {
+                runGripperSelftest();
+                return;
+            }
+
             // Mode B: wait for vision detection before proceeding
             if (ctx_->use_vision_) {
                 RCLCPP_INFO(ctx_->get_logger(), "  [视觉模式] 等待物体检测...");
@@ -1125,10 +1200,29 @@ bool DualArmController::prepareFromA1Truth()
                                 a1v::statusName(full.ik.status),
                                 a1v::statusName(full.collision.status),
                                 a1v::statusName(full.path_validation.status), p2_accept);
+                    if (path_ok && ctx_->pregrasp_execute_) {
+                        // P3a-1: only a real p2_acceptance=true reaches here, and
+                        // the SAME plan object P2b just verified is executed.
+                        RCLCPP_INFO(ctx_->get_logger(),
+                                    "  [P2] p2_acceptance=true ⇒ 允许执行本轮校验过的同一 Plan");
+                        std::string exec_detail;
+                        const bool arrived = executePregrasp(truth, exec_detail);
+                        RCLCPP_INFO(ctx_->get_logger(),
+                                    "[P3A_RESULT] state=%s detail=%s",
+                                    arrived ? "PREGRASP_REACHED" : "FAILED", exec_detail.c_str());
+                        if (arrived) {
+                            ctx_->setCurrentState(TaskState::PREGRASP_REACHED);
+                        } else {
+                            ctx_->setCurrentState(TaskState::ERROR);
+                        }
+                        return arrived;
+                    }
                     if (path_ok) {
                         RCLCPP_INFO(ctx_->get_logger(),
                                     "  [P2] p2_acceptance=true 的语义 = 通过本次静态与预抓取路径检查；"
-                                    "**不是**搬运 DONE，下降/闭合/抓持与完整搬运仍属 P3");
+                                    "**不是**搬运 DONE。pregrasp_execute 未启用，本轮不下发运动");
+                        RCLCPP_INFO(ctx_->get_logger(),
+                                    "[P3A_RESULT] state=NOT_RUN detail=pregrasp_execute is disabled");
                     } else {
                         RCLCPP_ERROR(ctx_->get_logger(),
                                      "  ✗ [P2B] 联合预抓取路径未通过：%s（%s）",
@@ -2471,6 +2565,9 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
     //    a hand-built interpolation would not be reported as a plan.
     // -----------------------------------------------------------------------
     auto dual = ctx_->dual_arm_;
+    // Conservative motion scaling for the plan that may be executed.
+    dual->setMaxVelocityScalingFactor(ctx_->pregrasp_vel_scale_);
+    dual->setMaxAccelerationScalingFactor(ctx_->pregrasp_acc_scale_);
     dual->setPlanningTime(ctx_->p2b_planning_time_sec_);
     dual->setNumPlanningAttempts(ctx_->p2b_planning_attempts_);
     dual->setPlannerId(ctx_->p2b_planner_id_);
@@ -2483,9 +2580,10 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
 
     RCLCPP_INFO(ctx_->get_logger(),
                 "  [P2B] 调用规划器: planner=%s, time=%.1fs, attempts=%d, 起点=当前实际状态, "
-                "终点=本次选定预抓取解",
+                "终点=本次选定预抓取解, 速度缩放=%.3f, 加速度缩放=%.3f",
                 ctx_->p2b_planner_id_.c_str(), ctx_->p2b_planning_time_sec_,
-                ctx_->p2b_planning_attempts_);
+                ctx_->p2b_planning_attempts_, ctx_->pregrasp_vel_scale_,
+                ctx_->pregrasp_acc_scale_);
 
     moveit::planning_interface::MoveGroupInterface::Plan plan;
     const auto plan_code = dual->plan(plan);
@@ -2530,6 +2628,52 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
                 return false;
             }
         }
+    }
+
+    // Both arms must be named exactly once each: a missing joint would leave part
+    // of the robot uncommanded and a duplicate or unknown name means the plan is
+    // not for this robot.
+    {
+        const moveit::core::JointModelGroup* dual_jmg =
+            model->getJointModelGroup(ctx_->dual_arm_group_);
+        if (dual_jmg == nullptr) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_NO_DUAL_GROUP";
+            out.path_validation.detail = "the dual-arm group is missing from the criterion model";
+            return false;
+        }
+        const a1v::JointNameCheck name_check =
+            a1v::validateJointNames(traj_names, dual_jmg->getVariableNames());
+        if (!name_check.ok) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = name_check.reason_code;
+            out.path_validation.detail = name_check.detail;
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", name_check.detail.c_str());
+            return false;
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2B] 关节名称核对: %zu 个，双臂唯一且完整（期望 %zu），无未知/重复",
+                    traj_names.size(), dual_jmg->getVariableNames().size());
+    }
+
+    // Timing must be legal even before execution is considered.
+    {
+        std::vector<double> times;
+        times.reserve(traj.points.size());
+        for (const auto& pt : traj.points) {
+            times.push_back(rclcpp::Duration(pt.time_from_start).seconds());
+        }
+        const a1v::TimeCheck tc = a1v::validateTimeFromStart(times);
+        if (!tc.ok) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = tc.reason_code;
+            out.path_validation.detail = tc.detail;
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P2B] %s", tc.detail.c_str());
+            return false;
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P2B] 时间戳核对: 首 %.6f s 末 %.6f s（严格递增、有限、非负）", tc.first_sec,
+                    tc.last_sec);
     }
 
     // Joint-limit check on every waypoint, in the criterion model.
@@ -2641,6 +2785,37 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
     // 4. Collision over every waypoint and every interpolated state, on the
     //    criterion model, with one fixed ACM set.
     // -----------------------------------------------------------------------
+    std::size_t checked_states = 0;
+    std::size_t subdivisions = 0;
+    ContactTally path_tally_total;
+    std::string worst_detail;
+
+    // Every waypoint is checked explicitly, including the LAST one. The segment
+    // interpolation below samples t in [0,1) of each segment and therefore never
+    // lands on the final trajectory point, so this pass is what covers it -- and
+    // it does so unconditionally, not via the negative-example switch.
+    ContactTally waypoint_tally;
+    for (std::size_t pi = 0; pi < traj.points.size(); ++pi) {
+        const moveit::core::RobotState st = stateOf(traj.points[pi].positions);
+        const ContactTally t = tallyContactsIn(scene, model, st, a1_verify_.base_acm, rod_id,
+                                               support_id);
+        ++checked_states;
+        if (t.total() > 0) {
+            waypoint_tally.rod += t.rod;
+            waypoint_tally.support += t.support;
+            waypoint_tally.dual_arm += t.dual_arm;
+            waypoint_tally.self += t.self;
+            waypoint_tally.world += t.world;
+            if (worst_detail.empty()) {
+                worst_detail = "waypoint " + std::to_string(pi) + " " + describeTally(t);
+            }
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P2B] 逐航点碰撞检查（含最后航点 %zu/%zu）: %zu 个航点，碰撞 %zu 处",
+                traj.points.size(), traj.points.size(), traj.points.size(),
+                waypoint_tally.total());
+
     const double step = ctx_->p2b_max_joint_step_rad_;
     if (!(step > 0.0)) {
         out.path_validation.status = a1v::CheckStatus::FAILED;
@@ -2650,10 +2825,6 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
     }
     constexpr std::size_t kMaxSubdivisions = 2000;
 
-    std::size_t checked_states = 0;
-    std::size_t subdivisions = 0;
-    ContactTally path_tally_total;
-    std::string worst_detail;
     for (std::size_t pi = 0; pi + 1 < traj.points.size(); ++pi) {
         const auto& a = traj.points[pi].positions;
         const auto& b = traj.points[pi + 1].positions;
@@ -2699,6 +2870,12 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
     RCLCPP_INFO(ctx_->get_logger(),
                 "  [P2B] 自碰撞口径: 沿用既有 SRDF/ACM 豁免，含同臂 hand↔link6(Never)/link7/link8"
                 " 等继承项；跨臂允许项已在验证副本中关闭。结果是在该规则下的结果");
+
+    path_tally_total.rod += waypoint_tally.rod;
+    path_tally_total.support += waypoint_tally.support;
+    path_tally_total.dual_arm += waypoint_tally.dual_arm;
+    path_tally_total.self += waypoint_tally.self;
+    path_tally_total.world += waypoint_tally.world;
 
     if (path_tally_total.total() > 0) {
         out.path_validation.status = a1v::CheckStatus::FAILED;
@@ -2835,12 +3012,431 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
                     "  ✓ [P2B][中段负例-注入] 端点无碰撞、中段被检出 ⇒ 路径内部确实被检查");
     }
 
+    a1_verify_.plan = plan;
+    a1_verify_.plan_valid = true;
     out.path_validation.status = a1v::CheckStatus::PASSED;
     out.path_validation.reason_code = "E_OK";
     out.path_validation.detail =
-        "planned path verified over " + std::to_string(checked_states) + " interpolated states";
+        "planned path verified over " + std::to_string(checked_states) + " states";
     RCLCPP_INFO(ctx_->get_logger(),
                 "  ✓ [P2B] 联合预抓取路径通过（仅规划，未执行）：%s", out.path_validation.detail.c_str());
+    return true;
+}
+
+/**
+ * A1 P3a-1: are the controllers in the state this round requires?
+ *
+ * dual_panda_arm_controller must be active (that is what receives the joint
+ * trajectory) and sim_multi_mode_controller must NOT be, since the two must
+ * never be active at once. No controller is switched here.
+ */
+bool DualArmController::checkControllerStatesEnabled(std::string& detail)
+{
+    using namespace std::chrono_literals;
+    auto client = ctx_->create_client<controller_manager_msgs::srv::ListControllers>(
+        "/controller_manager/list_controllers");
+    if (!client->wait_for_service(5s)) {
+        detail = "E_P3A_CM_UNAVAILABLE: /controller_manager/list_controllers is unavailable";
+        return false;
+    }
+    auto request = std::make_shared<controller_manager_msgs::srv::ListControllers::Request>();
+    auto future = client->async_send_request(request);
+    if (future.wait_for(5s) != std::future_status::ready) {
+        detail = "E_P3A_CM_TIMEOUT: the controller list did not arrive within 5 s";
+        return false;
+    }
+    const auto response = future.get();
+
+    std::string summary;
+    std::string arm_state;
+    std::string multi_state;
+    for (const auto& c : response->controller) {
+        summary += " [" + c.name + "=" + c.state + "]";
+        if (c.name == "dual_panda_arm_controller") {
+            arm_state = c.state;
+        }
+        if (c.name == "sim_multi_mode_controller") {
+            multi_state = c.state;
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "  [P3A-1] 控制器状态:%s", summary.c_str());
+
+    if (arm_state != "active") {
+        detail = "E_P3A_ARM_CONTROLLER_NOT_ACTIVE: dual_panda_arm_controller state is '" +
+                 (arm_state.empty() ? std::string("<absent>") : arm_state) + "'";
+        return false;
+    }
+    if (multi_state == "active") {
+        detail = "E_P3A_CONTROLLER_CONFLICT: sim_multi_mode_controller is active; the two "
+                 "controllers must not be active together";
+        return false;
+    }
+    return true;
+}
+
+bool DualArmController::executePregrasp(const a1t::TruthPayload& truth, std::string& detail)
+{
+    using namespace std::chrono_literals;
+    RCLCPP_INFO(ctx_->get_logger(),
+                "\n----- [P3A-1] 执行本轮校验过的联合预抓取轨迹（到位即停，不下降/不抓取）-----");
+
+    // ---- 0. Only a plan that P2b just verified may be executed. -------------
+    if (!a1_verify_.valid || !a1_verify_.plan_valid) {
+        detail = "E_P3A_NO_VERIFIED_PLAN: no plan from this round's P2b check is available";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    const auto& traj = a1_verify_.plan.trajectory_.joint_trajectory;
+    if (traj.points.empty() || traj.joint_names.empty()) {
+        detail = "E_P3A_EMPTY_PLAN: the verified plan carries no points";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-1] 执行对象 = 本轮 P2b 刚校验的同一 Plan（%zu 航点，%zu 关节）；"
+                "不重新规划、不读取旧 CSV、不经 executeApproach",
+                traj.points.size(), traj.joint_names.size());
+
+    // ---- 1. Controllers ----------------------------------------------------
+    if (!checkControllerStatesEnabled(detail)) {
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-1] dual_panda_arm_controller active 且 sim_multi_mode_controller 非 active；"
+                "本轮不做控制器切换");
+
+    // ---- 2. The robot must still be where the plan starts. -----------------
+    {
+        const moveit::core::RobotStatePtr cur = ctx_->dual_arm_->getCurrentState();
+        double worst = 0.0;
+        for (std::size_t i = 0; i < traj.joint_names.size(); ++i) {
+            worst = std::max(worst, std::fabs(cur->getVariablePosition(traj.joint_names[i]) -
+                                              traj.points.front().positions[i]));
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-1] 当前关节状态与计划首点最大差 %.6f rad（阈值 0.020）", worst);
+        if (worst > 0.02) {
+            detail = "E_P3A_START_MISMATCH: the robot is no longer at the plan's first point "
+                     "(max delta " + std::to_string(worst) + " rad)";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // ---- 3. The frozen object/scene must still apply. ----------------------
+    {
+        moveit::planning_interface::PlanningSceneInterface psi;
+        const auto objects = psi.getObjects(std::vector<std::string>{"aluminum_rod"});
+        const auto it = objects.find("aluminum_rod");
+        if (it == objects.end()) {
+            detail = "E_P3A_ROD_MISSING: aluminum_rod is no longer in the planning scene";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+            return false;
+        }
+        tf2::Transform object_tf;
+        tf2::Transform primitive_tf;
+        tf2::fromMsg(it->second.pose, object_tf);
+        tf2::fromMsg(it->second.primitive_poses[0], primitive_tf);
+        geometry_msgs::msg::Pose actual;
+        tf2::toMsg(object_tf * primitive_tf, actual);
+        const a1t::Vec3 apos{actual.position.x, actual.position.y, actual.position.z};
+        const a1t::Quat aquat{actual.orientation.x, actual.orientation.y, actual.orientation.z,
+                              actual.orientation.w};
+        const double dpos = std::sqrt(std::pow(apos.x - truth.position.x, 2) +
+                                      std::pow(apos.y - truth.position.y, 2) +
+                                      std::pow(apos.z - truth.position.z, 2));
+        const double dang = a1t::rotationDistanceRad(
+            a1t::Quat{truth.orientation.x, truth.orientation.y, truth.orientation.z,
+                      truth.orientation.w}, aquat);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-1] 冻结对象核对: 场景中的杆与本轮冻结真值差 %.4f mm / %.4f°",
+                    dpos * 1000.0, dang * 180.0 / M_PI);
+        if (dpos > 0.005 || dang > 5.0 * M_PI / 180.0) {
+            detail = "E_P3A_SCENE_CHANGED: the rod in the planning scene no longer matches the "
+                     "frozen truth, so the verified plan no longer applies";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // ---- 4a. Validate the derivative fields of the trajectory we are about to
+    //          dispatch. The 0.1 planning scaling is a configuration and does not
+    //          by itself prove the dispatched fields are valid.
+    {
+        const moveit::core::JointModelGroup* dual_jmg =
+            a1_verify_.model->getJointModelGroup(ctx_->dual_arm_group_);
+        std::vector<double> vel_limits;
+        std::vector<bool> vel_bounded;
+        std::vector<double> acc_limits;
+        std::vector<bool> acc_bounded;
+        for (const std::string& j : traj.joint_names) {
+            double vmax = 0.0;
+            double amax = 0.0;
+            bool vb = false;
+            bool ab = false;
+            // Limits are read from the LIVE model, which is the one that loaded
+            // robot_description_planning (joint_limits.yaml) and therefore
+            // carries the configured acceleration limits. The independent
+            // criterion model is built from URDF+SRDF only and has no
+            // acceleration bounds -- using it here would silently reduce this
+            // check to nothing. Joint limits are identical in both models; only
+            // the hand collision geometry differs. Nothing is invented: a joint
+            // with no declared limit is counted as unbounded, never as zero.
+            const moveit::core::JointModel* jm = ctx_->dual_arm_->getRobotModel()->getJointModel(j);
+            if (jm != nullptr) {
+                const moveit::core::VariableBounds& b = jm->getVariableBounds(j);
+                vmax = std::max(std::fabs(b.min_velocity_), std::fabs(b.max_velocity_));
+                vb = b.velocity_bounded_;
+                amax = std::max(std::fabs(b.min_acceleration_), std::fabs(b.max_acceleration_));
+                ab = b.acceleration_bounded_;
+            }
+            vel_limits.push_back(vmax);
+            vel_bounded.push_back(vb);
+            acc_limits.push_back(amax);
+            acc_bounded.push_back(ab);
+        }
+        (void)dual_jmg;
+
+        std::size_t vel_points = 0;
+        std::size_t acc_points = 0;
+        std::size_t vel_unbounded = 0;
+        std::size_t acc_unbounded = 0;
+        double vel_worst = 0.0;
+        double acc_worst = 0.0;
+        std::string vel_worst_joint;
+        std::string acc_worst_joint;
+        for (std::size_t pi = 0; pi < traj.points.size(); ++pi) {
+            const auto& pt = traj.points[pi];
+            if (!pt.velocities.empty()) {
+                ++vel_points;
+                const a1v::DerivativeCheck c =
+                    a1v::checkDerivativeField(pt.velocities, vel_limits, vel_bounded,
+                                              traj.joint_names);
+                if (!c.ok) {
+                    detail = "E_TRAJ_VELOCITY_INVALID at point " + std::to_string(pi) + ": " +
+                             c.reason_code + " (" + c.detail + ")";
+                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-1] %s", detail.c_str());
+                    return false;
+                }
+                vel_unbounded += c.unbounded;
+                if (c.worst_ratio > vel_worst) {
+                    vel_worst = c.worst_ratio;
+                    vel_worst_joint = c.worst_joint;
+                }
+            }
+            if (!pt.accelerations.empty()) {
+                ++acc_points;
+                const a1v::DerivativeCheck c =
+                    a1v::checkDerivativeField(pt.accelerations, acc_limits, acc_bounded,
+                                              traj.joint_names);
+                if (!c.ok) {
+                    detail = "E_TRAJ_ACCELERATION_INVALID at point " + std::to_string(pi) + ": " +
+                             c.reason_code + " (" + c.detail + ")";
+                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-1] %s", detail.c_str());
+                    return false;
+                }
+                acc_unbounded += c.unbounded;
+                if (c.worst_ratio > acc_worst) {
+                    acc_worst = c.worst_ratio;
+                    acc_worst_joint = c.worst_joint;
+                }
+            }
+        }
+
+        const std::size_t npts = traj.points.size();
+        if (vel_points != 0 && vel_points != npts) {
+            detail = "E_TRAJ_VELOCITY_INCONSISTENT: " + std::to_string(vel_points) + " of " +
+                     std::to_string(npts) + " points carry velocities";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-1] %s", detail.c_str());
+            return false;
+        }
+        if (acc_points != 0 && acc_points != npts) {
+            detail = "E_TRAJ_ACCELERATION_INCONSISTENT: " + std::to_string(acc_points) + " of " +
+                     std::to_string(npts) + " points carry accelerations";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-1] %s", detail.c_str());
+            return false;
+        }
+
+        if (vel_points == 0) {
+            RCLCPP_WARN(ctx_->get_logger(),
+                        "  [P3A-1] 下发轨迹**不含速度字段**，因此速度限制**未被校验**；"
+                        "不据此声称速度达标（不把缺失当零）");
+        } else {
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P3A-1] 速度字段校验（限制来源 live 模型）: %zu/%zu 点，最大占用比 %.4f"
+                        "（关节 %s），未声明限制的关节计数 %zu",
+                        vel_points, npts, vel_worst,
+                        vel_worst_joint.empty() ? "-" : vel_worst_joint.c_str(), vel_unbounded);
+        }
+        if (acc_points == 0) {
+            RCLCPP_WARN(ctx_->get_logger(),
+                        "  [P3A-1] 下发轨迹**不含加速度字段**，因此加速度限制**未被校验**；"
+                        "不据此声称加速度达标（不把缺失当零）");
+        } else {
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P3A-1] 加速度字段校验（限制来源 live 模型）: %zu/%zu 点，最大占用比 %.4f"
+                        "（关节 %s），未声明限制的关节计数 %zu",
+                        acc_points, npts, acc_worst,
+                        acc_worst_joint.empty() ? "-" : acc_worst_joint.c_str(), acc_unbounded);
+        }
+    }
+
+    // ---- 4b. Dispatch the verified plan with a bounded wait.
+    //
+    // The helper owns the worker and its result slot as shared state, so nothing
+    // on this stack is referenced and a worker that outlives the wait cannot
+    // touch freed memory. The MoveGroupInterface is likewise kept alive by a
+    // shared_ptr for the duration of the call. A MoveIt async action would be
+    // preferable, but MoveGroupInterface exposes no goal handle for the
+    // trajectory execution it starts internally.
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-1] 下发轨迹: 速度缩放 %.3f / 加速度缩放 %.3f；本轮不发送任何夹爪动作、"
+                "不开 weld、不 attach",
+                ctx_->pregrasp_vel_scale_, ctx_->pregrasp_acc_scale_);
+
+    std::shared_ptr<moveit::planning_interface::MoveGroupInterface> iface = ctx_->dual_arm_;
+    moveit::planning_interface::MoveGroupInterface::Plan dispatched = a1_verify_.plan;
+    const double planned_sec =
+        traj.points.empty() ? 0.0 : rclcpp::Duration(traj.points.back().time_from_start).seconds();
+
+    const a1v::BoundedExecOutcome exec = a1v::runBoundedExec(
+        [iface, dispatched]() mutable { return iface->execute(dispatched).val; },
+        [iface]() { iface->stop(); }, ctx_->pregrasp_exec_timeout_sec_, 4.0, 0.05);
+
+    if (exec.status == a1v::BoundedExecOutcome::Status::TIMEOUT) {
+        // This round terminates as a FAILURE. A late result is never read back
+        // into the verdict, so a late success cannot become PREGRASP_REACHED,
+        // and nothing is retried or continued.
+        RCLCPP_ERROR(ctx_->get_logger(),
+                     "  ✗ [P3A-1] E_P3A_EXEC_TIMEOUT: 执行在 %.1f s 内未结束（计划时长 %.3f s）",
+                     exec.elapsed_sec, planned_sec);
+        // A late result that had already ended needs no stop request; only a
+        // still-running worker gets one. Either way the status stays TIMEOUT and
+        // the late value is never read into the verdict.
+        RCLCPP_WARN(ctx_->get_logger(),
+                    "  [P3A-1] worker 实际完成时刻 %.4f s，预算 %.4f s ⇒ 判定为迟到；%s",
+                    exec.completed_at_sec >= 0.0 ? exec.completed_at_sec : -1.0, exec.timeout_sec,
+                    exec.stop_requested ? "已发出停止请求（**不声称**已保证物理停止）"
+                                        : "worker 已自行结束，未发出停止请求");
+        if (exec.worker_finished) {
+            RCLCPP_WARN(ctx_->get_logger(),
+                        "  [P3A-1] 迟到结果被丢弃，不参与判定；本轮以失败终止，不重试、不继续");
+        } else {
+            RCLCPP_WARN(ctx_->get_logger(),
+                        "  [P3A-1] worker 在停止宽限期内仍未结束（已 detach；其捕获均为共享状态，"
+                        "不会访问已销毁对象）");
+        }
+        detail = "E_P3A_EXEC_TIMEOUT: execution did not finish within " +
+                 std::to_string(ctx_->pregrasp_exec_timeout_sec_) + " s";
+        return false;
+    }
+
+    if (exec.status == a1v::BoundedExecOutcome::Status::EXCEPTION) {
+        detail = "E_P3A_EXEC_EXCEPTION: the execution call raised an exception";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-1] %s", detail.c_str());
+        return false;
+    }
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-1] 执行返回码 %d（MoveIt SUCCESS 枚举，非进程退出码），"
+                "用时 %.3f s（计划时长 %.3f s）",
+                exec.value, exec.elapsed_sec, planned_sec);
+    if (exec.value != moveit::core::MoveItErrorCode::SUCCESS) {
+        detail = "E_P3A_EXEC_FAILED: the controller reported error code " +
+                 std::to_string(exec.value);
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    if (exec.elapsed_sec > std::max(3.0 * planned_sec, 5.0)) {
+        detail = "E_P3A_EXEC_OVERRUN: execution took " + std::to_string(exec.elapsed_sec) +
+                 " s for a " + std::to_string(planned_sec) + " s plan";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+
+    // ---- 5. Arrival: fresh, settled state versus this round's target. ------
+    {
+        const auto w0 = std::chrono::steady_clock::now();
+        double settled_delta = 0.0;
+        std::size_t samples = 0;
+        moveit::core::RobotStatePtr prev = ctx_->dual_arm_->getCurrentState();
+        while (std::chrono::duration<double>(std::chrono::steady_clock::now() - w0).count() <
+               ctx_->pregrasp_stable_window_sec_) {
+            std::this_thread::sleep_for(50ms);
+            const moveit::core::RobotStatePtr now = ctx_->dual_arm_->getCurrentState();
+            double worst = 0.0;
+            for (const std::string& j : traj.joint_names) {
+                worst = std::max(worst, std::fabs(now->getVariablePosition(j) -
+                                                  prev->getVariablePosition(j)));
+            }
+            settled_delta = std::max(settled_delta, worst);
+            prev = now;
+            ++samples;
+        }
+        // The state is read live over a window; a settled reading cannot come
+        // from a stale cache.
+        const moveit::core::RobotStatePtr arrived = ctx_->dual_arm_->getCurrentState();
+        const a1v::ArmTarget got_left =
+            fromEigenPose(arrived->getGlobalLinkTransform(a1_verify_.left_eef));
+        const a1v::ArmTarget got_right =
+            fromEigenPose(arrived->getGlobalLinkTransform(a1_verify_.right_eef));
+        const a1v::PoseError el = a1v::poseError(a1_verify_.pregrasp_target.left, got_left);
+        const a1v::PoseError er = a1v::poseError(a1_verify_.pregrasp_target.right, got_right);
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-1] 到位实测（%zu 次采样，窗口 %.2f s，窗口内最大关节变化 %.6f rad）:",
+                    samples, ctx_->pregrasp_stable_window_sec_, settled_delta);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "     左臂 位置误差 %.4f mm，姿态误差 %.4f°  |  右臂 位置误差 %.4f mm，"
+                    "姿态误差 %.4f°",
+                    el.pos_m * 1000.0, el.angle_rad * 180.0 / M_PI, er.pos_m * 1000.0,
+                    er.angle_rad * 180.0 / M_PI);
+        RCLCPP_INFO(ctx_->get_logger(), "     到位容差: 位置 %.1f mm / 姿态 %.2f°",
+                    ctx_->pregrasp_arrival_pos_tol_m_ * 1000.0,
+                    ctx_->pregrasp_arrival_angle_tol_deg_);
+
+        if (settled_delta > ctx_->pregrasp_stable_tol_rad_) {
+            detail = "E_P3A_NOT_SETTLED: the joints were still moving at the end of the window "
+                     "(max change " + std::to_string(settled_delta) + " rad)";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+            return false;
+        }
+        const double ang_tol = ctx_->pregrasp_arrival_angle_tol_deg_ * M_PI / 180.0;
+        if (el.pos_m > ctx_->pregrasp_arrival_pos_tol_m_ ||
+            er.pos_m > ctx_->pregrasp_arrival_pos_tol_m_ || el.angle_rad > ang_tol ||
+            er.angle_rad > ang_tol) {
+            detail = "E_P3A_NOT_AT_TARGET: left " + std::to_string(el.pos_m * 1000.0) +
+                     " mm/" + std::to_string(el.angle_rad * 180.0 / M_PI) + " deg, right " +
+                     std::to_string(er.pos_m * 1000.0) + " mm/" +
+                     std::to_string(er.angle_rad * 180.0 / M_PI) + " deg";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+            return false;
+        }
+
+        // Observation only: the rod must not have been disturbed.
+        moveit::planning_interface::PlanningSceneInterface psi;
+        const auto objects = psi.getObjects(std::vector<std::string>{"aluminum_rod"});
+        const auto it = objects.find("aluminum_rod");
+        if (it != objects.end() && !it->second.primitive_poses.empty()) {
+            tf2::Transform object_tf;
+            tf2::Transform primitive_tf;
+            tf2::fromMsg(it->second.pose, object_tf);
+            tf2::fromMsg(it->second.primitive_poses[0], primitive_tf);
+            geometry_msgs::msg::Pose actual;
+            tf2::toMsg(object_tf * primitive_tf, actual);
+            const double d = std::sqrt(std::pow(actual.position.x - truth.position.x, 2) +
+                                       std::pow(actual.position.y - truth.position.y, 2) +
+                                       std::pow(actual.position.z - truth.position.z, 2));
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P3A-1] 观察（非判据）: 执行后**规划场景中**的杆对象相对冻结真值偏移 "
+                        "%.4f mm —— 来源是 /get_planning_scene + PlanningSceneInterface，"
+                        "**不是** MuJoCo 物理真值；物理扰动本轮未测。预抓取到位不代表抓取成功",
+                        d * 1000.0);
+        }
+    }
+
+    detail = "PREGRASP_REACHED";
     return true;
 }
 

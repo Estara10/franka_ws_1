@@ -1,0 +1,7 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p3a2a_gripper_selftest_d",
+  "mode": "gripper_selftest",
+  "result_line": "[GRIPPER_RESULT] state=GRIPPER_TEST_DONE failed_step=- open_cmd=0.0400 close_cmd=0.0100 arm_motion=none weld=0 attach=0",
+  "reached": true
+}

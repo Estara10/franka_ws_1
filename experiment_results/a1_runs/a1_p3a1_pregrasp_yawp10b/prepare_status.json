@@ -1,0 +1,21 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p3a1_pregrasp_yawp10b",
+  "mode": "prepare",
+  "task_state": "PREGRASP_REACHED",
+  "truth_topic": "/a1_rod_pose_truth",
+  "expected_run_id": "a1_p3a1_pregrasp_yawp10b",
+  "ros_domain_id": "77",
+  "truth_published": true,
+  "manifest_present": true,
+  "p2a_check_enabled": true,
+  "p2a_result_line": "[P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null",
+  "p2a_static_passed": true,
+  "p2b_check_enabled": true,
+  "p2b_result_line": "[P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=passed p2_acceptance=true",
+  "p2_acceptance": true,
+  "pregrasp_execute_enabled": true,
+  "p3a_result_line": "[P3A_RESULT] state=PREGRASP_REACHED detail=PREGRASP_REACHED",
+  "pregrasp_reached": true,
+  "task_log": "task_launch.log"
+}

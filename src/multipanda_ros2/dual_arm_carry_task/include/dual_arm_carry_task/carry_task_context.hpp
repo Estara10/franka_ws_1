@@ -48,6 +48,8 @@ enum class TaskState {
     PLACE,       // 放置物体（GRASP逆操作）
     RETREAT,     // 撤退至初始位置
     PREPARED,    // A1 P1b: 真值已冻结且规划场景已同步确认；仅准备完成
+    PREGRASP_REACHED,  // A1 P3a-1: 已执行本轮校验过的预抓取轨迹并实测到位；不是搬运 DONE
+    GRIPPER_TEST_DONE, // A1 P3a-2a: 空载开合测试结束；机械臂未动，不是搬运 DONE
     DONE,
     ERROR
 };
@@ -151,6 +153,36 @@ public:
     // collision checking. Recorded, not claimed as a continuous guarantee.
     double p2b_max_joint_step_rad_ {0.05};
     bool p2b_midpath_negative_ {true};
+
+    // A1 P3a-1: execute the SAME joint pre-grasp plan that P2b just verified, in
+    // this same simulation instance, then stop. Default off. It never enters the
+    // legacy FSM, never descends and never touches the gripper/weld.
+    bool pregrasp_execute_ {false};
+    double pregrasp_vel_scale_ {0.1};
+    double pregrasp_acc_scale_ {0.1};
+    double pregrasp_arrival_pos_tol_m_ {0.005};
+    double pregrasp_arrival_angle_tol_deg_ {2.0};
+    double pregrasp_stable_window_sec_ {0.3};
+    double pregrasp_stable_tol_rad_ {0.002};
+    double pregrasp_exec_timeout_sec_ {90.0};
+
+    // A1 P3a-2a: gripper action interface bounds. The stage budgets are
+    // per-stage and are additionally clamped by the single total budget, so two
+    // serial stage timeouts are never presented as one total timeout.
+    double gripper_total_timeout_sec_ {20.0};
+    double gripper_server_timeout_sec_ {10.0};
+    double gripper_goal_timeout_sec_ {5.0};
+    double gripper_result_timeout_sec_ {8.0};
+    double gripper_max_effort_ {100.0};
+    // command.position is a per-finger displacement; below this the call counts
+    // as a closing move for result interpretation.
+    double gripper_close_threshold_ {0.03};
+    // A1 P3a-2a: minimal explicit empty-load cycle entry (open -> close -> open).
+    bool gripper_selftest_ {false};
+    // Open command for the empty-load cycle (per-finger). The closing command
+    // reuses the pre-existing `gripper_close_position` / gripper_close_pos_ so
+    // the selftest and the task cannot drift apart.
+    double gripper_open_position_ {0.04};
     // Grasp offset along the rod's long axis; A0 uses 0.15.
     double p2a_grasp_offset_m_ {0.15};
     // Yaw term of A0's setRPY(pi, 0, pi/4).

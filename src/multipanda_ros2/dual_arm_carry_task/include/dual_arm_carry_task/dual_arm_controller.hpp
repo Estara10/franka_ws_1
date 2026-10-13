@@ -25,6 +25,9 @@ struct A1VerifyContext {
     // The chosen pre-grasp solution by joint name, so the planning goal can be
     // rebuilt in whichever model is being used.
     std::map<std::string, double> pregrasp_joints;
+    // The exact plan P2b verified. Executed verbatim -- never re-planned.
+    moveit::planning_interface::MoveGroupInterface::Plan plan;
+    bool plan_valid {false};
 };
 
 class DualArmController {
@@ -38,6 +41,9 @@ public:
     void allow_gripper_collision(bool allow);
     void publishAluminumRod();
     void executeInit();
+    // A1 P3a-2a: minimal explicit empty-load gripper cycle. The arms are never
+    // commanded; this only exercises the gripper action interface.
+    void runGripperSelftest();
     // A1 P1b (no motion): freeze the truth reference, sync the planning scene.
     bool prepareFromA1Truth();
     bool syncAluminumRodFromTruth(const geometry_msgs::msg::Pose& pose,
@@ -58,6 +64,10 @@ public:
     // A1 P2b (no execution): plan the joint pre-grasp path and re-verify every
     // waypoint and interpolated state on the P2a criterion model.
     bool runP2bPathCheck(a1v::SampleValidation& out);
+    // A1 P3a-1: execute the SAME plan P2b verified, in this simulation instance,
+    // then stop. Never re-plans, never descends, never touches gripper/weld.
+    bool executePregrasp(const a1t::TruthPayload& truth, std::string& detail);
+    bool checkControllerStatesEnabled(std::string& detail);
     void executeApproach();
     void executeGrasp();
     bool attachObject();

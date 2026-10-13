@@ -27,6 +27,7 @@
   <depend>multi_mode_control_msgs</depend>
   <!-- A1 P1a: /set_body_state, /get_body_state, /get_sim_info services. -->
   <depend>mujoco_ros_msgs</depend>
+  <depend>controller_manager_msgs</depend>
   <!-- A1 P1b: rod pose truth message (run identity + settled pose). -->
   <depend>dual_arm_a1_msgs</depend>
 
