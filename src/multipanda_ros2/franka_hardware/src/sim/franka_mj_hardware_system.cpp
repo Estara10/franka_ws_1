@@ -135,10 +135,30 @@ bool FrankaMjHardwareSystem::initSim(
         // Start the gripper node if true
         if(arm.robot_->has_gripper_){
             RCLCPP_INFO_STREAM(getLogger(), "Gripper found for " << arm.robot_name_ << ". Creating a gripper server.");
-            gripper_states_ptrs_.insert(std::make_pair(arm.robot_name_, std::make_shared<std::array<double,3>>()));
+            gripper_states_ptrs_.insert(std::make_pair(arm.robot_name_, std::make_shared<franka_gripper::GripperSharedState>()));
             gripper_nodes_.insert(std::make_pair(arm.robot_name_, std::make_shared<franka_gripper::GripperSimActionServer>(rclcpp::NodeOptions(), arm.robot_name_)));
             gripper_nodes_[arm.robot_name_]->initGripperPtrs(gripper_states_ptrs_[arm.robot_name_]);
             executor_->add_node(gripper_nodes_[arm.robot_name_]);
+            GripperContactBodyIds contact_ids;
+            contact_ids.left_finger = mj_name2id(m_, mjOBJ_BODY,
+                (arm.robot_name_ + "_left_finger").c_str());
+            contact_ids.right_finger = mj_name2id(m_, mjOBJ_BODY,
+                (arm.robot_name_ + "_right_finger").c_str());
+            contact_ids.rod = mj_name2id(m_, mjOBJ_BODY, "obj_rod_01");
+            gripper_contact_body_ids_[arm.robot_name_] = contact_ids;
+            RCLCPP_INFO(getLogger(),
+                "Gripper contact bodies %s: left=%d right=%d rod(obj_rod_01)=%d",
+                arm.robot_name_.c_str(), contact_ids.left_finger,
+                contact_ids.right_finger, contact_ids.rod);
+            for (int geom = 0; geom < m_->ngeom; ++geom) {
+              const int body = m_->geom_bodyid[geom];
+              if (body == contact_ids.left_finger || body == contact_ids.right_finger ||
+                  body == contact_ids.rod) {
+                const char* geom_name = mj_id2name(m_, mjOBJ_GEOM, geom);
+                RCLCPP_INFO(getLogger(), "  contact geom id=%d name=%s body_id=%d",
+                    geom, geom_name ? geom_name : "<unnamed>", body);
+              }
+            }
         }
         // Initialize with all the actuators set to "off"
         for(size_t i=0; i<kNumberOfJoints; i++){
@@ -191,6 +211,8 @@ bool FrankaMjHardwareSystem::initSim(
             [this](const std_msgs::msg::Bool::SharedPtr msg) {
                 weld_active_desired_.store(msg->data);
             });
+        weld_state_pub_ = weld_node_->create_publisher<std_msgs::msg::Bool>(
+            "/grasp_weld_state", rclcpp::QoS(10));
         adaptive_pub_ = weld_node_->create_publisher<std_msgs::msg::Float64MultiArray>("/adaptive_impedance_params", 10);
         executor_->add_node(weld_node_);
         
@@ -275,14 +297,24 @@ CallbackReturn FrankaMjHardwareSystem::on_activate(
     
     // Initialize gripper states from current MuJoCo position
     if(arm.robot_->has_gripper_){
-      double current_finger_pos = d_->qpos[arm.robot_->gripper_joint_qpos_indices_[0]];
-      double current_gripper_width = current_finger_pos * 2.0; // symmetric gripper
-      // at(0) = control value (0-255), at(1) = current position (meters)
-      gripper_states_ptrs_[arm.robot_name_]->at(0) = current_gripper_width / 0.0003137;
-      gripper_states_ptrs_[arm.robot_name_]->at(1) = current_finger_pos;
-      RCLCPP_INFO(getLogger(), "Initialized %s gripper: finger_pos=%.4f, width=%.4f, ctrl=%.1f", 
-                  arm.robot_name_.c_str(), current_finger_pos, current_gripper_width, 
-                  gripper_states_ptrs_[arm.robot_name_]->at(0));
+      const auto& gs = gripper_states_ptrs_[arm.robot_name_];
+      const double q1 = d_->qpos[arm.robot_->gripper_joint_qpos_indices_[0]];
+      const double q2 = d_->qpos[arm.robot_->gripper_joint_qpos_indices_[1]];
+      // The command is the PER-FINGER displacement in metres -- the same unit
+      // the position tendon actuator takes -- not the old 0-255 value.
+      // Initialising with the measured position holds the gripper where it
+      // already is instead of jumping. The un-sanitised q1/q2 are published as
+      // the first real feedback so the action server has valid data before its
+      // first control cycle.
+      double init_cmd = q1;
+      if(!std::isfinite(init_cmd)){ init_cmd = 0.0; }
+      init_cmd = std::min(std::max(0.0, init_cmd), 0.04);
+      franka_gripper::writeCommand(gs, init_cmd);
+      franka_gripper::publishFeedback(gs, q1, q2);
+      const franka_gripper::GripperFeedback fb = franka_gripper::readFeedback(gs);
+      RCLCPP_INFO(getLogger(), "Initialized %s gripper: q1=%.4f q2=%.4f gap=%.4f cmd=%.4f m (seq %llu)",
+                  arm.robot_name_.c_str(), fb.finger_q1, fb.finger_q2, fb.totalGap(),
+                  fb.command_per_finger, fb.feedback_seq);
     }
   }
   RCLCPP_INFO(getLogger(), "Started");
@@ -314,7 +346,31 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
     arm.hw_velocities_ = arm.hw_franka_robot_state_.dq;
     arm.hw_efforts_ = arm.hw_franka_robot_state_.tau_J;
     if(arm.robot_->has_gripper_){
-      gripper_states_ptrs_[arm.robot_name_]->at(1) = d_->qpos[arm.robot_->gripper_joint_qpos_indices_[0]];
+      // The ONLY writer of the finger feedback, and it publishes both fingers
+      // under the shared lock so a reader can never see q1 from one cycle and
+      // q2 from another.
+      const auto ids_it = gripper_contact_body_ids_.find(arm.robot_name_);
+      const GripperContactBodyIds ids = ids_it == gripper_contact_body_ids_.end()
+          ? GripperContactBodyIds{} : ids_it->second;
+      bool left_contact = false;
+      bool right_contact = false;
+      if (ids.rod >= 0 && ids.left_finger >= 0 && ids.right_finger >= 0) {
+        for (int i = 0; i < d_->ncon; ++i) {
+          const mjContact& contact = d_->contact[i];
+          const int body1 = m_->geom_bodyid[contact.geom1];
+          const int body2 = m_->geom_bodyid[contact.geom2];
+          if (body1 == ids.rod || body2 == ids.rod) {
+            const int other = body1 == ids.rod ? body2 : body1;
+            left_contact = left_contact || other == ids.left_finger;
+            right_contact = right_contact || other == ids.right_finger;
+          }
+        }
+      }
+      franka_gripper::publishFeedback(
+          gripper_states_ptrs_[arm.robot_name_],
+          d_->qpos[arm.robot_->gripper_joint_qpos_indices_[0]],
+          d_->qpos[arm.robot_->gripper_joint_qpos_indices_[1]],
+          left_contact, right_contact);
     }
   }
 //   for(auto& obj_pair: mj_objs_){
@@ -487,7 +543,14 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
         break;
     }
     if(arm.robot_->has_gripper_){
-      d_->ctrl[arm.robot_->gripper_act_idx_] = gripper_states_ptrs_[arm.robot_name_]->at(0);
+      // The physics thread is the only writer of MuJoCo ctrl. The target comes
+      // from the action server through the shared handoff; a non-finite target
+      // is never written into the simulation.
+      const franka_gripper::GripperFeedback fb =
+          franka_gripper::readFeedback(gripper_states_ptrs_[arm.robot_name_]);
+      if(std::isfinite(fb.command_per_finger)){
+        d_->ctrl[arm.robot_->gripper_act_idx_] = fb.command_per_finger;
+      }
     }
   }
 
@@ -495,6 +558,15 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
   if (weld_eq_id_ >= 0) {
     bool desired = weld_active_desired_.load();
     if (desired && !weld_currently_active_) {
+      if (weld_right_eq_id_ < 0 || weld_eq_id_ < 0) {
+        RCLCPP_ERROR(getLogger(), "Dual grasp weld activation rejected: both equality constraints are required");
+        if (weld_state_pub_) {
+          std_msgs::msg::Bool state;
+          state.data = false;
+          weld_state_pub_->publish(state);
+        }
+        return hardware_interface::return_type::OK;
+      }
       // Activate left-hand weld
       updateWeldRelpose();
       d_->eq_active[weld_eq_id_] = 1;
@@ -503,9 +575,15 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
         updateWeldRelposeRight();
         d_->eq_active[weld_right_eq_id_] = 1;
       }
-      weld_currently_active_ = true;
-      RCLCPP_INFO(getLogger(), "Grasp weld ACTIVATED (left%s)",
-                  weld_right_eq_id_ >= 0 ? " + right)" : " only)");
+      weld_currently_active_ = weld_right_eq_id_ >= 0 &&
+          d_->eq_active[weld_eq_id_] != 0 && d_->eq_active[weld_right_eq_id_] != 0;
+      RCLCPP_INFO(getLogger(), "Grasp weld %s (left + right; physical thread)",
+                  weld_currently_active_ ? "ACTIVATED" : "REJECTED: dual equality unavailable");
+      if (weld_state_pub_) {
+        std_msgs::msg::Bool state;
+        state.data = weld_currently_active_;
+        weld_state_pub_->publish(state);
+      }
     } else if (!desired && weld_currently_active_) {
       d_->eq_active[weld_eq_id_] = 0;
       if (weld_right_eq_id_ >= 0) {
@@ -514,6 +592,11 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
       weld_currently_active_ = false;
       RCLCPP_INFO(getLogger(), "Grasp weld DEACTIVATED (left%s)",
                   weld_right_eq_id_ >= 0 ? " + right)" : " only)");
+      if (weld_state_pub_) {
+        std_msgs::msg::Bool state;
+        state.data = false;
+        weld_state_pub_->publish(state);
+      }
     }
   }
 

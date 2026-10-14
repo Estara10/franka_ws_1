@@ -1,0 +1,10 @@
+[INFO] [launch]: All log files can be found below /tmp/a1_p3a2c_parameter_smoke_home/log/2026-10-14-12-36-50-805055-Estara-155964
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [156051]
+[dual_arm_carry_task_node-1] [INFO] [1791952616.137656035] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791952616.138561268] [dual_arm_carry_task]: [P3A2C_CONFIG] grasp_contact_close=true (parameter default=false), grasp_descent=false
+[dual_arm_carry_task_node-1] [INFO] [1791952616.139391203] [dual_arm_carry_task]: A1 truth mode enabled: subscribing to /a1_rod_pose_truth (expected_run_id=p3a2c-smoke-true)
+[dual_arm_carry_task_node-1] [INFO] [1791952616.140041138] [dual_arm_carry_task]: A1 到位新鲜度: 订阅 /joint_states（序号 + 到达时刻；重复旧样本不计数）
+[dual_arm_carry_task_node-1] [ERROR] [1791952616.140194234] [dual_arm_carry_task]:   ✗ grasp_contact_close=true 需要 grasp_descent=true；闭合入口必须以本轮 GRASP_POSE_REACHED 为前置条件
+[dual_arm_carry_task_node-1] [ERROR] [1791952616.140226657] [dual_arm_carry_task]:   ✗ 参数组合无效（构造期已拒绝，原因见上方 ERROR），未初始化控制器，非零退出
+[ERROR] [dual_arm_carry_task_node-1]: process has died [pid 156051, exit code 1, cmd '/home/lidio/franka_ws_1/install/dual_arm_carry_task/lib/dual_arm_carry_task/dual_arm_carry_task_node --ros-args -r __node:=dual_arm_carry_task --params-file /tmp/launch_params__5z7woyi --params-file /tmp/launch_params_vl1cyuwx --params-file /tmp/launch_params__l7syxs_ --params-file /tmp/launch_params_btt8yecj --params-file /tmp/launch_params_mjawrvvy'].

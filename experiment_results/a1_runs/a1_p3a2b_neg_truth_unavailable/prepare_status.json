@@ -1,0 +1,23 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p3a2b_neg_truth_unavailable",
+  "mode": "prepare",
+  "task_state": "ERROR",
+  "truth_topic": "/a1_rod_pose_truth",
+  "expected_run_id": "a1_p3a2b_neg_truth_unavailable",
+  "ros_domain_id": "77",
+  "truth_published": true,
+  "manifest_present": true,
+  "p2a_check_enabled": true,
+  "p2a_result_line": "[P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null",
+  "p2a_static_passed": true,
+  "p2b_check_enabled": true,
+  "p2b_result_line": "[P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=passed p2_acceptance=true",
+  "p2_acceptance": true,
+  "grasp_descent_enabled": true,
+  "p3a2b_result_line": "[P3A2B_RESULT] state=FAILED detail=E_2B_TRUTH_UNAVAILABLE: the physical rod could not be measured before the descent (the MuJoCo truth service is unavailable; the physical rod was NOT measured); refusing to descend",
+  "pregrasp_execute_enabled": true,
+  "p3a_result_line": "[P3A_RESULT] state=PREGRASP_REACHED detail=PREGRASP_REACHED",
+  "pregrasp_reached": true,
+  "task_log": "task_launch.log"
+}

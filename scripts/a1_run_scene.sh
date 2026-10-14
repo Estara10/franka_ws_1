@@ -62,10 +62,19 @@ P2A_CHECK=0
 P2B_CHECK=0
 # A1 P3a-1: execute the verified pre-grasp plan, then stop. Implies --p2b-check.
 PREGRASP_EXECUTE=0
+GRASP_DESCENT=0
+GRASP_CONTACT_CLOSE=0
+GRASP_MODEL="none"
+DESCENT_NEGATIVE_FINAL=""
+DESCENT_NEGATIVE_TRUTH=""
 # A1 P3a-2a: gripper interface check -- one empty-load open/close/open cycle.
 GRIPPER_SELFTEST=0
 P2A_WORKSPACE=""
 P2A_WORKSPACE_SOURCE=""
+TASK_TARGET_X=""
+TASK_TARGET_Y=""
+TASK_TARGET_YAW_DEG=""
+TASK_TARGET_FIELDS=0
 
 usage() {
   cat <<'EOF'
@@ -100,6 +109,25 @@ usage: a1_run_scene.sh [options]
   --gripper-selftest    A1 P3a-2a: start one simulator and run a single dual-gripper
                         open -> empty close -> open cycle at the arm's default start
                         pose. The arms are not commanded; no weld/attach.
+  --descent-negative-final M   A1 P3a-2b verification only: position | collision.
+                        Deliberately damages the FINAL trajectory so the rejection
+                        path can be shown to fire. Nothing is executed.
+  --descent-negative-truth M   A1 P3a-2b verification only: unavailable | offset.
+                        Makes the pre-descent rod truth unavailable or shifted so
+                        the refusal path can be shown to fire. Nothing is executed.
+  --grasp-descent       A1 P3a-2b: after the pre-grasp is reached, open both
+                        grippers and descend along world Z to the grasp pose,
+                        then stop. Implies --pregrasp-execute. The gripper stays
+                        OPEN: nothing is closed, welded, attached, lifted or
+                        carried. Exit code follows the P3A2B result.
+  --grasp-contact-close A1 P3a-2c: after GRASP_POSE_REACHED, close progressively and
+                        require fresh bilateral finger-to-rod contact; no weld/attach/lift/carry.
+  --grasp-model ideal_weld
+                        S1: explicit ideal rigid grasp, after A1 verified descent complete
+                        lift/transport/rotate/place/release/retreat; friction grip is not validated.
+  --target-x M --target-y M --target-yaw-deg DEG
+                        Optional explicit task target forwarded to the task launch;
+                        omitted values retain the launch defaults.
   --pregrasp-execute    A1 P3a-1: also EXECUTE the same plan P2b just verified and
                         stop on arrival (no descent, no grasp, no carry). Implies
                         --p2b-check. Exit code follows the P3A result.
@@ -134,6 +162,14 @@ while [[ $# -gt 0 ]]; do
     --p2a-check)       P2A_CHECK=1; shift ;;
     --p2b-check)       P2B_CHECK=1; P2A_CHECK=1; shift ;;
     --pregrasp-execute) PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1; shift ;;
+    --grasp-descent)    GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1; shift ;;
+    --grasp-contact-close) GRASP_CONTACT_CLOSE=1; GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1; shift ;;
+    --grasp-model) GRASP_MODEL="$2"; shift 2 ;;
+    --target-x) TASK_TARGET_X="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
+    --target-y) TASK_TARGET_Y="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
+    --target-yaw-deg) TASK_TARGET_YAW_DEG="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
+    --descent-negative-final) DESCENT_NEGATIVE_FINAL="$2"; shift 2 ;;
+    --descent-negative-truth) DESCENT_NEGATIVE_TRUTH="$2"; shift 2 ;;
     --gripper-selftest) GRIPPER_SELFTEST=1; shift ;;
     --p2a-workspace)   P2A_WORKSPACE="$2 $3 $4 $5"; shift 5 ;;
     --p2a-workspace-source) P2A_WORKSPACE_SOURCE="$2"; shift 2 ;;
@@ -149,6 +185,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${GRASP_MODEL}" != "none" && "${GRASP_MODEL}" != "ideal_weld" ]]; then
+  echo "error: --grasp-model must be none or ideal_weld" >&2; exit 3
+fi
+if [[ "${GRASP_MODEL}" == "ideal_weld" ]]; then
+  GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1
+  if [[ "${GRASP_CONTACT_CLOSE}" -eq 1 || "${GRIPPER_SELFTEST}" -eq 1 ]]; then
+    echo "error: ideal_weld is exclusive with contact-close and gripper selftest" >&2; exit 3
+  fi
+fi
+
 if ! [[ "${CANDIDATE_INDEX}" =~ ^[0-9]+$ ]]; then
   echo "error: --candidate-index must be a non-negative integer" >&2
   exit 3
@@ -159,6 +205,10 @@ if [[ -n "${SEED}" ]] && ! [[ "${SEED}" =~ ^[0-9]+$ ]]; then
 fi
 if [[ "${EXPLICIT_FIELDS}" -ne 0 && "${EXPLICIT_FIELDS}" -ne 3 ]]; then
   echo "error: --x, --y and --yaw-deg must be supplied together" >&2
+  exit 3
+fi
+if [[ "${TASK_TARGET_FIELDS}" -ne 0 && "${TASK_TARGET_FIELDS}" -ne 3 ]]; then
+  echo "error: --target-x, --target-y and --target-yaw-deg must be supplied together" >&2
   exit 3
 fi
 
@@ -273,7 +323,11 @@ record_prepare_status() {
     printf '  "p2b_check_enabled": %s,\n' "$([[ "${P2B_CHECK}" -eq 1 ]] && echo true || echo false)"
     printf '  "p2b_result_line": "%s",\n' "$(grep -m1 '\[P2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P2B_RESULT\]/[P2B_RESULT]/' | tr -d '"\\')"
     printf '  "p2_acceptance": %s,\n' "$(p2_acceptance_true && echo true || echo false)"
-    printf '  "pregrasp_execute_enabled": %s,\n' "$([[ "${PREGRASP_EXECUTE}" -eq 1 ]] && echo true || echo false)"
+    printf '  "grasp_descent_enabled": %s,\n' "$([[ "${GRASP_DESCENT}" -eq 1 ]] && echo true || echo false)"
+    printf '  "grasp_contact_close_enabled": %s,\n' "$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)"
+printf '  "p3a2b_result_line": "%s",\n' "$(grep -m1 '\[P3A2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P3A2B_RESULT\]/[P3A2B_RESULT]/' | tr -d '"\\')"
+    printf '  "p3a2c_result_line": "%s",\n' "$(grep -m1 '\[P3A2C_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P3A2C_RESULT\]/[P3A2C_RESULT]/' | tr -d '"\\')"
+printf '  "pregrasp_execute_enabled": %s,\n' "$([[ "${PREGRASP_EXECUTE}" -eq 1 ]] && echo true || echo false)"
     printf '  "p3a_result_line": "%s",\n' "$(grep -m1 '\[P3A_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P3A_RESULT\]/[P3A_RESULT]/' | tr -d '"\\')"
     printf '  "pregrasp_reached": %s,\n' "$(pregrasp_reached && echo true || echo false)"
     printf '  "task_log": "task_launch.log"\n'
@@ -290,6 +344,18 @@ pregrasp_reached() {
   line="$(grep -m1 '\[P3A_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null || true)"
   [[ -n "${line}" ]] || return 1
   [[ "${line}" == *"state=PREGRASP_REACHED"* ]]
+}
+
+grasp_pose_reached() {
+  local line
+  line="$(grep -m1 '\[P3A2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null || true)"
+  [[ "${line}" == *"state=GRASP_POSE_REACHED"* ]]
+}
+
+grasp_contact_confirmed() {
+  local line
+  line="$(grep -m1 '\[P3A2C_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null || true)"
+  [[ "${line}" == *"state=GRASP_CONTACT_CONFIRMED"* ]]
 }
 
 p2_acceptance_true() {
@@ -383,6 +449,11 @@ echo "   ROS_DOMAIN_ID     : ${ROS_DOMAIN_ID}"
 echo "   ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY}"
 echo "   params            : ${PARAMS_FILE}"
 echo "   output dir        : ${RUN_DIR}"
+if [[ "${TASK_TARGET_FIELDS}" -eq 3 ]]; then
+  echo "   task target       : x=${TASK_TARGET_X} y=${TASK_TARGET_Y} world_yaw_deg=${TASK_TARGET_YAW_DEG}"
+else
+  echo "   task target       : launch defaults"
+fi
 echo "=============================================================="
 
 NODE_ARGS=(
@@ -434,6 +505,14 @@ fi
 
 # --- Start exactly one simulation instance ----------------------------------
 SIM_LOG="${RUN_DIR}/sim_dual_moveit.log"
+# A1 P3a-2a only: have each simulated gripper node append a plain CSV of its own
+# real finger feedback (q1, q2, total gap, sequence number, command, target).
+# Off for every other mode, and read by the gripper nodes at construction, so it
+# must be exported before the simulation launch below.
+if [[ "${GRIPPER_SELFTEST}" -eq 1 || "${GRASP_CONTACT_CLOSE}" -eq 1 ]]; then
+  export GRIPPER_TRACE_CSV="${RUN_DIR}/gripper_fingers"
+  echo "[gripper] raw finger command/feedback trace enabled: ${GRIPPER_TRACE_CSV}_<robot>.csv"
+fi
 echo "[sim] starting one simulation instance (MoveIt launch includes MuJoCo)"
 setsid ros2 launch franka_moveit_config sim_dual_moveit.launch.py \
   "use_rviz:=${USE_RVIZ}" "headless:=${HEADLESS}" \
@@ -548,7 +627,7 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
   RUNNER_ARGS=("${NODE_ARGS[@]}" --publish-truth --truth-topic "${TRUTH_TOPIC}" --hold-sec "${HOLD_SEC}")
   setsid ros2 run dual_arm_carry_task a1_scene_runner_node \
     "${RUNNER_ARGS[@]}" \
-    --ros-args --params-file "${PARAMS_FILE}" \
+    --ros-args --params-file "${PARAMS_FILE}" -p service_call_timeout_sec:=5.0 \
     > "${RUN_DIR}/runner.log" 2>&1 &
   RUNNER_PID=$!
   sleep 1
@@ -580,7 +659,22 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     # The task must not move: rod_pose_source=a1_truth with prepare_only=true.
     P2A_ARGS=(p2a_check:="$([[ "${P2A_CHECK}" -eq 1 ]] && echo true || echo false)"
               p2b_check:="$([[ "${P2B_CHECK}" -eq 1 ]] && echo true || echo false)"
-              pregrasp_execute:="$([[ "${PREGRASP_EXECUTE}" -eq 1 ]] && echo true || echo false)")
+              pregrasp_execute:="$([[ "${PREGRASP_EXECUTE}" -eq 1 ]] && echo true || echo false)"
+              grasp_descent:="$([[ "${GRASP_DESCENT}" -eq 1 ]] && echo true || echo false)")
+    P2A_ARGS+=(grasp_contact_close:="$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)")
+    P2A_ARGS+=(grasp_model:="${GRASP_MODEL}")
+    if [[ "${TASK_TARGET_FIELDS}" -eq 3 ]]; then
+      P2A_ARGS+=(rod_target_x:="${TASK_TARGET_X}" rod_target_y:="${TASK_TARGET_Y}"
+                 rod_target_yaw_deg:="${TASK_TARGET_YAW_DEG}")
+    fi
+    # Verification-only injections. ros2 launch rejects an empty value
+    # ("name:="), so these are only passed when actually set.
+    if [[ -n "${DESCENT_NEGATIVE_FINAL}" ]]; then
+      P2A_ARGS+=(descent_negative_final:="${DESCENT_NEGATIVE_FINAL}")
+    fi
+    if [[ -n "${DESCENT_NEGATIVE_TRUTH}" ]]; then
+      P2A_ARGS+=(descent_negative_truth:="${DESCENT_NEGATIVE_TRUTH}")
+    fi
     if [[ -n "${P2A_WORKSPACE}" ]]; then
       read -r P2A_XMIN P2A_XMAX P2A_YMIN P2A_YMAX <<<"${P2A_WORKSPACE}"
       P2A_ARGS+=(p2a_workspace_x_min:="${P2A_XMIN}" p2a_workspace_x_max:="${P2A_XMAX}"
@@ -605,11 +699,23 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     TASK_DEADLINE=$((SECONDS + TASK_TIMEOUT))
     TASK_STATE=""
     while (( SECONDS < TASK_DEADLINE )); do
+      if grep -q '\[S1_IDEAL_WELD_RESULT\] state=DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+        TASK_STATE="DONE"; break
+      fi
       if grep -q "已发布准备完成状态(PREPARED)" "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="PREPARED"; break
       fi
+      if grep -q "\[P3A2C_RESULT\] state=GRASP_CONTACT_CONFIRMED" "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+        TASK_STATE="GRASP_CONTACT_CONFIRMED"; break
+      fi
       if grep -q "已发布任务失败状态(ERROR)" "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="ERROR"; break
+      fi
+      # A1 P3a-2b terminal state: the descent reached the grasp pose. Checked
+      # BEFORE the pre-grasp marker, because with grasp_descent enabled the
+      # pre-grasp is an intermediate step on the way here.
+      if grep -q "已发布抓取位姿到位状态(GRASP_POSE_REACHED)" "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+        TASK_STATE="GRASP_POSE_REACHED"; break
       fi
       # A1 P3a-1 terminal state: pre-grasp reached (its own stage result).
       if grep -q "已发布预抓取到位状态(PREGRASP_REACHED)" "${RUN_DIR}/task_launch.log" 2>/dev/null; then
@@ -624,7 +730,18 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     echo "[prepare] task state: ${TASK_STATE}"
     record_prepare_status "${TASK_STATE}"
 
-    if [[ "${TASK_STATE}" == "PREGRASP_REACHED" ]]; then
+    if [[ "${TASK_STATE}" == "DONE" && "${GRASP_MODEL}" == "ideal_weld" ]]; then
+      RC=0
+      echo "[prepare] S1 ideal_weld complete; rigid ideal grasp only (friction/slip unverified)"
+    elif [[ "${TASK_STATE}" == "GRASP_CONTACT_CONFIRMED" ]]; then
+      if grasp_contact_confirmed; then
+        RC=0
+        echo "[prepare] P3a-2c: GRASP_CONTACT_CONFIRMED (bilateral finger-rod contact; no weld/attach/lift/carry)"
+      else
+        record_status "E_P3A2C_NOT_CONFIRMED" "contact result missing or failed" "prepare"
+        RC=9
+      fi
+    elif [[ "${TASK_STATE}" == "PREGRASP_REACHED" ]]; then
       RC=0
       if pregrasp_reached; then
         echo "[prepare] P3a-1: PREGRASP_REACHED (pre-grasp only; no grasp, no carry)"
@@ -633,6 +750,22 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
         record_status "E_P3A_NOT_REACHED" \
           "pre-grasp execution ended without reporting arrival" "prepare"
         RC=6
+      fi
+    elif [[ "${TASK_STATE}" == "GRASP_POSE_REACHED" ]]; then
+      if [[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]]; then
+        echo "[prepare] P3a-2c NOT CONFIRMED: contact close was requested, but task stopped at GRASP_POSE_REACHED" >&2
+        record_status "E_P3A2C_NOT_CONFIRMED" \
+          "contact close was requested but the task only reached GRASP_POSE_REACHED; no contact result was reported" \
+          "prepare"
+        RC=9
+      elif grasp_pose_reached; then
+        RC=0
+        echo "[prepare] P3a-2b: GRASP_POSE_REACHED (arms only; gripper still OPEN; no grasp, no carry)"
+      else
+        echo "[prepare] P3a-2b reported the terminal state but no GRASP_POSE_REACHED result" >&2
+        record_status "E_P3A2B_NOT_REACHED" \
+          "the descent ended without reporting arrival" "prepare"
+        RC=8
       fi
     elif [[ "${TASK_STATE}" == "PREPARED" ]]; then
       RC=0
@@ -650,6 +783,17 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
               "the joint pre-grasp path did not pass; sample rejected, no rule or start was changed" \
               "prepare"
             RC=5
+          fi
+        elif [[ "${GRASP_DESCENT}" -eq 1 ]]; then
+          if grasp_pose_reached; then
+            echo "[prepare] P3a-2b: GRASP_POSE_REACHED (arms only, gripper still OPEN; no grasp, no carry)"
+          else
+            echo "[prepare] P3a-2b did NOT reach the grasp pose; see task_launch.log" >&2
+            grep -m1 '\[P3A2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null >&2 || true
+            record_status "E_P3A2B_NOT_REACHED" \
+              "the descent did not reach the grasp pose; reported as failure, nothing retried or re-sampled" \
+              "prepare"
+            RC=8
           fi
         elif [[ "${PREGRASP_EXECUTE}" -eq 1 ]]; then
           if pregrasp_reached; then

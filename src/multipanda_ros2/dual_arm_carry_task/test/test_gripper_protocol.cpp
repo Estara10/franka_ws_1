@@ -41,6 +41,39 @@ TEST(GripperProtocol, SucceededCloseWithoutReachingTheGoalIsFlaggedUnproven)
   EXPECT_TRUE(r.contact_unproven);
 }
 
+TEST(GripperContactWindow, NoContactAndSingleSideNeverConfirm)
+{
+  a1g::BilateralContactWindow no_contact(3, 2e-4);
+  for (unsigned long long seq = 1; seq <= 5; ++seq)
+    EXPECT_FALSE(no_contact.update(seq, 0.02, 0.02, false, false));
+  EXPECT_EQ(no_contact.count(), 0U);
+
+  a1g::BilateralContactWindow one_side(3, 2e-4);
+  for (unsigned long long seq = 1; seq <= 5; ++seq)
+    EXPECT_FALSE(one_side.update(seq, 0.02, 0.02, true, false));
+  EXPECT_FALSE(one_side.confirmed());
+}
+
+TEST(GripperContactWindow, RequiresFreshBilateralStableSamples)
+{
+  a1g::BilateralContactWindow window(3, 2e-4);
+  EXPECT_FALSE(window.update(1, 0.0200, 0.0200, true, true));
+  EXPECT_FALSE(window.update(1, 0.0200, 0.0200, true, true));  // old feedback
+  EXPECT_FALSE(window.confirmed());
+  EXPECT_FALSE(window.update(2, 0.0201, 0.0199, true, true));
+  EXPECT_TRUE(window.update(3, 0.0200, 0.0200, true, true));
+  EXPECT_TRUE(window.confirmed());
+  EXPECT_NEAR(window.gap(), 0.0400, 1e-12);
+}
+
+TEST(GripperContactWindow, GapStabilityAloneDoesNotConfirm)
+{
+  a1g::BilateralContactWindow window(3, 2e-4);
+  for (unsigned long long seq = 1; seq <= 5; ++seq)
+    EXPECT_FALSE(window.update(seq, 0.02, 0.02, false, false));
+  EXPECT_FALSE(window.confirmed());
+}
+
 // THE regression this round exists for: an aborted close used to be waved
 // through as success. It must never be.
 TEST(GripperProtocol, AbortedWhileClosingIsNeverSuccess)

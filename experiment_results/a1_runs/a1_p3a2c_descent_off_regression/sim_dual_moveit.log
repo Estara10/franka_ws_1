@@ -1,0 +1,24 @@
+Traceback (most recent call last):
+  File "/opt/ros/humble/bin/ros2", line 33, in <module>
+    sys.exit(load_entry_point('ros2cli==0.18.18', 'console_scripts', 'ros2')())
+  File "/opt/ros/humble/lib/python3.10/site-packages/ros2cli/cli.py", line 91, in main
+    rc = extension.main(parser=parser, args=args)
+  File "/opt/ros/humble/lib/python3.10/site-packages/ros2launch/command/launch.py", line 172, in main
+    return launch_a_launch_file(
+  File "/opt/ros/humble/lib/python3.10/site-packages/ros2launch/api/api.py", line 162, in launch_a_launch_file
+    launch_service = launch.LaunchService(
+  File "/opt/ros/humble/lib/python3.10/site-packages/launch/launch_service.py", line 74, in __init__
+    self.__logger = launch.logging.get_logger('launch')
+  File "/opt/ros/humble/lib/python3.10/site-packages/launch/logging/__init__.py", line 298, in get_logger
+    launch_log_file_handler = launch_config.get_log_file_handler()
+  File "/opt/ros/humble/lib/python3.10/site-packages/launch/logging/__init__.py", line 272, in get_log_file_handler
+    file_path = self.get_log_file_path(file_name)
+  File "/opt/ros/humble/lib/python3.10/site-packages/launch/logging/__init__.py", line 258, in get_log_file_path
+    return os.path.join(self.log_dir, file_name)
+  File "/opt/ros/humble/lib/python3.10/site-packages/launch/logging/__init__.py", line 119, in log_dir
+    self._log_dir = _make_unique_log_dir(
+  File "/opt/ros/humble/lib/python3.10/site-packages/launch/logging/__init__.py", line 81, in _make_unique_log_dir
+    os.makedirs(log_dir, exist_ok=True)
+  File "/usr/lib/python3.10/os.py", line 225, in makedirs
+    mkdir(name, mode)
+OSError: [Errno 30] Read-only file system: '/home/lidio/.ros/log/2026-10-14-11-01-42-637827-Estara-61'

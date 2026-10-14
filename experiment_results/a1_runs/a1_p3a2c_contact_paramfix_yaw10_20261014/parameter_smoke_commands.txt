@@ -1,0 +1,4 @@
+installed_launch=/home/lidio/franka_ws_1/install/dual_arm_carry_task/share/dual_arm_carry_task/launch/dual_arm_carry_task.launch.py
+smoke_domain=87; no simulator; no motion commands
+true_smoke_exit=0
+default_smoke_exit=124

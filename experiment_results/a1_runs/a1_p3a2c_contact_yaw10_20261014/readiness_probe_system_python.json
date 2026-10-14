@@ -1,0 +1,3 @@
+[rtk] WARNING: untrusted project filters (.rtk/filters.toml)
+[rtk] Filters NOT applied. Run `rtk trust` to review and enable.
+{"controllers": {"dual_panda_arm_controller": "active", "force_torque_sensor_broadcaster_left": "active", "force_torque_sensor_broadcaster_right": "active", "joint_state_broadcaster": "active"}, "get_sim_info_request": "responded", "gripper_actions_ready": true, "rod_name": "", "rod_truth_request": "success"}

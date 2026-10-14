@@ -1,0 +1,7 @@
+[INFO] [launch]: All log files can be found below /tmp/codex_s1_ros_home/log/2026-10-14-18-45-20-688613-Estara-260209
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [260285]
+[dual_arm_carry_task_node-1] [INFO] [1791974726.005245138] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] terminate called after throwing an instance of 'rclcpp::exceptions::InvalidParameterTypeException'
+[dual_arm_carry_task_node-1]   what():  parameter 'rod_target_yaw_deg' has invalid type: Wrong parameter type, parameter {rod_target_yaw_deg} is of type {double}, setting it to {integer} is not allowed.
+[ERROR] [dual_arm_carry_task_node-1]: process has died [pid 260285, exit code -6, cmd '/home/lidio/franka_ws_1/install/dual_arm_carry_task/lib/dual_arm_carry_task/dual_arm_carry_task_node --ros-args -r __node:=dual_arm_carry_task --params-file /tmp/launch_params_n0hxjbo0 --params-file /tmp/launch_params_n6_zmxsr --params-file /tmp/launch_params_77ciinhk --params-file /tmp/launch_params_ny2i0s9i --params-file /tmp/launch_params_8qumnf0o'].

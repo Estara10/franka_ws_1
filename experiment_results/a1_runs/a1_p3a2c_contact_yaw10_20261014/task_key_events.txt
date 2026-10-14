@@ -1,0 +1,8 @@
+95:[dual_arm_carry_task_node-1] [INFO] [1791952197.720788582] [dual_arm_carry_task]: [P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null
+96:[dual_arm_carry_task_node-1] [INFO] [1791952197.720792439] [dual_arm_carry_task]: [P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null static_passed=true
+222:[dual_arm_carry_task_node-1] [INFO] [1791952197.803578931] [dual_arm_carry_task]: [P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=passed p2_acceptance=true
+241:[dual_arm_carry_task_node-1] [INFO] [1791952208.831424317] [dual_arm_carry_task]: [P3A_RESULT] state=PREGRASP_REACHED detail=PREGRASP_REACHED
+287:[dual_arm_carry_task_node-1] [INFO] [1791952214.551660886] [dual_arm_carry_task]: [P3A2B_RESULT] state=GRASP_POSE_REACHED detail=GRASP_POSE_REACHED
+288:[dual_arm_carry_task_node-1] [INFO] [1791952214.551693268] [dual_arm_carry_task]:   [P3A-2B] 本轮结束于 GRASP_POSE_REACHED；夹爪保持打开，未闭合、未 weld、未 attach、未抬升、未搬运
+291:[dual_arm_carry_task_node-1] [INFO] [1791952214.751934040] [dual_arm_carry_task]:     ✓ 已到达抓取位姿（GRASP_POSE_REACHED）—— 夹爪保持打开，未闭合、未 weld、未 attach、未抬升、未搬运
+292:[dual_arm_carry_task_node-1] [INFO] [1791952214.752052556] [dual_arm_carry_task]: 已发布抓取位姿到位状态(GRASP_POSE_REACHED)，不是任务 DONE。

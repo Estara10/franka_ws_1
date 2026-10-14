@@ -1,0 +1,5 @@
+ROS_HOME=/tmp/a1_p3a2c_ros_home
+ROS_DOMAIN_ID=77
+ROS_LOCALHOST_ONLY=1
+started_utc=2026-10-14T04:37:25Z
+sim_pid=156294

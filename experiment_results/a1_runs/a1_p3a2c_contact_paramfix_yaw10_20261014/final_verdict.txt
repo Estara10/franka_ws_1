@@ -1,0 +1,5 @@
+P3a-2c outcome: FAILED; GRASP_CONTACT_CONFIRMED was not reached.
+Launch parameter wiring is fixed and installed. Node runtime read grasp_contact_close=true in the explicit run; no-argument smoke read false.
+Run reached GRASP_POSE_REACHED after truth, readiness, P2a/P2b, fresh finger mapping, strict R1 (51 states, 0 collisions), and descent (30 samples / 0.300 s / max delta 0.001980 rad).
+A left Grasp goal was sent; client timed out and requested cancellation; server protocol result FAILED/contact_unproven, window_samples=0. Right Grasp goal was not sent after left failure. Final feedback: left q1/q2=0.020502/0.020502 m, gap=0.041004 m, both rod contact flags true, seq=46905; right q1/q2=0.040000/0.040000 m, gap=0.080000 m, both flags false, seq=46900. No bilateral stable-gap task acceptance.
+Arm max deviation=0.007788 rad at mj_left_joint7 (limit 0.002000 rad). Rod truth delta=0.000362 m, 0.02342 deg. One simulation only; no retry. No weld/attach, lift, or carry. Raw evidence preserved in this run directory.

@@ -1,0 +1,10 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "s1_ideal_weld_yawp10_20261014_retry1",
+  "stage": "cleanup",
+  "outcome_code": "E_SCRIPT_INTERRUPTED",
+  "detail": "script exited with code 2",
+  "ros_domain_id": "77",
+  "ros_localhost_only": "1",
+  "manifest_present": true
+}

@@ -133,6 +133,90 @@ TEST(A1SampleTargets, YawRotatesBothTheOffsetsAndTheWrist)
   EXPECT_NEAR(a1v::quatYaw(t.right.orientation), yaw + a1v::kPi / 4.0, 1e-12);
 }
 
+TEST(A1FingerSnapshot, MapsFourDistinctMeasuredValuesByJointName)
+{
+  const a1v::FingerFeedbackSample left{0.011, 0.033, 11, 1000000001LL, 4.10};
+  const a1v::FingerFeedbackSample right{0.027, 0.013, 22, 1000000002LL, 4.11};
+  std::map<std::string, double> global;
+  global["mj_left_finger_joint1"] = left.q1;
+  global["mj_left_finger_joint2"] = left.q2;
+  global["mj_right_finger_joint1"] = right.q1;
+  global["mj_right_finger_joint2"] = right.q2;
+  a1v::FingerJointSnapshot snapshot;
+  std::string reason;
+  ASSERT_TRUE(a1v::makeFingerJointSnapshot(left, right, global, 1000000003LL, 4.12,
+                                           4.00, 4.20, {{10, 21}}, 0.5, 1e-6,
+                                           snapshot, reason)) << reason;
+  EXPECT_EQ(snapshot.positions, (std::array<double, 4>{{0.011, 0.033, 0.027, 0.013}}));
+  EXPECT_EQ(snapshot.source_seq, (std::array<std::uint64_t, 2>{{11, 22}}));
+
+  std::map<std::string, double> mapped;
+  ASSERT_TRUE(a1v::mapMeasuredFingerPositions(snapshot.positions, mapped, reason)) << reason;
+  ASSERT_EQ(mapped.size(), 4u);
+  const auto& names = a1v::fingerJointNames();
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    EXPECT_DOUBLE_EQ(mapped.at(names[i]), snapshot.positions[i]);
+  }
+}
+
+TEST(A1FingerSnapshot, RejectsMissingOldAndContradictoryFeedback)
+{
+  const a1v::FingerFeedbackSample left{0.040, 0.039, 11, 1000000001LL, 4.10};
+  const a1v::FingerFeedbackSample right{0.040, 0.039, 22, 1000000002LL, 4.10};
+  const std::map<std::string, double> complete = {
+      {"mj_left_finger_joint1", 0.040}, {"mj_left_finger_joint2", 0.039},
+      {"mj_right_finger_joint1", 0.040}, {"mj_right_finger_joint2", 0.039}};
+  a1v::FingerJointSnapshot out;
+  std::string reason;
+
+  auto missing = complete;
+  missing.erase("mj_right_finger_joint2");
+  EXPECT_FALSE(a1v::makeFingerJointSnapshot(left, right, missing, 1000000003LL, 4.12,
+                                            4.00, 4.20, {{10, 21}}, 0.5, 1e-6,
+                                            out, reason));
+
+  const std::map<std::string, double> no_global_fingers;
+  ASSERT_TRUE(a1v::makeFingerJointSnapshot(left, right, no_global_fingers, 0, 0.0,
+                                           4.00, 4.20, {{10, 21}}, 0.5, 1e-6,
+                                           out, reason)) << reason;
+  EXPECT_FALSE(out.global_joint_state_matched);
+
+  const a1v::FingerFeedbackSample absent{0.040, 0.039, 0, 1000000001LL, 4.10};
+  EXPECT_FALSE(a1v::makeFingerJointSnapshot(absent, right, no_global_fingers, 0, 0.0,
+                                            4.00, 4.20, {{0, 21}}, 0.5, 1e-6,
+                                            out, reason));
+
+  EXPECT_FALSE(a1v::makeFingerJointSnapshot(left, right, complete, 1000000003LL, 4.12,
+                                            4.00, 4.20, {{11, 21}}, 0.5, 1e-6,
+                                            out, reason));
+
+  const a1v::FingerFeedbackSample stale{left.q1, left.q2, 12, left.stamp_ns, 3.0};
+  EXPECT_FALSE(a1v::makeFingerJointSnapshot(stale, right, complete, 1000000003LL, 4.12,
+                                            4.00, 4.20, {{11, 21}}, 0.5, 1e-6,
+                                            out, reason));
+
+  auto conflict = complete;
+  conflict["mj_left_finger_joint2"] = 0.0;
+  EXPECT_FALSE(a1v::makeFingerJointSnapshot(left, right, conflict, 1000000003LL, 4.12,
+                                            4.00, 4.20, {{10, 21}}, 0.5, 1e-6,
+                                            out, reason));
+}
+
+TEST(A1FingerAxis, NonCommutingRuntimeRotationChainClosesAcrossRodWidth)
+{
+  const a1v::Vec3 rod_x_world_base{1.0, 0.0, 0.0};
+  for (double yaw_deg : {-90.0, -15.0, 0.0, 10.0, 45.0, 90.0, 170.0}) {
+    const double yaw = yaw_deg * kDeg;
+    const a1v::Vec3 closure = a1v::fingerClosureAxisForRodYaw(yaw);
+    const a1v::Vec3 rod_long = a1v::rotateZ({0.0, 1.0, 0.0}, yaw);
+    const a1v::Vec3 rod_width = a1v::rotateZ(rod_x_world_base, yaw);
+    EXPECT_NEAR(closure.x, rod_width.x, 1e-12) << "yaw=" << yaw_deg;
+    EXPECT_NEAR(closure.y, rod_width.y, 1e-12) << "yaw=" << yaw_deg;
+    EXPECT_NEAR(closure.x * rod_long.x + closure.y * rod_long.y, 0.0, 1e-12)
+        << "yaw=" << yaw_deg;
+  }
+}
+
 TEST(A1SampleTargets, GraspAndPreGraspShareXYAndOrientationAndDifferOnlyInZ)
 {
   const a1v::GraspGeometry g;
@@ -883,4 +967,210 @@ TEST(A1SampleAggregate, StatusNamesAreStable)
   EXPECT_STREQ(a1v::statusName(a1v::CheckStatus::PASSED), "passed");
   EXPECT_STREQ(a1v::statusName(a1v::CheckStatus::FAILED), "failed");
   EXPECT_STREQ(a1v::statusName(a1v::CheckStatus::NOT_RUN), "NOT_RUN");
+}
+
+// ---------------------------------------------------------------------------
+// A1 P3a-2b: the descent schedule and its straightness measure
+// ---------------------------------------------------------------------------
+
+TEST(A1DescentSchedule, NonPositiveStepsYieldsAnEmptySchedule)
+{
+  // An empty schedule must be rejected by the caller rather than being read as
+  // "descend in one jump".
+  const a1t::TruthPayload rod = rodAt(0.50, 0.0, 0.02, 0.0);
+  a1v::GraspGeometry g;
+  EXPECT_TRUE(a1v::buildDescentSchedule(rod, g, 0).empty());
+  EXPECT_TRUE(a1v::buildDescentSchedule(rod, g, -3).empty());
+}
+
+TEST(A1DescentSchedule, IncludesBothEndsAndReproducesTheExistingTargets)
+{
+  const a1t::TruthPayload rod = rodAt(0.50, 0.0, 0.02, 0.0);
+  a1v::GraspGeometry g;
+  const auto sched = a1v::buildDescentSchedule(rod, g, 8);
+  ASSERT_EQ(sched.size(), 9u);
+
+  const a1v::DualTarget pre = a1v::buildPreGraspTarget(rod, g);
+  const a1v::DualTarget grasp = a1v::buildGraspTarget(rod, g);
+  // Same generator, same definitions: the schedule's ends ARE the two targets
+  // this round already validated.
+  EXPECT_NEAR(a1v::poseError(pre.left, sched.front().left).pos_m, 0.0, 1e-12);
+  EXPECT_NEAR(a1v::poseError(grasp.left, sched.back().left).pos_m, 0.0, 1e-12);
+  EXPECT_NEAR(a1v::poseError(pre.right, sched.front().right).pos_m, 0.0, 1e-12);
+  EXPECT_NEAR(a1v::poseError(grasp.right, sched.back().right).pos_m, 0.0, 1e-12);
+}
+
+TEST(A1DescentSchedule, OnlyTheHeightChangesAcrossTheSchedule)
+{
+  const a1t::TruthPayload rod = rodAt(0.48, 0.03, 0.02, 12.0);
+  a1v::GraspGeometry g;
+  const auto sched = a1v::buildDescentSchedule(rod, g, 10);
+  ASSERT_EQ(sched.size(), 11u);
+  for (const auto& t : sched) {
+    EXPECT_NEAR(t.left.position.x, sched.front().left.position.x, 1e-12);
+    EXPECT_NEAR(t.left.position.y, sched.front().left.position.y, 1e-12);
+    EXPECT_NEAR(t.right.position.x, sched.front().right.position.x, 1e-12);
+    EXPECT_NEAR(t.right.position.y, sched.front().right.position.y, 1e-12);
+    EXPECT_NEAR(a1t::rotationDistanceRad(sched.front().left.orientation, t.left.orientation), 0.0,
+                1e-12);
+    EXPECT_NEAR(a1t::rotationDistanceRad(sched.front().right.orientation, t.right.orientation), 0.0,
+                1e-12);
+  }
+  // Strictly descending, and covering the configured span.
+  for (std::size_t i = 1; i < sched.size(); ++i) {
+    EXPECT_LT(sched[i].left.position.z, sched[i - 1].left.position.z);
+  }
+  EXPECT_NEAR(sched.front().left.position.z, g.pre_grasp_height_m, 1e-12);
+  EXPECT_NEAR(sched.back().left.position.z, g.grasp_height_m, 1e-12);
+  EXPECT_NEAR(sched.front().left.position.z - sched.back().left.position.z,
+              g.pre_grasp_height_m - g.grasp_height_m, 1e-12);
+}
+
+TEST(A1DescentDeviation, AStraightVerticalLineHasNoDeviation)
+{
+  const a1t::TruthPayload rod = rodAt(0.50, 0.0, 0.02, 0.0);
+  a1v::GraspGeometry g;
+  const auto sched = a1v::buildDescentSchedule(rod, g, 12);
+  std::vector<a1v::ArmTarget> left;
+  for (const auto& t : sched) {
+    left.push_back(t.left);
+  }
+  const a1v::StraightDescentDeviation d = a1v::straightDescentDeviation(left);
+  EXPECT_TRUE(d.ok);
+  EXPECT_NEAR(d.max_xy_m, 0.0, 1e-12);
+  EXPECT_NEAR(d.max_angle_rad, 0.0, 1e-12);
+}
+
+TEST(A1DescentDeviation, HorizontalDriftAndRotationAreBothMeasured)
+{
+  std::vector<a1v::ArmTarget> seq;
+  for (int i = 0; i < 5; ++i) {
+    a1v::ArmTarget t;
+    // 1 mm of horizontal drift per step, so the worst is 4 mm from the first.
+    t.position = {0.5 + 0.001 * i, 0.0, 0.28 - 0.01 * i};
+    t.orientation = a1v::quatFromRpy(a1v::kPi, 0.0, 0.5 * kDeg * i);
+    seq.push_back(t);
+  }
+  const a1v::StraightDescentDeviation d = a1v::straightDescentDeviation(seq);
+  EXPECT_TRUE(d.ok);
+  EXPECT_NEAR(d.max_xy_m, 0.004, 1e-9);
+  EXPECT_EQ(d.worst_xy_index, 4u);
+  EXPECT_NEAR(d.max_angle_rad, 2.0 * kDeg, 1e-9);
+  EXPECT_EQ(d.worst_angle_index, 4u);
+}
+
+TEST(A1DescentDeviation, EmptyAndNonFiniteSequencesAreRejected)
+{
+  const a1v::StraightDescentDeviation empty = a1v::straightDescentDeviation({});
+  EXPECT_FALSE(empty.ok);
+  EXPECT_EQ(empty.reason_code, "E_DESCENT_EMPTY");
+
+  std::vector<a1v::ArmTarget> bad(2);
+  bad[0].position = {0.5, 0.0, 0.2};
+  bad[0].orientation = a1v::quatFromRpy(a1v::kPi, 0.0, 0.0);
+  bad[1].position = {std::numeric_limits<double>::quiet_NaN(), 0.0, 0.1};
+  bad[1].orientation = bad[0].orientation;
+  const a1v::StraightDescentDeviation d = a1v::straightDescentDeviation(bad);
+  EXPECT_FALSE(d.ok);
+  EXPECT_EQ(d.reason_code, "E_DESCENT_NOT_FINITE");
+}
+
+// ---------------------------------------------------------------------------
+// A1 P3a-2b: the arrival window must count only NEW feedback
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::vector<std::string> armPair()
+{
+  return {"mj_left_joint1", "mj_right_joint1"};
+}
+
+std::map<std::string, double> heldSample(double v)
+{
+  return {{"mj_left_joint1", v}, {"mj_right_joint1", v}};
+}
+
+}  // namespace
+
+TEST(A1FreshWindow, ReReadingOneSampleNeverFillsTheWindow)
+{
+  // The defect this replaces: a loop that slept and then called getCurrentState()
+  // counted iterations, so one cached state read 30 times looked like 30 samples.
+  a1v::FreshWindow w(armPair(), 2, 0.30, 0.002);
+  std::string reject;
+  ASSERT_TRUE(w.add(1ULL, 0.0, heldSample(0.1), reject));
+  for (unsigned long long i = 0; i < 50; ++i) {
+    EXPECT_FALSE(w.add(1ULL, 0.01 * static_cast<double>(i), heldSample(0.1), reject));
+    EXPECT_EQ(reject, "E_FRESH_STALE_SEQ");
+  }
+  const a1v::FreshWindow::Verdict v = w.verdict();
+  EXPECT_FALSE(v.ready);
+  EXPECT_FALSE(v.ok);
+  EXPECT_EQ(v.samples, 1u);
+  EXPECT_EQ(v.reason_code, "E_FRESH_WINDOW_INCOMPLETE");
+}
+
+TEST(A1FreshWindow, NewSamplesOverTheWindowAreAccepted)
+{
+  a1v::FreshWindow w(armPair(), 2, 0.30, 0.002);
+  std::string reject;
+  for (int i = 0; i < 8; ++i) {
+    ASSERT_TRUE(w.add(static_cast<unsigned long long>(i + 1), 0.05 * i, heldSample(0.1), reject));
+  }
+  EXPECT_TRUE(w.ready());
+  const a1v::FreshWindow::Verdict v = w.verdict();
+  EXPECT_TRUE(v.ok);
+  EXPECT_EQ(v.reason_code, "E_OK");
+  // The window slides: the oldest sample falls out once the span exceeds the
+  // window length, so 8 fed samples leave a 0.30 s window of 7.
+  EXPECT_EQ(v.samples, 7u);
+  EXPECT_NEAR(v.span_sec, 0.30, 1e-12);
+  EXPECT_NEAR(v.worst_change_rad, 0.0, 1e-12);
+  EXPECT_DOUBLE_EQ(v.last_positions.at("mj_left_joint1"), 0.1);
+}
+
+TEST(A1FreshWindow, WholeWindowDriftIsJudgedNotAdjacentSteps)
+{
+  // Each step is 4e-4, a fifth of the 2e-3 tolerance, so an adjacent-step test
+  // would pass. The slid window still walks 2.4e-3 and must fail.
+  a1v::FreshWindow w(armPair(), 2, 0.30, 0.002);
+  std::string reject;
+  for (int i = 0; i < 8; ++i) {
+    ASSERT_TRUE(w.add(static_cast<unsigned long long>(i + 1), 0.05 * i,
+                      heldSample(0.1 + 0.0004 * i), reject));
+  }
+  const a1v::FreshWindow::Verdict v = w.verdict();
+  EXPECT_TRUE(v.ready);
+  EXPECT_FALSE(v.ok);
+  EXPECT_EQ(v.reason_code, "E_FRESH_NOT_SETTLED");
+  EXPECT_NEAR(v.worst_change_rad, 0.0024, 1e-12);
+  EXPECT_EQ(v.worst_joint, "mj_left_joint1");
+}
+
+TEST(A1FreshWindow, ASampleMissingAJointIsRejectedAndDoesNotCount)
+{
+  a1v::FreshWindow w(armPair(), 2, 0.0, 0.002);
+  std::string reject;
+  ASSERT_TRUE(w.add(1ULL, 0.0, heldSample(0.1), reject));
+  std::map<std::string, double> partial {{"mj_left_joint1", 0.1}};
+  EXPECT_FALSE(w.add(2ULL, 0.01, partial, reject));
+  EXPECT_EQ(reject, "E_FRESH_INCOMPLETE");
+  EXPECT_EQ(w.verdict().samples, 1u);
+
+  std::map<std::string, double> non_finite = heldSample(0.1);
+  non_finite["mj_right_joint1"] = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(w.add(3ULL, 0.02, non_finite, reject));
+  EXPECT_EQ(reject, "E_FRESH_INCOMPLETE");
+  EXPECT_EQ(w.verdict().samples, 1u);
+}
+
+TEST(A1FreshWindow, NoSamplesAtAllIsNotArrival)
+{
+  a1v::FreshWindow w(armPair(), 2, 0.30, 0.002);
+  const a1v::FreshWindow::Verdict v = w.verdict();
+  EXPECT_FALSE(v.ready);
+  EXPECT_FALSE(v.ok);
+  EXPECT_EQ(v.reason_code, "E_FRESH_NO_SAMPLES");
+  EXPECT_EQ(v.samples, 0u);
 }

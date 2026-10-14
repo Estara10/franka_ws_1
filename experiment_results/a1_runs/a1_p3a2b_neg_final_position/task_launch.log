@@ -1,0 +1,277 @@
+[INFO] [launch]: All log files can be found below /home/lidio/.ros/log/2026-10-14-10-37-11-944012-Estara-101224
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [101349]
+[dual_arm_carry_task_node-1] [INFO] [1791945437.258937019] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791945437.263184651] [dual_arm_carry_task]: A1 truth mode enabled: subscribing to /a1_rod_pose_truth (expected_run_id=a1_p3a2b_neg_final_position)
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264136256] [dual_arm_carry_task]: A1 到位新鲜度: 订阅 /joint_states（序号 + 到达时刻；重复旧样本不计数）
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264180721] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264185846] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264189485] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264192488] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264195541] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264198484] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264201449] [dual_arm_carry_task]:   杆位姿来源: a1_truth
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264205996] [dual_arm_carry_task]:   准备模式(prepare_only): 启用（本轮 A1 不运动）
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264209403] [dual_arm_carry_task]:   P2a 静态检查(p2a_check): 启用（几何/双臂 IK/组合碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264212608] [dual_arm_carry_task]:   P2b 路径检查(p2b_check): 启用（联合预抓取路径规划与校验）
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264215629] [dual_arm_carry_task]:   预抓取执行(pregrasp_execute): 启用（执行本轮校验过的同一 Plan，到位即停）
+[dual_arm_carry_task_node-1] [INFO] [1791945437.264218890] [dual_arm_carry_task]:   下降到抓取位姿(grasp_descent): 启用（预抓取→打开双爪→沿世界 Z 下降到抓取位姿即停；不闭合、不 weld、不 attach、不抬升）
+[dual_arm_carry_task_node-1] [INFO] [1791945437.396560439] [dual_arm_carry_task]:   A1 真值已冻结: run_id=a1_p3a2b_neg_final_position frame=world pos=(0.500000, 0.000000, 0.020654)
+[dual_arm_carry_task_node-1] [INFO] [1791945439.264432111] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791945439.268200172] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.002 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791945439.268222640] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791945439.287492259] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791945439.287525491] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791945439.291881385] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791945439.294982196] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791945439.294997327] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295007567] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295012794] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295017539] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295020506] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295024784] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295033763] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295036730] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295039491] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295043121] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295046341] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295048916] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295056312] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295060713] [dual_arm_carry_task]:   [A1] MoveIt 规划坐标系: base_link
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295067852] [dual_arm_carry_task]:   [A1] 冻结真值: run_id=a1_p3a2b_neg_final_position frame=world pos=(0.500000, 0.000000, 0.020654) size=(0.040, 0.400, 0.040) mass=0.640000 kg
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295086013] [dual_arm_carry_task]:   [A1] 冻结真值 yaw=10.0000° (长轴为杆局部 Y 轴)
+[dual_arm_carry_task_node-1] [INFO] [1791945439.295107626] [dual_arm_carry_task]:   [A1] 坐标处理: world 与 base_link 数值等价（SRDF 固定 virtual_joint + URDF/MuJoCo 基座位置一致），按显式单位变换处理
+[dual_arm_carry_task_node-1] [INFO] [1791945439.302609308] [dual_arm_carry_task]:   [A1] 读回原始值: object_frame='base_link' primitives=1 pose=(0.500000, 0.000000, 0.020654) quat=(0.000000, -0.000000, 0.087156, 0.996195) dims=(0.0400, 0.4000, 0.0400)
+[dual_arm_carry_task_node-1] [INFO] [1791945439.302646762] [dual_arm_carry_task]:   [A1] 写入请求值: object_frame='base_link' pose=(0.500000, 0.000000, 0.020654) quat=(0.000000, -0.000000, 0.087156, 0.996195)
+[dual_arm_carry_task_node-1] [INFO] [1791945439.302655463] [dual_arm_carry_task]:   [A1] 场景读回核对: Δpos=0.0000 mm, Δangle=0.0000°, Δsize=0.000e+00 m (容差 1.0 mm / 0.5° / 1e-06 m)
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305692738] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ----- [P2A] 样本静态有效性检查（不运动）-----
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305729482] [dual_arm_carry_task]:   [P2A][几何] passed (E_OK)
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305733776] [dual_arm_carry_task]:     杆 yaw=10.0000° 倾角=0.0000° 中心 z=0.020654 | footprint x=[0.4456, 0.5544] y=[-0.2004, 0.2004]
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305742315] [dual_arm_carry_task]:     配置工作区 x=[0.300, 0.700] y=[-0.300, 0.300]，最小余量 99.565 mm。来源: config/a1_scene_sampling.yaml 采样范围按 15° 最大 footprint 外扩后加 80 mm 余量；MuJoCo 支撑面为无限 plane，非物理桌面边缘
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305747994] [dual_arm_carry_task]:     说明: MuJoCo 支撑面为无限 plane（dual_scene.xml 的 floor geom，无 pos），上界是配置的研究包络，不是物理桌面边缘
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305751871] [dual_arm_carry_task]:   [P2A][目标] 抓取偏移 0.150 m（沿杆长轴，杆半长 0.200 m），末端基准 yaw 45.0°
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305756319] [dual_arm_carry_task]:     预抓取 z=0.280 抓取 z=0.130（均为腕部 link8 原点高度，非指尖/TCP）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305759747] [dual_arm_carry_task]:     左(杆 +长轴端) 预抓取=(0.4740, 0.1477, 0.2800) 抓取=(0.4740, 0.1477, 0.1300)
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305764362] [dual_arm_carry_task]:     右(杆 -长轴端) 预抓取=(0.5260, -0.1477, 0.2800) 抓取=(0.5260, -0.1477, 0.1300)
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305770140] [dual_arm_carry_task]:     姿态约定核对: 本构造器 q=(0.887010833, 0.461748613, 0.000000000, 0.000000000) 与 tf2 setRPY(π,0,55.0000°) 角度差 0.000e+00 rad
+[dual_arm_carry_task_node-1] [INFO] [1791945439.305779600] [dual_arm_carry_task]:   [P2A][IK] 末端 link: 左=mj_left_link8 右=mj_right_link8（目标位姿即该 link 的原点位姿）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.306031664] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309092131] [dual_arm_carry_task]:   [P2A][IK] 5/5 次尝试同时解出双臂（关节限位剔除 0，残差剔除 0）；已选下降变化最小者
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309121208] [dual_arm_carry_task]:     [pre-grasp] 关节限位余量 0.6396 rad | FK 残差 左=0.0000 mm/0.0000° 右=0.0000 mm/0.0000°
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309128595] [dual_arm_carry_task]:     [pre-grasp] 相对机器人起始位形的最大单关节差 2.0390 rad（仅记录，不作判据：起始位形不是抓取起点，且抓取姿态按设计相差 180° 腕部翻转）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309144538] [dual_arm_carry_task]:     [grasp] 关节限位余量 0.6655 rad | FK 残差 左=0.0000 mm/0.0000° 右=0.0000 mm/0.0000°
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309149539] [dual_arm_carry_task]:     [grasp] 相对机器人起始位形的最大单关节差 1.9503 rad（仅记录，不作判据：起始位形不是抓取起点，且抓取姿态按设计相差 180° 腕部翻转）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309158703] [dual_arm_carry_task]:     [预抓取→抓取] 左臂 最大单关节变化 0.7377 rad（上限 2.0000）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309168086] [dual_arm_carry_task]:     [预抓取→抓取] 右臂 最大单关节变化 0.5823 rad（上限 2.0000）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309178983] [dual_arm_carry_task]:     [grasp] 左臂关节解: mj_left_joint1=-0.263080 mj_left_joint2=0.448604 mj_left_joint3=0.024335 mj_left_joint4=-2.406329 mj_left_joint5=-0.037293 mj_left_joint6=2.854629 mj_left_joint7=-1.165314 
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309198298] [dual_arm_carry_task]:     [grasp] 右臂关节解: mj_right_joint1=-0.100784 mj_right_joint2=0.556966 mj_right_joint3=0.270611 mj_right_joint4=-2.218738 mj_right_joint5=-0.365372 mj_right_joint6=2.734985 mj_right_joint7=-0.491556 
+[dual_arm_carry_task_node-1] [INFO] [1791945439.309800321] [dual_arm_carry_task]:   [P2A][碰撞] 场景来源 /get_planning_scene：世界物体 1 个，aluminum_rod 在场景中: 是
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310148868] [dual_arm_carry_task]:   [P2A][碰撞] 验证场景世界物体: aluminum_rod
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310170732] [dual_arm_carry_task]:   [P2A][支撑面] 已在**验证场景**中补齐 'a1_support_plane': BOX 6.0x6.0x2.000，顶面位于 z=0.000 向下覆盖 2.0 m (frame=base_link)，来源 dual_scene.xml 的 floor geom（无限 plane，此处用有限深板近似；超出 ±3.0 m 或深于 2.0 m 处不覆盖）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310226310] [dual_arm_carry_task]:     ACM 条目核查: 共 25 个条目；会隐藏双臂互碰的允许项 39 个，会隐藏杆接触的允许项 0 个（已在验证副本中关闭，未改动全局 ACM/SRDF）；示例: mj_left_hand<->mj_right_link4 mj_left_hand<->mj_right_link5 mj_left_link0<->mj_right_link0 mj_left_link0<->mj_right_link1 mj_left_link0<->mj_right_link2 mj_left_link1<->mj_right_link0 mj_left_link1<->mj_right_link1 mj_left_link2<->mj_right_link0 mj_left_link2<->mj_right_link1 mj_left_link2<->mj_right_link2
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310263303] [dual_arm_carry_task]:     [P2A][支撑面] 仅允许固定安装配对 base_link/link0/link1（两臂）与 'a1_support_plane' 接触（这些碰撞体跨越安装平面且不随臂位形变化）；手部与手指**不在**豁免内，其余连杆与地面的接触一律检查
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310586476] [dual_arm_carry_task]:   [P2A][对照 model=urdf_reference] 原始 URDF 六体手掌近似，仅作对照，非本轮判据
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310593602] [dual_arm_carry_task]:     [预抓取 z=0.280] 不允许任何杆接触: 杆接触=0 地面/支撑面=0 双臂互碰=0 自碰撞=0 其他世界物体=0
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310599560] [dual_arm_carry_task]:     [抓取 z=0.130] 仅允许手指-杆接触（hand/其余连杆仍检查）: 杆接触=2 地面/支撑面=2 双臂互碰=0 自碰撞=0 其他世界物体=0 例: a1_support_plane<->mj_left_hand a1_support_plane<->mj_right_hand aluminum_rod<->mj_left_hand aluminum_rod<->mj_right_hand
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310779861] [dual_arm_carry_task]:   [P2A][hand] 模型来源: /home/lidio/franka_ws_1/install/franka_description/share/franka_description/mujoco/franka/assets/hand.stl（600 顶点，二进制 STL，未施加额外缩放）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310784478] [dual_arm_carry_task]:   [P2A][hand] hand_c 局部 AABB: x[-0.031636, 0.031616] y[-0.103990, 0.100426] z[-0.025925, 0.065962]
+[dual_arm_carry_task_node-1] [INFO] [1791945439.310790957] [dual_arm_carry_task]:   [P2A][hand] 替换为 BOX 中心=(-0.000010, -0.001782, 0.020019) 尺寸=(0.063252, 0.204416, 0.091887)（中心为 (min+max)/2，非 hand 原点；已断言包含全部顶点）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.311959772] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791945439.312413814] [dual_arm_carry_task]:   [P2A][hand] 状态按同名关节映射后 FK 残差 0.000000 mm / 0.000000°（左臂抓取目标）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.312612022] [dual_arm_carry_task]:   [P2A][判据 model=mujoco_hand_aabb] 手掌替换为 hand_c AABB，其余连杆/手指/场景/ACM 语义不变
+[dual_arm_carry_task_node-1] [INFO] [1791945439.312623014] [dual_arm_carry_task]:     [预抓取 z=0.280] 杆接触=0 地面/支撑面=0 双臂互碰=0 自碰撞=0 其他世界物体=0
+[dual_arm_carry_task_node-1] [INFO] [1791945439.312630196] [dual_arm_carry_task]:     [抓取 z=0.130] 杆接触=0 地面/支撑面=0 双臂互碰=0 自碰撞=0 其他世界物体=0
+[dual_arm_carry_task_node-1] [INFO] [1791945439.312895104] [dual_arm_carry_task]:     [手掌负例-注入] 在与替换后手掌 AABB 同中心同姿态处注入障碍 'a1_hand_obstacle_injected'（验证注入，非实际机器人运动）: 杆接触=0 地面/支撑面=0 双臂互碰=0 自碰撞=0 其他世界物体=5 例: a1_hand_obstacle_injected<->mj_left_hand a1_hand_obstacle_injected<->mj_left_leftfinger a1_hand_obstacle_injected<->mj_left_link7 a1_hand_obstacle_injected<->mj_left_link8 a1_hand_obstacle_injected<->mj_left_rightfinger
+[dual_arm_carry_task_node-1] [INFO] [1791945439.312911182] [dual_arm_carry_task]:     ✓ [手掌负例-注入] 替换后的手掌仍然检出碰撞，替换几何确实参与检查
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313548989] [dual_arm_carry_task]:     [地面负例-注入] 目标 z=-0.050（低于支撑面 0.000，非采样位姿）: 杆接触=6 地面/支撑面=12 双臂互碰=0 自碰撞=0 其他世界物体=0 例: a1_support_plane<->mj_left_hand a1_support_plane<->mj_left_leftfinger a1_support_plane<->mj_left_link6 a1_support_plane<->mj_left_link7 a1_support_plane<->mj_left_link8 a1_support_plane<->mj_left_rightfinger a1_support_plane<->mj_right_hand a1_support_plane<->mj_right_leftfinger a1_support_plane<->mj_right_link6 a1_support_plane<->mj_right_link7
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313559291] [dual_arm_carry_task]:     ✓ [地面负例-注入] 穿地状态被正确拒绝（地面/支撑面接触 12 处）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313566033] [dual_arm_carry_task]:   [P2A] 静态检查汇总: geometry=passed ik=passed collision=passed path_validation=NOT_RUN
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313569345] [dual_arm_carry_task]:   [P2A] 注意: 静态通过仅表示该组合目标本身有效；p2_acceptance=null, path_validation=NOT_RUN，可搬运性由 P2b 判定
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313572374] [dual_arm_carry_task]: [P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313575861] [dual_arm_carry_task]: [P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null static_passed=true
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313649117] [dual_arm_carry_task]:   ✓ [P2A] 静态检查通过（几何/IK/碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313654011] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ----- [P2B] 联合预抓取路径规划与校验（仅规划，不执行运动）-----
+[dual_arm_carry_task_node-1] [INFO] [1791945439.313657726] [dual_arm_carry_task]:   判据模型 model=mujoco_hand_aabb（手掌为 hand_c AABB），场景为 P2a 独立验证场景
+[dual_arm_carry_task_node-1] [INFO] [1791945439.316992431] [dual_arm_carry_task]:   [P2B] 起始状态: 记录值与当前 live 状态最大关节差 0.000000 rad（起点不被替换）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.318837686] [dual_arm_carry_task]:   [P2B] 调用规划器: planner=PTP, time=10.0s, attempts=5, 起点=当前实际状态, 终点=本次选定预抓取解, 速度缩放=0.100, 加速度缩放=0.100
+[dual_arm_carry_task_node-1] [INFO] [1791945439.318936234] [move_group_interface]: MoveGroup action client/server ready
+[dual_arm_carry_task_node-1] [INFO] [1791945439.319294593] [move_group_interface]: Planning request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791945439.352243313] [move_group_interface]: Planning request complete!
+[dual_arm_carry_task_node-1] [INFO] [1791945439.353143844] [move_group_interface]: time taken to generate plan: 0.00154166 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791945439.353189635] [dual_arm_carry_task]:   [P2B] 关节名称核对: 14 个，双臂唯一且完整（期望 14），无未知/重复
+[dual_arm_carry_task_node-1] [INFO] [1791945439.353211403] [dual_arm_carry_task]:   [P2B] 时间戳核对: 首 0.000000 s 末 9.809870 s（严格递增、有限、非负）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354001236] [dual_arm_carry_task]:   [P2B] 路径: 100 航点, 14 关节 | 起点与记录起始状态最大差 0.000000 rad | 相邻航点最大单关节变化 0.0218 rad
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354025558] [dual_arm_carry_task]:   [P2B] 终点 FK 残差（对本次选定预抓取目标）: 左=0.0000 mm/0.0000° 右=0.0000 mm/0.0000°
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354033987] [dual_arm_carry_task]: [P2B_PATH_NAMES] mj_left_joint1,mj_left_joint2,mj_left_joint3,mj_left_joint4,mj_left_joint5,mj_left_joint6,mj_left_joint7,mj_right_joint1,mj_right_joint2,mj_right_joint3,mj_right_joint4,mj_right_joint5,mj_right_joint6,mj_right_joint7
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354043752] [dual_arm_carry_task]: [P2B_PATH] 0,0.000000,-0.784977,0.000000,-2.355999,-0.000001,1.570992,0.784997,0.000000,-0.784977,0.000000,-2.355999,-0.000001,1.570992,0.784997
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354068915] [dual_arm_carry_task]: [P2B_PATH] 1,0.000582,-0.783916,-0.000861,-2.356093,0.000104,1.572121,0.782497,0.000590,-0.783776,-0.000333,-2.355876,0.000098,1.572059,0.783046
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354075362] [dual_arm_carry_task]: [P2B_PATH] 2,0.002328,-0.780735,-0.003444,-2.356373,0.000418,1.575507,0.774997,0.002361,-0.780174,-0.001330,-2.355507,0.000393,1.575261,0.777193
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354081981] [dual_arm_carry_task]: [P2B_PATH] 3,0.005237,-0.775432,-0.007749,-2.356841,0.000942,1.581151,0.762497,0.005313,-0.774170,-0.002993,-2.354892,0.000886,1.580598,0.767437
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354088233] [dual_arm_carry_task]: [P2B_PATH] 4,0.009310,-0.768008,-0.013776,-2.357495,0.001675,1.589052,0.744997,0.009445,-0.765765,-0.005320,-2.354031,0.001576,1.588069,0.753780
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354094380] [dual_arm_carry_task]: [P2B_PATH] 5,0.014302,-0.758912,-0.021161,-2.358297,0.002573,1.598734,0.723553,0.014509,-0.755465,-0.008172,-2.352976,0.002422,1.597224,0.737044
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354100486] [dual_arm_carry_task]: [P2B_PATH] 6,0.019364,-0.749685,-0.028652,-2.359110,0.003484,1.608554,0.701803,0.019645,-0.745018,-0.011065,-2.351905,0.003279,1.606509,0.720070
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354106412] [dual_arm_carry_task]: [P2B_PATH] 7,0.024427,-0.740458,-0.036142,-2.359923,0.004395,1.618374,0.680053,0.024780,-0.734572,-0.013958,-2.350835,0.004137,1.615795,0.703096
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354112236] [dual_arm_carry_task]: [P2B_PATH] 8,0.029489,-0.731232,-0.043633,-2.360737,0.005306,1.628194,0.658303,0.029916,-0.724125,-0.016851,-2.349765,0.004995,1.625080,0.686121
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354118526] [dual_arm_carry_task]: [P2B_PATH] 9,0.034552,-0.722005,-0.051124,-2.361550,0.006217,1.638014,0.636553,0.035052,-0.713679,-0.019744,-2.348695,0.005852,1.634366,0.669147
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354125359] [dual_arm_carry_task]: [P2B_PATH] 10,0.039614,-0.712779,-0.058614,-2.362363,0.007128,1.647834,0.614803,0.040188,-0.703232,-0.022637,-2.347624,0.006710,1.643652,0.652172
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354133758] [dual_arm_carry_task]: [P2B_PATH] 11,0.044677,-0.703552,-0.066105,-2.363177,0.008039,1.657654,0.593053,0.045324,-0.692786,-0.025529,-2.346554,0.007568,1.652937,0.635198
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354139899] [dual_arm_carry_task]: [P2B_PATH] 12,0.049739,-0.694326,-0.073596,-2.363990,0.008950,1.667474,0.571303,0.050460,-0.682339,-0.028422,-2.345484,0.008425,1.662223,0.618224
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354145795] [dual_arm_carry_task]: [P2B_PATH] 13,0.054802,-0.685099,-0.081086,-2.364803,0.009861,1.677294,0.549553,0.055595,-0.671892,-0.031315,-2.344413,0.009283,1.671509,0.601249
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354151603] [dual_arm_carry_task]: [P2B_PATH] 14,0.059864,-0.675872,-0.088577,-2.365616,0.010772,1.687114,0.527803,0.060731,-0.661446,-0.034208,-2.343343,0.010140,1.680794,0.584275
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354157715] [dual_arm_carry_task]: [P2B_PATH] 15,0.064927,-0.666646,-0.096068,-2.366430,0.011683,1.696934,0.506053,0.065867,-0.650999,-0.037101,-2.342273,0.010998,1.690080,0.567300
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354163409] [dual_arm_carry_task]: [P2B_PATH] 16,0.069989,-0.657419,-0.103558,-2.367243,0.012594,1.706754,0.484303,0.071003,-0.640553,-0.039994,-2.341202,0.011856,1.699365,0.550326
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354169261] [dual_arm_carry_task]: [P2B_PATH] 17,0.075052,-0.648193,-0.111049,-2.368056,0.013505,1.716575,0.462553,0.076139,-0.630106,-0.042887,-2.340132,0.012713,1.708651,0.533352
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354175040] [dual_arm_carry_task]: [P2B_PATH] 18,0.080114,-0.638966,-0.118540,-2.368869,0.014416,1.726395,0.440803,0.081275,-0.619659,-0.045779,-2.339062,0.013571,1.717937,0.516377
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354180803] [dual_arm_carry_task]: [P2B_PATH] 19,0.085177,-0.629740,-0.126030,-2.369683,0.015327,1.736215,0.419053,0.086411,-0.609213,-0.048672,-2.337991,0.014429,1.727222,0.499403
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354186692] [dual_arm_carry_task]: [P2B_PATH] 20,0.090239,-0.620513,-0.133521,-2.370496,0.016238,1.746035,0.397303,0.091546,-0.598766,-0.051565,-2.336921,0.015286,1.736508,0.482428
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354192687] [dual_arm_carry_task]: [P2B_PATH] 21,0.095302,-0.611286,-0.141011,-2.371309,0.017149,1.755855,0.375553,0.096682,-0.588320,-0.054458,-2.335851,0.016144,1.745793,0.465454
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354200643] [dual_arm_carry_task]: [P2B_PATH] 22,0.100364,-0.602060,-0.148502,-2.372122,0.018060,1.765675,0.353803,0.101818,-0.577873,-0.057351,-2.334780,0.017001,1.755079,0.448480
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354206483] [dual_arm_carry_task]: [P2B_PATH] 23,0.105427,-0.592833,-0.155993,-2.372936,0.018971,1.775495,0.332053,0.106954,-0.567426,-0.060244,-2.333710,0.017859,1.764365,0.431505
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354212609] [dual_arm_carry_task]: [P2B_PATH] 24,0.110489,-0.583607,-0.163483,-2.373749,0.019882,1.785315,0.310303,0.112090,-0.556980,-0.063137,-2.332640,0.018717,1.773650,0.414531
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354218464] [dual_arm_carry_task]: [P2B_PATH] 25,0.115552,-0.574380,-0.170974,-2.374562,0.020793,1.795135,0.288553,0.117226,-0.546533,-0.066029,-2.331569,0.019574,1.782936,0.397556
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354224262] [dual_arm_carry_task]: [P2B_PATH] 26,0.120614,-0.565154,-0.178465,-2.375375,0.021704,1.804955,0.266803,0.122361,-0.536087,-0.068922,-2.330499,0.020432,1.792222,0.380582
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354230113] [dual_arm_carry_task]: [P2B_PATH] 27,0.125677,-0.555927,-0.185955,-2.376189,0.022615,1.814775,0.245053,0.127497,-0.525640,-0.071815,-2.329429,0.021289,1.801507,0.363608
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354235980] [dual_arm_carry_task]: [P2B_PATH] 28,0.130739,-0.546700,-0.193446,-2.377002,0.023526,1.824596,0.223303,0.132633,-0.515193,-0.074708,-2.328358,0.022147,1.810793,0.346633
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354241587] [dual_arm_carry_task]: [P2B_PATH] 29,0.135802,-0.537474,-0.200937,-2.377815,0.024437,1.834416,0.201553,0.137769,-0.504747,-0.077601,-2.327288,0.023005,1.820078,0.329659
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354247523] [dual_arm_carry_task]: [P2B_PATH] 30,0.140864,-0.528247,-0.208427,-2.378629,0.025348,1.844236,0.179803,0.142905,-0.494300,-0.080494,-2.326218,0.023862,1.829364,0.312684
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354253276] [dual_arm_carry_task]: [P2B_PATH] 31,0.145927,-0.519021,-0.215918,-2.379442,0.026259,1.854056,0.158053,0.148041,-0.483854,-0.083387,-2.325148,0.024720,1.838650,0.295710
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354261343] [dual_arm_carry_task]: [P2B_PATH] 32,0.150989,-0.509794,-0.223409,-2.380255,0.027170,1.863876,0.136303,0.153176,-0.473407,-0.086279,-2.324077,0.025578,1.847935,0.278736
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354273488] [dual_arm_carry_task]: [P2B_PATH] 33,0.156052,-0.500567,-0.230899,-2.381068,0.028081,1.873696,0.114553,0.158312,-0.462961,-0.089172,-2.323007,0.026435,1.857221,0.261761
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354283109] [dual_arm_carry_task]: [P2B_PATH] 34,0.161114,-0.491341,-0.238390,-2.381882,0.028992,1.883516,0.092803,0.163448,-0.452514,-0.092065,-2.321937,0.027293,1.866506,0.244787
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354292214] [dual_arm_carry_task]: [P2B_PATH] 35,0.166177,-0.482114,-0.245881,-2.382695,0.029903,1.893336,0.071053,0.168584,-0.442067,-0.094958,-2.320866,0.028150,1.875792,0.227812
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354300957] [dual_arm_carry_task]: [P2B_PATH] 36,0.171239,-0.472888,-0.253371,-2.383508,0.030814,1.903156,0.049303,0.173720,-0.431621,-0.097851,-2.319796,0.029008,1.885078,0.210838
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354310592] [dual_arm_carry_task]: [P2B_PATH] 37,0.176302,-0.463661,-0.260862,-2.384321,0.031725,1.912976,0.027553,0.178856,-0.421174,-0.100744,-2.318726,0.029866,1.894363,0.193864
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354320524] [dual_arm_carry_task]: [P2B_PATH] 38,0.181364,-0.454435,-0.268353,-2.385135,0.032636,1.922796,0.005803,0.183992,-0.410728,-0.103637,-2.317655,0.030723,1.903649,0.176889
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354327052] [dual_arm_carry_task]: [P2B_PATH] 39,0.186427,-0.445208,-0.275843,-2.385948,0.033547,1.932616,-0.015947,0.189127,-0.400281,-0.106529,-2.316585,0.031581,1.912934,0.159915
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354332968] [dual_arm_carry_task]: [P2B_PATH] 40,0.191489,-0.435981,-0.283334,-2.386761,0.034458,1.942437,-0.037697,0.194263,-0.389834,-0.109422,-2.315515,0.032438,1.922220,0.142940
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354338850] [dual_arm_carry_task]: [P2B_PATH] 41,0.196552,-0.426755,-0.290824,-2.387574,0.035369,1.952257,-0.059447,0.199399,-0.379388,-0.112315,-2.314444,0.033296,1.931506,0.125966
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354347745] [dual_arm_carry_task]: [P2B_PATH] 42,0.201614,-0.417528,-0.298315,-2.388388,0.036280,1.962077,-0.081197,0.204535,-0.368941,-0.115208,-2.313374,0.034154,1.940791,0.108992
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354353568] [dual_arm_carry_task]: [P2B_PATH] 43,0.206677,-0.408302,-0.305806,-2.389201,0.037191,1.971897,-0.102947,0.209671,-0.358495,-0.118101,-2.312304,0.035011,1.950077,0.092017
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354359614] [dual_arm_carry_task]: [P2B_PATH] 44,0.211739,-0.399075,-0.313296,-2.390014,0.038102,1.981717,-0.124697,0.214807,-0.348048,-0.120994,-2.311233,0.035869,1.959363,0.075043
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354366003] [dual_arm_carry_task]: [P2B_PATH] 45,0.216802,-0.389849,-0.320787,-2.390828,0.039013,1.991537,-0.146447,0.219942,-0.337601,-0.123887,-2.310163,0.036727,1.968648,0.058068
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354373499] [dual_arm_carry_task]: [P2B_PATH] 46,0.221864,-0.380622,-0.328278,-2.391641,0.039924,2.001357,-0.168197,0.225078,-0.327155,-0.126779,-2.309093,0.037584,1.977934,0.041094
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354379629] [dual_arm_carry_task]: [P2B_PATH] 47,0.226927,-0.371395,-0.335768,-2.392454,0.040835,2.011177,-0.189947,0.230214,-0.316708,-0.129672,-2.308022,0.038442,1.987219,0.024120
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354385515] [dual_arm_carry_task]: [P2B_PATH] 48,0.231989,-0.362169,-0.343259,-2.393267,0.041746,2.020997,-0.211697,0.235350,-0.306262,-0.132565,-2.306952,0.039299,1.996505,0.007145
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354391472] [dual_arm_carry_task]: [P2B_PATH] 49,0.237052,-0.352942,-0.350750,-2.394081,0.042657,2.030817,-0.233447,0.240486,-0.295815,-0.135458,-2.305882,0.040157,2.005791,-0.009829
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354397767] [dual_arm_carry_task]: [P2B_PATH] 50,0.242114,-0.343716,-0.358240,-2.394894,0.043568,2.040637,-0.255197,0.245622,-0.285369,-0.138351,-2.304811,0.041015,2.015076,-0.026804
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354406130] [dual_arm_carry_task]: [P2B_PATH] 51,0.247177,-0.334489,-0.365731,-2.395707,0.044479,2.050458,-0.276947,0.250758,-0.274922,-0.141244,-2.303741,0.041872,2.024362,-0.043778
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354415177] [dual_arm_carry_task]: [P2B_PATH] 52,0.252239,-0.325263,-0.373222,-2.396520,0.045390,2.060278,-0.298697,0.255893,-0.264475,-0.144137,-2.302671,0.042730,2.033647,-0.060752
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354422988] [dual_arm_carry_task]: [P2B_PATH] 53,0.257302,-0.316036,-0.380712,-2.397334,0.046301,2.070098,-0.320447,0.261029,-0.254029,-0.147029,-2.301601,0.043588,2.042933,-0.077727
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354428845] [dual_arm_carry_task]: [P2B_PATH] 54,0.262364,-0.306809,-0.388203,-2.398147,0.047212,2.079918,-0.342197,0.266165,-0.243582,-0.149922,-2.300530,0.044445,2.052219,-0.094701
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354437409] [dual_arm_carry_task]: [P2B_PATH] 55,0.267427,-0.297583,-0.395694,-2.398960,0.048123,2.089738,-0.363947,0.271301,-0.233136,-0.152815,-2.299460,0.045303,2.061504,-0.111676
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354443156] [dual_arm_carry_task]: [P2B_PATH] 56,0.272489,-0.288356,-0.403184,-2.399773,0.049034,2.099558,-0.385697,0.276437,-0.222689,-0.155708,-2.298390,0.046160,2.070790,-0.128650
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354448939] [dual_arm_carry_task]: [P2B_PATH] 57,0.277552,-0.279130,-0.410675,-2.400587,0.049944,2.109378,-0.407447,0.281573,-0.212242,-0.158601,-2.297319,0.047018,2.080075,-0.145624
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354454771] [dual_arm_carry_task]: [P2B_PATH] 58,0.282614,-0.269903,-0.418165,-2.401400,0.050855,2.119198,-0.429197,0.286708,-0.201796,-0.161494,-2.296249,0.047876,2.089361,-0.162599
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354460569] [dual_arm_carry_task]: [P2B_PATH] 59,0.287677,-0.260677,-0.425656,-2.402213,0.051766,2.129018,-0.450947,0.291844,-0.191349,-0.164387,-2.295179,0.048733,2.098647,-0.179573
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354466516] [dual_arm_carry_task]: [P2B_PATH] 60,0.292739,-0.251450,-0.433147,-2.403026,0.052677,2.138838,-0.472697,0.296980,-0.180903,-0.167279,-2.294108,0.049591,2.107932,-0.196548
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354472133] [dual_arm_carry_task]: [P2B_PATH] 61,0.297802,-0.242223,-0.440637,-2.403840,0.053588,2.148658,-0.494447,0.302116,-0.170456,-0.170172,-2.293038,0.050448,2.117218,-0.213522
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354477847] [dual_arm_carry_task]: [P2B_PATH] 62,0.302864,-0.232997,-0.448128,-2.404653,0.054499,2.158478,-0.516197,0.307252,-0.160009,-0.173065,-2.291968,0.051306,2.126504,-0.230496
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354485533] [dual_arm_carry_task]: [P2B_PATH] 63,0.307927,-0.223770,-0.455619,-2.405466,0.055410,2.168299,-0.537947,0.312388,-0.149563,-0.175958,-2.290897,0.052164,2.135789,-0.247471
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354491360] [dual_arm_carry_task]: [P2B_PATH] 64,0.312989,-0.214544,-0.463109,-2.406280,0.056321,2.178119,-0.559697,0.317523,-0.139116,-0.178851,-2.289827,0.053021,2.145075,-0.264445
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354497098] [dual_arm_carry_task]: [P2B_PATH] 65,0.318052,-0.205317,-0.470600,-2.407093,0.057232,2.187939,-0.581447,0.322659,-0.128670,-0.181744,-2.288757,0.053879,2.154360,-0.281420
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354502795] [dual_arm_carry_task]: [P2B_PATH] 66,0.323114,-0.196090,-0.478091,-2.407906,0.058143,2.197759,-0.603197,0.327795,-0.118223,-0.184637,-2.287686,0.054737,2.163646,-0.298394
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354508443] [dual_arm_carry_task]: [P2B_PATH] 67,0.328177,-0.186864,-0.485581,-2.408719,0.059054,2.207579,-0.624947,0.332931,-0.107776,-0.187529,-2.286616,0.055594,2.172932,-0.315368
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354514455] [dual_arm_carry_task]: [P2B_PATH] 68,0.333239,-0.177637,-0.493072,-2.409533,0.059965,2.217399,-0.646697,0.338067,-0.097330,-0.190422,-2.285546,0.056452,2.182217,-0.332343
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354520211] [dual_arm_carry_task]: [P2B_PATH] 69,0.338302,-0.168411,-0.500563,-2.410346,0.060876,2.227219,-0.668447,0.343203,-0.086883,-0.193315,-2.284475,0.057309,2.191503,-0.349317
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354526583] [dual_arm_carry_task]: [P2B_PATH] 70,0.343364,-0.159184,-0.508053,-2.411159,0.061787,2.237039,-0.690197,0.348339,-0.076437,-0.196208,-2.283405,0.058167,2.200788,-0.366292
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354532374] [dual_arm_carry_task]: [P2B_PATH] 71,0.348427,-0.149958,-0.515544,-2.411972,0.062698,2.246859,-0.711947,0.353474,-0.065990,-0.199101,-2.282335,0.059025,2.210074,-0.383266
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354538041] [dual_arm_carry_task]: [P2B_PATH] 72,0.353489,-0.140731,-0.523035,-2.412786,0.063609,2.256679,-0.733697,0.358610,-0.055544,-0.201994,-2.281264,0.059882,2.219360,-0.400240
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354543683] [dual_arm_carry_task]: [P2B_PATH] 73,0.358552,-0.131504,-0.530525,-2.413599,0.064520,2.266499,-0.755447,0.363746,-0.045097,-0.204887,-2.280194,0.060740,2.228645,-0.417215
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354549391] [dual_arm_carry_task]: [P2B_PATH] 74,0.363615,-0.122278,-0.538016,-2.414412,0.065431,2.276319,-0.777197,0.368882,-0.034650,-0.207779,-2.279124,0.061597,2.237931,-0.434189
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354555115] [dual_arm_carry_task]: [P2B_PATH] 75,0.368677,-0.113051,-0.545507,-2.415225,0.066342,2.286140,-0.798947,0.374018,-0.024204,-0.210672,-2.278053,0.062455,2.247216,-0.451163
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354561098] [dual_arm_carry_task]: [P2B_PATH] 76,0.373740,-0.103825,-0.552997,-2.416039,0.067253,2.295960,-0.820697,0.379154,-0.013757,-0.213565,-2.276983,0.063313,2.256502,-0.468138
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354566832] [dual_arm_carry_task]: [P2B_PATH] 77,0.378802,-0.094598,-0.560488,-2.416852,0.068164,2.305780,-0.842447,0.384289,-0.003311,-0.216458,-2.275913,0.064170,2.265788,-0.485112
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354572747] [dual_arm_carry_task]: [P2B_PATH] 78,0.383865,-0.085372,-0.567978,-2.417665,0.069075,2.315600,-0.864197,0.389425,0.007136,-0.219351,-2.274843,0.065028,2.275073,-0.502087
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354580160] [dual_arm_carry_task]: [P2B_PATH] 79,0.388927,-0.076145,-0.575469,-2.418479,0.069986,2.325420,-0.885947,0.394561,0.017583,-0.222244,-2.273772,0.065886,2.284359,-0.519061
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354588540] [dual_arm_carry_task]: [P2B_PATH] 80,0.393990,-0.066918,-0.582960,-2.419292,0.070897,2.335240,-0.907697,0.399697,0.028029,-0.225137,-2.272702,0.066743,2.293645,-0.536035
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354594341] [dual_arm_carry_task]: [P2B_PATH] 81,0.399052,-0.057692,-0.590450,-2.420105,0.071808,2.345060,-0.929447,0.404833,0.038476,-0.228029,-2.271632,0.067601,2.302930,-0.553010
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354600049] [dual_arm_carry_task]: [P2B_PATH] 82,0.404115,-0.048465,-0.597941,-2.420918,0.072719,2.354880,-0.951197,0.409969,0.048922,-0.230922,-2.270561,0.068458,2.312216,-0.569984
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354607503] [dual_arm_carry_task]: [P2B_PATH] 83,0.409177,-0.039239,-0.605432,-2.421732,0.073630,2.364700,-0.972947,0.415104,0.059369,-0.233815,-2.269491,0.069316,2.321501,-0.586959
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354613253] [dual_arm_carry_task]: [P2B_PATH] 84,0.414240,-0.030012,-0.612922,-2.422545,0.074541,2.374520,-0.994697,0.420240,0.069816,-0.236708,-2.268421,0.070174,2.330787,-0.603933
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354619470] [dual_arm_carry_task]: [P2B_PATH] 85,0.419302,-0.020786,-0.620413,-2.423358,0.075452,2.384340,-1.016447,0.425376,0.080262,-0.239601,-2.267350,0.071031,2.340073,-0.620907
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354627512] [dual_arm_carry_task]: [P2B_PATH] 86,0.424365,-0.011559,-0.627904,-2.424171,0.076363,2.394161,-1.038197,0.430512,0.090709,-0.242494,-2.266280,0.071889,2.349358,-0.637882
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354633544] [dual_arm_carry_task]: [P2B_PATH] 87,0.429427,-0.002332,-0.635394,-2.424985,0.077274,2.403981,-1.059947,0.435648,0.101155,-0.245387,-2.265210,0.072747,2.358644,-0.654856
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354639348] [dual_arm_carry_task]: [P2B_PATH] 88,0.434490,0.006894,-0.642885,-2.425798,0.078185,2.413801,-1.081697,0.440784,0.111602,-0.248279,-2.264139,0.073604,2.367929,-0.671831
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354645038] [dual_arm_carry_task]: [P2B_PATH] 89,0.439552,0.016121,-0.650376,-2.426611,0.079096,2.423621,-1.103447,0.445920,0.122048,-0.251172,-2.263069,0.074462,2.377215,-0.688805
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354651232] [dual_arm_carry_task]: [P2B_PATH] 90,0.444615,0.025347,-0.657866,-2.427424,0.080007,2.433441,-1.125197,0.451055,0.132495,-0.254065,-2.261999,0.075319,2.386501,-0.705779
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354656899] [dual_arm_carry_task]: [P2B_PATH] 91,0.449677,0.034574,-0.665357,-2.428238,0.080918,2.443261,-1.146947,0.456191,0.142942,-0.256958,-2.260928,0.076177,2.395786,-0.722754
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354662610] [dual_arm_carry_task]: [P2B_PATH] 92,0.454740,0.043800,-0.672848,-2.429051,0.081829,2.453081,-1.168697,0.461327,0.153388,-0.259851,-2.259858,0.077035,2.405072,-0.739728
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354668370] [dual_arm_carry_task]: [P2B_PATH] 93,0.459802,0.053027,-0.680338,-2.429864,0.082740,2.462901,-1.190447,0.466463,0.163835,-0.262744,-2.258788,0.077892,2.414358,-0.756703
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354675676] [dual_arm_carry_task]: [P2B_PATH] 94,0.464828,0.062187,-0.687774,-2.430672,0.083645,2.472650,-1.212039,0.471561,0.174206,-0.265616,-2.257725,0.078744,2.423576,-0.773554
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354685738] [dual_arm_carry_task]: [P2B_PATH] 95,0.469016,0.069820,-0.693971,-2.431344,0.084398,2.480774,-1.230032,0.475810,0.182848,-0.268009,-2.256840,0.079453,2.431258,-0.787597
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354692285] [dual_arm_carry_task]: [P2B_PATH] 96,0.472040,0.075332,-0.698446,-2.431830,0.084943,2.486641,-1.243026,0.478878,0.189089,-0.269737,-2.256200,0.079965,2.436805,-0.797737
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354697924] [dual_arm_carry_task]: [P2B_PATH] 97,0.473901,0.078723,-0.701199,-2.432129,0.085277,2.490250,-1.251019,0.480766,0.192928,-0.270800,-2.255807,0.080281,2.440217,-0.803975
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354703635] [dual_arm_carry_task]: [P2B_PATH] 98,0.474598,0.079992,-0.702230,-2.432241,0.085403,2.491601,-1.254013,0.481473,0.194366,-0.271198,-2.255660,0.080399,2.441495,-0.806312
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354711838] [dual_arm_carry_task]: [P2B_PATH] 99,0.474603,0.080003,-0.702239,-2.432242,0.085404,2.491612,-1.254037,0.481479,0.194378,-0.271202,-2.255658,0.080400,2.441506,-0.806331
+[dual_arm_carry_task_node-1] [INFO] [1791945439.354715327] [dual_arm_carry_task]: [P2B_START_END] model=mujoco_hand_aabb start_source=live_current_state goal=this_round_selected_pregrasp planner=PTP waypoints=100 joints=14
+[dual_arm_carry_task_node-1] [INFO] [1791945439.361784728] [dual_arm_carry_task]:   [P2B] 逐航点碰撞检查（含最后航点 100/100）: 100 个航点，碰撞 0 处
+[dual_arm_carry_task_node-1] [INFO] [1791945439.369930490] [dual_arm_carry_task]:   [P2B] 插值分辨率: 最大单关节步长 0.0500 rad ⇒ 共细分 99 段, 检查 199 个状态（航点 100）。这是离散采样检查，**不是**连续碰撞的数学保证
+[dual_arm_carry_task_node-1] [INFO] [1791945439.369952635] [dual_arm_carry_task]:   [P2B] 自碰撞口径: 沿用既有 SRDF/ACM 豁免，含同臂 hand↔link6(Never)/link7/link8 等继承项；跨臂允许项已在验证副本中关闭。结果是在该规则下的结果
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409737600] [dual_arm_carry_task]:   [P2B][中段负例-注入] 候选扫描:  [mj_left_link5: 无严格内部候选] [mj_left_link6: 无严格内部候选] [mj_left_link7@32:起0/终0/中2]
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409765074] [dual_arm_carry_task]:   [P2B][中段负例-注入] 选用航点 33/100 的 mj_left_link7 位置注入 0.05 m 障碍 'a1_path_obstacle_injected'（验证注入，非规划器结果、非实际运动；起终点经确认无碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409770405] [dual_arm_carry_task]:      中间航点碰撞=2
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409781189] [dual_arm_carry_task]:      注入后整条路径上有 69 个采样状态被检出碰撞（原为 0）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409784409] [dual_arm_carry_task]:   ✓ [P2B][中段负例-注入] 端点无碰撞、中段被检出 ⇒ 路径内部确实被检查
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409828720] [dual_arm_carry_task]:   ✓ [P2B] 联合预抓取路径通过（仅规划，未执行）：planned path verified over 199 states
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409846077] [dual_arm_carry_task]: [P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=passed p2_acceptance=true
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409850689] [dual_arm_carry_task]:   [P2] p2_acceptance=true ⇒ 允许执行本轮校验过的同一 Plan
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409854308] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ----- [P3A-1] 执行本轮校验过的联合预抓取轨迹（到位即停，不下降/不抓取）-----
+[dual_arm_carry_task_node-1] [INFO] [1791945439.409858473] [dual_arm_carry_task]:   [P3A-1] 执行对象 = 本轮 P2b 刚校验的同一 Plan（100 航点，14 关节）；不重新规划、不读取旧 CSV、不经 executeApproach
+[dual_arm_carry_task_node-1] [INFO] [1791945439.412609892] [dual_arm_carry_task]:   [P3A-1] 控制器状态: [force_torque_sensor_broadcaster_left=active] [joint_state_broadcaster=active] [force_torque_sensor_broadcaster_right=active] [dual_panda_arm_controller=active]
+[dual_arm_carry_task_node-1] [INFO] [1791945439.412639074] [dual_arm_carry_task]:   [P3A-1] dual_panda_arm_controller active 且 sim_multi_mode_controller 非 active；本轮不做控制器切换
+[dual_arm_carry_task_node-1] [INFO] [1791945439.415548942] [dual_arm_carry_task]:   [P3A-1] 当前关节状态与计划首点最大差 0.000001 rad（阈值 0.020）
+[dual_arm_carry_task_node-1] [INFO] [1791945439.420055466] [dual_arm_carry_task]:   [P3A-1] 冻结对象核对: 场景中的杆与本轮冻结真值差 0.0000 mm / 0.0000°
+[dual_arm_carry_task_node-1] [INFO] [1791945439.423106081] [dual_arm_carry_task]:   [P3A-1] 速度字段校验（限制来源 live 模型）: 100/100 点，最大占用比 0.0833（关节 mj_left_joint7），未声明限制的关节计数 0
+[dual_arm_carry_task_node-1] [INFO] [1791945439.423126165] [dual_arm_carry_task]:   [P3A-1] 加速度字段校验（限制来源 live 模型）: 100/100 点，最大占用比 0.0480（关节 mj_right_joint2），未声明限制的关节计数 0
+[dual_arm_carry_task_node-1] [INFO] [1791945439.423131624] [dual_arm_carry_task]:   [P3A-1] 下发轨迹: 速度缩放 0.100 / 加速度缩放 0.100；本轮不发送任何夹爪动作、不开 weld、不 attach
+[dual_arm_carry_task_node-1] [INFO] [1791945439.423789690] [move_group_interface]: Execute request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791945449.374453949] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791945449.390391223] [dual_arm_carry_task]:   [P3A-1] 执行返回码 1（MoveIt SUCCESS 枚举，非进程退出码），用时 9.967 s（计划时长 9.810 s）
+[dual_arm_carry_task_node-1] [INFO] [1791945450.420140550] [dual_arm_carry_task]:   [P3A-1] 到位窗口（**新鲜反馈**）: 30 个样本 / 0.302 s（序号 6468），窗口内最大单关节变化 0.001990 rad（mj_left_joint7，阈值 0.002000）
+[dual_arm_carry_task_node-1] [INFO] [1791945450.420249275] [dual_arm_carry_task]:      左臂 位置误差 0.2869 mm，姿态误差 0.3779°  |  右臂 位置误差 0.6421 mm，姿态误差 0.3952°
+[dual_arm_carry_task_node-1] [INFO] [1791945450.420256555] [dual_arm_carry_task]:      到位容差: 位置 5.0 mm / 姿态 2.00°
+[dual_arm_carry_task_node-1] [INFO] [1791945450.424009916] [dual_arm_carry_task]:   [P3A-1] 观察（非判据）: 执行后**规划场景中**的杆对象相对冻结真值偏移 0.0000 mm —— 来源是 /get_planning_scene + PlanningSceneInterface，**不是** MuJoCo 物理真值；物理扰动本轮未测。预抓取到位不代表抓取成功
+[dual_arm_carry_task_node-1] [INFO] [1791945450.426980732] [dual_arm_carry_task]: [P3A_RESULT] state=PREGRASP_REACHED detail=PREGRASP_REACHED
+[dual_arm_carry_task_node-1] [INFO] [1791945450.426998779] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ----- [P3A-2B] 从预抓取位姿下降到抓取位姿（到位即停，不闭合/不 weld/不 attach）-----
+[dual_arm_carry_task_node-1] [INFO] [1791945450.437526582] [dual_arm_carry_task]:   [P3A-1] 控制器状态: [force_torque_sensor_broadcaster_left=active] [joint_state_broadcaster=active] [force_torque_sensor_broadcaster_right=active] [dual_panda_arm_controller=active]
+[dual_arm_carry_task_node-1] [INFO] [1791945450.437562259] [dual_arm_carry_task]:   [P3A-2B] 下降前先打开双爪（单指位移 0.0400 ⇒ 目标开口 0.0800 m），并要求真实反馈到位
+[dual_arm_carry_task_node-1] [INFO] [1791945450.437573236] [dual_arm_carry_task]:   [夹爪] 双臂指令 0.0400（单指位移；服务器目标开口 = 2×该值 = 0.0800 m），总预算 20.0 s，打开
+[dual_arm_carry_task_node-1] [INFO] [1791945450.439985739] [dual_arm_carry_task]:   [夹爪] 创建并复用 左 action 客户端: /mj_left_gripper_sim_node/gripper_action
+[dual_arm_carry_task_node-1] [INFO] [1791945451.493154189] [dual_arm_carry_task]:   [夹爪] 创建并复用 右 action 客户端: /mj_right_gripper_sim_node/gripper_action
+[dual_arm_carry_task_node-1] [INFO] [1791945452.573471641] [dual_arm_carry_task]:   [夹爪] 打开 left  | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 result_position=0.0800 m effort=0.00 | E_OK succeeded; gap 0.080009 m vs commanded 0.080000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791945452.573576207] [dual_arm_carry_task]:   [夹爪] 打开 right | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 result_position=0.0800 m effort=0.00 | E_OK succeeded; gap 0.080020 m vs commanded 0.080000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791945452.573593255] [dual_arm_carry_task]:   [夹爪] 双臂总用时 2.136 s（总预算 20.0 s，阶段预算各自独立计入总预算）
+[dual_arm_carry_task_node-1] [INFO] [1791945452.573610141] [dual_arm_carry_task]:   ✓ [P3A-2B] 双爪打开并实测到位，允许下降
+[dual_arm_carry_task_node-1] [INFO] [1791945452.595493164] [dual_arm_carry_task]:   [P3A-2B] 下降前 **MuJoCo 物理真值** 杆位姿: (0.500000, 0.000000, 0.020654) q=(0.00000, -0.00000, 0.08716, 0.99619)
+[dual_arm_carry_task_node-1] [INFO] [1791945452.595543856] [dual_arm_carry_task]:   [P3A-2B] 冻结参考仍适用性核对（物理真值 vs 本轮冻结真值）: 位置差 0.0000 mm（容差 5.0 mm），角度差 0.0000°（容差 5.0°）
+[dual_arm_carry_task_node-1] [INFO] [1791945452.595571482] [dual_arm_carry_task]:   [P3A-2B] 下降计划: 自 z=0.2800 到 z=0.1300（跨度 0.1500 m），21 个目标（20 段），杆 yaw=10.00°，抓手偏移 0.1500 m，末端基准 yaw=45.0°
+[dual_arm_carry_task_node-1] [INFO] [1791945452.595588771] [dual_arm_carry_task]:   [P3A-2B] 计划端点核对（对 P2a 的预抓取/抓取目标）: 最大位置差 0.000000 mm，最大姿态差 0.000000°
+[dual_arm_carry_task_node-1] [INFO] [1791945452.600997076] [dual_arm_carry_task]:   [P3A-2B] 下降起点 = 本次实际状态；与已到位预抓取解的最大**手臂**关节差 0.001653 rad（mj_left_joint7）；夹爪指关节因本轮开爪而变化，不参与此判据
+[dual_arm_carry_task_node-1] [INFO] [1791945452.611098053] [dual_arm_carry_task]:   [P3A-2B] 组合状态 IK: 21 个航点全部求解成功（同一 RobotState 内两臂联合，非两条独立单臂轨迹）
+[dual_arm_carry_task_node-1] [INFO] [1791945452.611332628] [dual_arm_carry_task]:   [P3A-2B] 相邻航点最大单关节变化 0.0277 rad（第 6 段，阈值 2.0000）
+[dual_arm_carry_task_node-1] [INFO] [1791945452.611399096] [dual_arm_carry_task]:   [P3A-2B] 计划竖直性（FK 实测，对首点）: 左 max XY 0.0001 mm / max 姿态 0.0000°；右 max XY 0.0000 mm / max 姿态 0.0000°（阈值 XY 2.0000 mm / 姿态 1.0000°）
+[dual_arm_carry_task_node-1] [INFO] [1791945452.615286467] [dual_arm_carry_task]:   [P3A-2B] TOTG: 26 轨迹点（IK 航点 21），时长 2.405 s —— 以下所有检查针对**这条最终轨迹**，不再针对 TOTG 之前的航点
+[dual_arm_carry_task_node-1] [WARN] [1791945452.615307864] [dual_arm_carry_task]:   [P3A-2B][负例-注入] 已把最终轨迹末点的第 1 个关节位置 +100 rad（仅验证用；不执行任何运动）
+[dual_arm_carry_task_node-1] [INFO] [1791945452.619241303] [dual_arm_carry_task]:   [P3A-2B] 最终轨迹检查基线: 判据模型 + 本轮**真实打开的指关节**（最大指位移 0.0400 m）
+[dual_arm_carry_task_node-1] [ERROR] [1791945452.622056739] [dual_arm_carry_task]:   ✗ [P3A-2B] E_2B_FINAL_LIMIT at point 25: joint mj_left_joint1 = 100.253246
+[dual_arm_carry_task_node-1] [ERROR] [1791945452.622105757] [dual_arm_carry_task]:   ✗ [P3A-2B] 下降路径未通过校验，不下发运动：E_2B_FINAL_LIMIT at point 25: joint mj_left_joint1 = 100.253246
+[dual_arm_carry_task_node-1] [INFO] [1791945452.622114640] [dual_arm_carry_task]: [P3A2B_RESULT] state=FAILED detail=E_2B_FINAL_LIMIT at point 25: joint mj_left_joint1 = 100.253246
+[dual_arm_carry_task_node-1] [INFO] [1791945452.622119514] [dual_arm_carry_task]:   [P3A-2B] 本轮结束于独立的 FAILED；夹爪保持打开，未闭合、未 weld、未 attach、未抬升、未搬运
+[dual_arm_carry_task_node-1] [ERROR] [1791945452.822226390] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [ERROR] [1791945452.822268526] [dual_arm_carry_task]:     ✗ 任务失败！
+[dual_arm_carry_task_node-1] [INFO] [1791945452.822277182] [dual_arm_carry_task]: 已发布任务失败状态(ERROR)。
+[dual_arm_carry_task_node-1] [ERROR] [1791945452.822281085] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791945452.822284931] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791945452.822288086] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[dual_arm_carry_task_node-1] [INFO] [1791945453.038561200] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 101349]

@@ -8,6 +8,8 @@
 #include <chrono>
 #include <atomic>
 #include <cmath>
+#include <deque>
+#include <map>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -134,6 +136,127 @@ Vec3 rotateZ(const Vec3& v, double yaw)
   return Vec3{v.x * c - v.y * s, v.x * s + v.y * c, v.z};
 }
 
+bool makeFingerJointSnapshot(const FingerFeedbackSample& left,
+                             const FingerFeedbackSample& right,
+                             const std::map<std::string, double>& global_positions,
+                             std::int64_t global_stamp_ns,
+                             double global_recv_steady_sec,
+                             double opened_after_steady_sec,
+                             double now_steady_sec,
+                             const std::array<std::uint64_t, 2>& baseline_seq,
+                             double max_age_sec,
+                             double source_tolerance_m,
+                             FingerJointSnapshot& out,
+                             std::string& reason)
+{
+  const FingerFeedbackSample* samples[] = {&left, &right};
+  if (!finite(now_steady_sec) || !finite(opened_after_steady_sec) ||
+      !finite(global_recv_steady_sec) || !(max_age_sec > 0.0) ||
+      !(source_tolerance_m >= 0.0)) {
+    reason = "invalid freshness/check configuration";
+    return false;
+  }
+  FingerJointSnapshot candidate;
+  const auto& names = fingerJointNames();
+  for (std::size_t arm = 0; arm < 2; ++arm) {
+    const FingerFeedbackSample& sample = *samples[arm];
+    if (sample.seq == 0 || sample.seq <= baseline_seq[arm]) {
+      reason = (arm == 0 ? "left" : "right") + std::string(" feedback sequence did not advance");
+      return false;
+    }
+    if (sample.stamp_ns <= 0 || sample.recv_steady_sec < opened_after_steady_sec ||
+        now_steady_sec - sample.recv_steady_sec > max_age_sec) {
+      reason = (arm == 0 ? "left" : "right") +
+               std::string(" feedback is unstamped, pre-open, or stale");
+      return false;
+    }
+    if (!finite(sample.q1) || !finite(sample.q2) || sample.q1 < 0.0 || sample.q2 < 0.0 ||
+        sample.q1 > 0.04 + source_tolerance_m || sample.q2 > 0.04 + source_tolerance_m) {
+      reason = (arm == 0 ? "left" : "right") + std::string(" feedback contains invalid finger positions");
+      return false;
+    }
+    candidate.source_seq[arm] = sample.seq;
+    candidate.source_stamp_ns[arm] = sample.stamp_ns;
+    candidate.source_recv_steady_sec[arm] = sample.recv_steady_sec;
+    candidate.positions[arm * 2] = sample.q1;
+    candidate.positions[arm * 2 + 1] = sample.q2;
+  }
+
+  std::size_t global_finger_values = 0;
+  for (const auto& name : names) {
+    if (global_positions.count(name) != 0) ++global_finger_values;
+  }
+  if (global_finger_values != 0 && global_finger_values != names.size()) {
+    reason = "aggregated /joint_states contains only a partial four-finger state";
+    return false;
+  }
+  if (global_finger_values == names.size()) {
+    if (global_stamp_ns <= 0 || global_recv_steady_sec < opened_after_steady_sec ||
+        now_steady_sec - global_recv_steady_sec > max_age_sec) {
+      reason = "four-finger /joint_states sample is unstamped, pre-open, or stale";
+      return false;
+    }
+    for (std::size_t i = 0; i < names.size(); ++i) {
+      const auto it = global_positions.find(names[i]);
+      if (!finite(it->second)) {
+        reason = "aggregated /joint_states contains a non-finite value for " + names[i];
+        return false;
+      }
+      if (std::fabs(it->second - candidate.positions[i]) > source_tolerance_m) {
+        reason = "feedback source conflict for " + names[i] + ": private=" +
+                 fmt(candidate.positions[i]) + " global=" + fmt(it->second);
+        return false;
+      }
+    }
+    candidate.global_joint_state_matched = true;
+  }
+  out = candidate;
+  reason = "ok";
+  return true;
+}
+
+bool mapMeasuredFingerPositions(const std::array<double, 4>& positions,
+                                std::map<std::string, double>& by_joint_name,
+                                std::string& reason)
+{
+  const auto& names = fingerJointNames();
+  std::map<std::string, double> candidate;
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    if (!finite(positions[i]) || positions[i] < 0.0 || positions[i] > 0.0401) {
+      reason = "invalid measured value for " + names[i];
+      return false;
+    }
+    candidate.emplace(names[i], positions[i]);
+  }
+  by_joint_name = std::move(candidate);
+  reason = "ok";
+  return true;
+}
+
+Vec3 fingerClosureAxisForRodYaw(double rod_yaw_rad)
+{
+  // Quaternions are composed in matrix application order from right to left.
+  const auto multiply = [](const Quat& a, const Quat& b) {
+    return Quat{
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+  };
+  const Quat hand_rotation = multiply(
+      multiply(quatFromRpy(0.0, 0.0, rod_yaw_rad + kPi / 4.0),
+               quatFromRpy(kPi, 0.0, 0.0)),
+      quatFromRpy(0.0, 0.0, -kPi / 4.0));
+  // q * (0, 1, 0) * conjugate(q), expanded to avoid a ROS/Eigen dependency.
+  const double x = hand_rotation.x;
+  const double y = hand_rotation.y;
+  const double z = hand_rotation.z;
+  const double w = hand_rotation.w;
+  return Vec3{2.0 * (x * y - w * z),
+              1.0 - 2.0 * (x * x + z * z),
+              2.0 * (y * z + w * x)};
+}
+
 DualTarget buildDualTarget(const a1t::TruthPayload& truth,
                            const GraspGeometry& geom,
                            double height_m,
@@ -177,6 +300,164 @@ DualTarget buildGraspTarget(const a1t::TruthPayload& truth,
                             double* yaw_out)
 {
   return buildDualTarget(truth, geom, geom.grasp_height_m, yaw_out);
+}
+
+std::vector<DualTarget> buildDescentSchedule(const a1t::TruthPayload& truth,
+                                             const GraspGeometry& geom,
+                                             int steps,
+                                             double* yaw_out)
+{
+  std::vector<DualTarget> out;
+  if (steps <= 0) {
+    return out;  // caller must reject an empty schedule
+  }
+  if (yaw_out != nullptr) {
+    *yaw_out = quatYaw(truth.orientation);
+  }
+  out.reserve(static_cast<std::size_t>(steps) + 1);
+  for (int i = 0; i <= steps; ++i) {
+    const double t = static_cast<double>(i) / static_cast<double>(steps);
+    // Only the height varies; the builder supplies the same rod offsets and the
+    // same wrist orientation at every step, so the whole schedule shares the
+    // pre-grasp XY and orientation by construction.
+    const double height = geom.pre_grasp_height_m +
+                          t * (geom.grasp_height_m - geom.pre_grasp_height_m);
+    DualTarget target = buildDualTarget(truth, geom, height, nullptr);
+    out.push_back(target);
+  }
+  return out;
+}
+
+FreshWindow::FreshWindow(std::vector<std::string> joint_names, int min_samples,
+                         double min_span_sec, double settle_tol_rad)
+    : joints_(std::move(joint_names)),
+      min_samples_(min_samples > 1 ? min_samples : 1),
+      min_span_sec_(min_span_sec > 0.0 ? min_span_sec : 0.0),
+      tol_rad_(settle_tol_rad > 0.0 ? settle_tol_rad : 0.0)
+{
+}
+
+bool FreshWindow::add(unsigned long long seq, double recv_sec,
+                      const std::map<std::string, double>& positions,
+                      std::string& reject_reason)
+{
+  if (have_ && seq == last_seq_) {
+    // The same feedback, read again. Counting it would let a single sample
+    // "confirm" arrival.
+    reject_reason = "E_FRESH_STALE_SEQ";
+    return false;
+  }
+  for (const std::string& j : joints_) {
+    const auto it = positions.find(j);
+    if (it == positions.end() || !std::isfinite(it->second)) {
+      reject_reason = "E_FRESH_INCOMPLETE";
+      return false;
+    }
+  }
+  have_ = true;
+  last_seq_ = seq;
+  Sample s;
+  s.seq = seq;
+  s.recv_sec = recv_sec;
+  s.positions = positions;
+  window_.push_back(std::move(s));
+
+  // Slide: drop the oldest sample only while what REMAINS still spans the
+  // window. Comparing `back - front > span` instead would over-prune by one
+  // whenever the arithmetic lands a hair above the span.
+  while (window_.size() > 1 &&
+         (window_.back().recv_sec - window_[1].recv_sec) >= min_span_sec_) {
+    window_.pop_front();
+  }
+  reject_reason.clear();
+  return true;
+}
+
+bool FreshWindow::ready() const
+{
+  if (window_.size() < static_cast<std::size_t>(min_samples_)) {
+    return false;
+  }
+  return (window_.back().recv_sec - window_.front().recv_sec) >= min_span_sec_;
+}
+
+FreshWindow::Verdict FreshWindow::verdict() const
+{
+  Verdict v;
+  v.samples = window_.size();
+  v.span_sec = window_.size() > 1 ? (window_.back().recv_sec - window_.front().recv_sec) : 0.0;
+  v.last_seq = window_.empty() ? 0ULL : window_.back().seq;
+  if (!window_.empty()) {
+    v.last_positions = window_.back().positions;
+  }
+  v.ready = ready();
+  if (window_.empty()) {
+    v.reason_code = "E_FRESH_NO_SAMPLES";
+    v.detail = "no NEW feedback sample arrived";
+    return v;
+  }
+  for (const std::string& j : joints_) {
+    double lo = window_.front().positions.at(j);
+    double hi = lo;
+    for (const Sample& s : window_) {
+      lo = std::min(lo, s.positions.at(j));
+      hi = std::max(hi, s.positions.at(j));
+    }
+    if (hi - lo > v.worst_change_rad) {
+      v.worst_change_rad = hi - lo;
+      v.worst_joint = j;
+    }
+  }
+  if (!v.ready) {
+    v.reason_code = "E_FRESH_WINDOW_INCOMPLETE";
+    v.detail = "only " + std::to_string(v.samples) + " new sample(s) over " +
+               std::to_string(v.span_sec) + " s";
+    return v;
+  }
+  v.ok = v.worst_change_rad <= tol_rad_;
+  v.reason_code = v.ok ? "E_OK" : "E_FRESH_NOT_SETTLED";
+  v.detail = "whole-window per-joint spread " + std::to_string(v.worst_change_rad) +
+             " rad (" + (v.worst_joint.empty() ? "-" : v.worst_joint) + ") over " +
+             std::to_string(v.samples) + " new samples / " + std::to_string(v.span_sec) + " s";
+  return v;
+}
+
+StraightDescentDeviation straightDescentDeviation(const std::vector<ArmTarget>& achieved)
+{
+  StraightDescentDeviation out;
+  if (achieved.empty()) {
+    out.reason_code = "E_DESCENT_EMPTY";
+    out.detail = "no achieved poses to measure";
+    return out;
+  }
+  for (std::size_t i = 0; i < achieved.size(); ++i) {
+    if (!finite(achieved[i].position) || !finite(achieved[i].orientation)) {
+      out.reason_code = "E_DESCENT_NOT_FINITE";
+      out.detail = "sample " + std::to_string(i) + " is not finite";
+      return out;
+    }
+  }
+  const ArmTarget& ref = achieved.front();
+  for (std::size_t i = 0; i < achieved.size(); ++i) {
+    const double dx = achieved[i].position.x - ref.position.x;
+    const double dy = achieved[i].position.y - ref.position.y;
+    const double xy = std::sqrt(dx * dx + dy * dy);
+    if (xy > out.max_xy_m) {
+      out.max_xy_m = xy;
+      out.worst_xy_index = i;
+    }
+    const double ang = a1t::rotationDistanceRad(ref.orientation, achieved[i].orientation);
+    if (ang > out.max_angle_rad) {
+      out.max_angle_rad = ang;
+      out.worst_angle_index = i;
+    }
+  }
+  out.ok = true;
+  out.reason_code = "E_OK";
+  out.detail = "max XY deviation " + std::to_string(out.max_xy_m * 1000.0) +
+               " mm, max angle deviation " + std::to_string(out.max_angle_rad * 180.0 / M_PI) +
+               " deg over " + std::to_string(achieved.size()) + " samples";
+  return out;
 }
 
 // ---------------------------------------------------------------------------

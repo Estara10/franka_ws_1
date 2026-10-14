@@ -13,10 +13,12 @@
   <depend>rclcpp_lifecycle</depend>
   <depend>mujoco_ros2_control</depend>
   <depend>franka_msgs</depend>
+  <depend>dual_arm_a1_msgs</depend>
   <depend>hardware_interface</depend>
   <depend>pluginlib</depend>
   <depend>std_msgs</depend>
 
+  <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_clang_format</test_depend>
   <test_depend>ament_cmake_copyright</test_depend>
   <test_depend>ament_cmake_cppcheck</test_depend>

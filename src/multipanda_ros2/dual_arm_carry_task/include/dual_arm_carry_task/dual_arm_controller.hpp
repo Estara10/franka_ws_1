@@ -28,6 +28,30 @@ struct A1VerifyContext {
     // The exact plan P2b verified. Executed verbatim -- never re-planned.
     moveit::planning_interface::MoveGroupInterface::Plan plan;
     bool plan_valid {false};
+
+    // A1 P3a-2b: the descent to the grasp pose, generated from the ACTUAL
+    // reached pre-grasp state and verified this round. Executed verbatim.
+    a1v::DualTarget grasp_target;
+    std::map<std::string, double> grasp_joints;
+    std::shared_ptr<moveit::core::RobotState> descent_start;
+    std::vector<std::shared_ptr<moveit::core::RobotState>> descent_waypoints;
+    moveit::planning_interface::MoveGroupInterface::Plan descent_plan;
+    bool descent_plan_valid {false};
+    // Measured departure of the verified path from a straight vertical line.
+    a1v::StraightDescentDeviation descent_deviation;
+    double descent_span_m {0.0};
+    bool pregrasp_reached_this_round {false};
+};
+
+// A1 P3a-2b: physical rod truth read from MuJoCo, kept separate from anything
+// the planning scene reports so the two are never confused.
+struct MujocoRodTruth {
+    bool ok {false};
+    a1v::Vec3 position;
+    a1v::Quat orientation;
+    a1v::Vec3 linear_velocity;
+    a1v::Vec3 angular_velocity;
+    std::string detail;
 };
 
 class DualArmController {
@@ -67,6 +91,53 @@ public:
     // A1 P3a-1: execute the SAME plan P2b verified, in this simulation instance,
     // then stop. Never re-plans, never descends, never touches gripper/weld.
     bool executePregrasp(const a1t::TruthPayload& truth, std::string& detail);
+    // A1 P3a-2b: open both grippers, then descend from the reached pre-grasp
+    // pose to the grasp pose along world Z and stop. Never closes, welds,
+    // attaches or lifts.
+    bool runGraspDescent(const a1t::TruthPayload& truth, std::string& detail);
+    bool runGraspContact(const a1t::TruthPayload& truth, std::string& detail);
+    bool runIdealWeldCarry(const a1t::TruthPayload& truth, std::string& detail);
+    // A1 P3a-2b: build the Cartesian descent from the ACTUAL reached pre-grasp
+    // state, solve it with combined-state IK on the criterion model, and verify
+    // every waypoint and interpolated state. Nothing is dispatched here.
+    bool buildAndVerifyGraspDescent(const a1t::TruthPayload& truth,
+                                    const a1v::FingerJointSnapshot& fingers,
+                                    std::string& detail);
+    bool awaitFreshOpenFingerSnapshot(
+        double opened_after_steady_sec,
+        const std::array<std::uint64_t, 2>& baseline_seq,
+        a1v::FingerJointSnapshot& out,
+        std::string& detail);
+    // Reads the rod's pose straight from MuJoCo. Explicitly NOT the planning
+    // scene: the two are reported side by side, never interchanged.
+    // `service_override` exists only so a negative example can point at a
+    // name that does not exist; normal callers leave it empty.
+    MujocoRodTruth readMujocoRodTruth(const std::string& service_override = std::string());
+
+    // A1 P3a-2b: one short window of PROVABLY FRESH joint feedback.
+    //
+    // Each sample must carry a joint_states sequence number that has not been
+    // counted yet, so re-reading the same state can never fill the window, and
+    // the settle test is the WHOLE window's per-joint spread rather than the
+    // difference between two adjacent samples.
+    struct FreshArrival {
+        bool ok {false};
+        std::string reason_code;
+        std::string detail;
+        std::size_t samples {0};
+        double window_sec {0.0};
+        double worst_joint_change_rad {0.0};
+        std::string worst_joint;
+        unsigned long long last_seq {0};
+        std::map<std::string, double> last_positions;   // the newest fresh sample
+    };
+    FreshArrival awaitFreshArrival(const std::vector<std::string>& joint_names,
+                                   double window_sec,
+                                   double settle_tol_rad);
+    // Builds a RobotState from one fresh feedback sample. Fails, rather than
+    // filling in defaults, if a joint in `positions` is missing.
+    bool freshStateFor(const std::map<std::string, double>& positions,
+                       moveit::core::RobotState& out);
     bool checkControllerStatesEnabled(std::string& detail);
     void executeApproach();
     void executeGrasp();

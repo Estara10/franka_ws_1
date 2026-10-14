@@ -15,6 +15,7 @@
 #pragma once
 
 #include <chrono>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <memory>
@@ -26,6 +27,9 @@
 #include <franka_msgs/action/grasp.hpp>
 #include <franka_msgs/action/homing.hpp>
 #include <franka_msgs/action/move.hpp>
+#include <franka_hardware/sim/gripper_command_policy.hpp>
+#include <franka_hardware/sim/gripper_shared_state.hpp>
+#include <dual_arm_a1_msgs/msg/gripper_contact_feedback.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
@@ -63,7 +67,7 @@ class GripperSimActionServer : public rclcpp::Node {
   /// @param options options for node initialization
   explicit GripperSimActionServer(const rclcpp::NodeOptions& options = rclcpp::NodeOptions(), std::string robot_name="panda");
   // GripperSimActionServer(const rclcpp::NodeOptions& options, double &gripper_cmd, std::array<double, 2> &gripper_states);
-  void initGripperPtrs(std::shared_ptr<std::array<double, 3>> states_ptr);
+  void initGripperPtrs(std::shared_ptr<GripperSharedState> states_ptr);
  private:
   /// describes the different tasks. Each task corresponds to one action server
   enum class Task { kHoming, kMove, kGrasp, kGripperCommand };
@@ -90,7 +94,7 @@ class GripperSimActionServer : public rclcpp::Node {
   const int k_default_state_publish_rate = 30;     // default gripper state publish rate
   const int k_default_feedback_publish_rate = 10;  // default action feedback publish rate
 
-  std::shared_ptr<std::array<double, 3>> gripper_states_ptr_; // cmd, width, force
+  std::shared_ptr<GripperSharedState> gripper_states_ptr_;  // guarded handoff, see the header
 
   rclcpp_action::Server<Homing>::SharedPtr homing_server_;
   rclcpp_action::Server<Move>::SharedPtr move_server_;
@@ -100,6 +104,8 @@ class GripperSimActionServer : public rclcpp::Node {
   std::mutex gripper_state_mutex_;
   franka::GripperState current_gripper_state_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_states_publisher_;
+  rclcpp::Publisher<dual_arm_a1_msgs::msg::GripperContactFeedback>::SharedPtr contact_feedback_publisher_;
+  std::string robot_name_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::shared_ptr<rclcpp::Rate> cmd_rate_;
   bool is_canceled_;
@@ -110,7 +116,18 @@ class GripperSimActionServer : public rclcpp::Node {
   std::vector<std::string> joint_names_;
   std::chrono::nanoseconds future_wait_timeout_{0};
 
-  franka::GripperState getGripperState();
+  /// What one bounded, feedback-driven move produced.
+  struct GripperArrival {
+    bool reached {false};
+    bool contact_confirmed {false};
+    /// True only when `snapshot` is the feedback sample that satisfied arrival.
+    /// The action result uses this saved snapshot rather than re-reading.
+    bool has_snapshot {false};
+    GripperFeedback snapshot;
+  };
+
+  /// Builds the franka_msgs-style state from one feedback snapshot.
+  franka::GripperState getGripperState(const GripperFeedback& fb);
   void publishGripperState();
 
   /// Writes the actuator command for a desired TOTAL gap.
@@ -121,14 +138,40 @@ class GripperSimActionServer : public rclcpp::Node {
   /// with ctrlrange [0, 0.08] and a joint range of [0, 0.04]. Commanding the
   /// 0-255 value the previous code used therefore saturated the actuator for
   /// every command.
-  void writeGapCommand(double gap_m);
+  ///
+  /// Returns false, and writes nothing, for a non-finite gap: a NaN command
+  /// must never be silently turned into a full close, which is where the old
+  /// `isFinite ? x : 0.0` fallback ended up.
+  bool writeGapCommand(double gap_m);
 
-  /// Real total gap measured from the finger joint feedback, not from a model.
-  double measuredGap() const;
+  /// Real total gap `q1 + q2` from the finger joint feedback, or NaN when no
+  /// valid feedback is available. Not one finger doubled.
+  double measuredGap();
 
-  /// Bounded, feedback-driven move. Returns true only when the measured gap
-  /// reached `width` within `tol`, or a cancel/timeout ended it.
-  bool driveToGap(double width, double speed, double tol, bool stop_on_contact);
+  /// Bounded, feedback-driven move to a total gap `width_m`.
+  ///
+  /// Returns reached=true ONLY when the measurement arrived inside `tol` on a
+  /// run of `kStableSamples` genuinely new feedback samples (strictly
+  /// increasing sequence numbers) whose whole-window spread is within
+  /// `kStableDelta`, with the full command already issued and no cancel or
+  /// deadline expiry. Contact completion is selected only by an explicit
+  /// Grasp action. On success `out.snapshot` holds that feedback sample.
+  GripperArrival driveToGap(double width_m, double speed_m_s, double tol_m,
+                            GripperCompletionPolicy completion_policy,
+                            bool hold_after_bilateral_contact = false);
+
+  /// Optional raw trace of the four real finger values while a move runs.
+  ///
+  /// Enabled by the environment variable `GRIPPER_TRACE_CSV`: when it holds a
+  /// path prefix, this node appends its rows to `<prefix>_<node name>.csv`.
+  /// Off by default, and deliberately a plain CSV append rather than a logging
+  /// system. Only ever written from the move loop, never from a callback.
+  void openTraceIfRequested(const std::string& robot_name);
+  void traceRow(double commanded_m, double target_m, const GripperFeedback& fb,
+                const char* phase = "move");
+  std::ofstream trace_;
+  std::mutex trace_mutex_;
+  std::chrono::steady_clock::time_point trace_begin_;
 
   /// stops the gripper and writes the result into the response
   /// @param[out] response  will be updated with the success status and error message
@@ -158,10 +201,9 @@ class GripperSimActionServer : public rclcpp::Node {
 
   /// Performs the moveit grasp command
   /// @param goal_handle
-  /// @param command_handler eiter a grasp or move command defined by the onExecuteGripperCommand
-  /// method
+  /// @param command_handler a bounded move defined by onExecuteGripperCommand
   void executeGripperCommand(const std::shared_ptr<GoalHandleGripperCommand>& goal_handle,
-                             const std::function<bool()>& command_handler);
+                             const std::function<GripperArrival()>& command_handler);
 
   /// Defines a function for either grasping or moving the gripper, depending on the current gripper
   /// state and the commanded goal. Then it calls executeGripperCommand to execute that function

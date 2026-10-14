@@ -1,0 +1,10 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p3a2c_contact_hold_yaw10_20261014",
+  "stage": "startup",
+  "outcome_code": "E_SERVICES_UNAVAILABLE",
+  "detail": "services did not appear within 120s",
+  "ros_domain_id": "79",
+  "ros_localhost_only": "1",
+  "manifest_present": false
+}

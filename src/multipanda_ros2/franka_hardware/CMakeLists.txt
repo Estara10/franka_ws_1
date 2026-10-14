@@ -33,6 +33,7 @@ find_package(rclcpp_lifecycle REQUIRED)
 find_package(mujoco_ros2_control REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(franka_msgs REQUIRED)
+find_package(dual_arm_a1_msgs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(Franka REQUIRED) # Franka_DIR will provide the path to the libfranka installation
@@ -117,6 +118,7 @@ ament_target_dependencies(
   "pluginlib"
   Franka
   franka_msgs
+  dual_arm_a1_msgs
   std_srvs
   std_msgs
 )
@@ -141,6 +143,13 @@ install(
 )
 
 if(BUILD_TESTING)
+    # A1 P3a-2a: the gripper feedback handoff and its stability window are
+    # header-only and ROS-free, so they are tested directly against the same
+    # code the server runs.
+    find_package(ament_cmake_gtest REQUIRED)
+    ament_add_gtest(test_gripper_shared_state test/test_gripper_shared_state.cpp)
+    target_include_directories(test_gripper_shared_state PRIVATE include)
+
     find_package(ament_cmake_clang_format REQUIRED)
     find_package(ament_cmake_copyright REQUIRED)
     find_package(ament_cmake_cppcheck REQUIRED)

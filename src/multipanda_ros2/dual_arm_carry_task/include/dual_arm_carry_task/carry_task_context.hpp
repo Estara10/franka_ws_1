@@ -26,6 +26,7 @@
 #include <moveit/robot_trajectory/robot_trajectory.h>
 #include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
 #include <dual_arm_a1_msgs/msg/rod_pose_truth.hpp>
+#include <dual_arm_a1_msgs/msg/gripper_contact_feedback.hpp>
 #include "dual_arm_carry_task/a1_truth.hpp"
 #include "dual_arm_carry_task/a1_sample_validator.hpp"
 #include <memory>
@@ -33,6 +34,7 @@
 #include <chrono>
 #include <set>
 #include <map>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <atomic>
 #include <mutex>
 
@@ -49,6 +51,8 @@ enum class TaskState {
     RETREAT,     // 撤退至初始位置
     PREPARED,    // A1 P1b: 真值已冻结且规划场景已同步确认；仅准备完成
     PREGRASP_REACHED,  // A1 P3a-1: 已执行本轮校验过的预抓取轨迹并实测到位；不是搬运 DONE
+    GRASP_POSE_REACHED, // A1 P3a-2b: 已下降到抓取位姿并实测到位；夹爪保持打开，不是抓取成功
+    GRASP_CONTACT_CONFIRMED, // A1 P3a-2c: 双手双指对杆接触并通过新鲜稳定窗口
     GRIPPER_TEST_DONE, // A1 P3a-2a: 空载开合测试结束；机械臂未动，不是搬运 DONE
     DONE,
     ERROR
@@ -165,6 +169,109 @@ public:
     double pregrasp_stable_window_sec_ {0.3};
     double pregrasp_stable_tol_rad_ {0.002};
     double pregrasp_exec_timeout_sec_ {90.0};
+
+    // A1 P3a-2b: the descent from the reached pre-grasp pose to the grasp pose.
+    // Off by default; enabling it never unlocks the legacy carry FSM.
+    bool grasp_descent_ {false};
+    bool grasp_contact_close_ {false};
+    std::string grasp_model_ {"none"};
+    std::atomic<bool> weld_state_received_ {false};
+    std::atomic<bool> weld_state_active_ {false};
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr weld_state_sub_;
+    // Number of SEGMENTS in the Cartesian descent, so the path holds steps+1
+    // targets including both ends.
+    int descent_steps_ {20};
+    // How far the ACHIEVED end-effector poses may depart from a straight
+    // vertical descent before the path is rejected. The descent is only called
+    // "along world Z" to the extent this measurement shows it is.
+    double descent_max_xy_dev_m_ {0.002};
+    double descent_max_angle_dev_deg_ {1.0};
+    // A1 P3a-2b: physical rod truth, read from MuJoCo before and after the
+    // descent so the physics measurement is reported separately from the
+    // planning-scene object.
+    std::string mujoco_get_body_state_service_ {"/get_body_state"};
+    std::string mujoco_rod_body_name_ {"obj_rod_01"};
+    std::string mujoco_admin_hash_ {""};
+    double mujoco_truth_timeout_sec_ {2.0};
+    // Tolerance for "the rod the arm is about to descend onto is still the rod
+    // this round froze". Reuses the same pose-consistency bound the pre-grasp
+    // stage already applies to the planning scene (5 mm / 5 deg).
+    double descent_truth_pos_tol_m_ {0.005};
+    double descent_truth_angle_tol_deg_ {5.0};
+    // Test-only controlled injections for the P3a-2b negative examples. Both are
+    // empty by default; when set they deliberately damage one thing so the
+    // rejection path can be shown to fire and to dispatch nothing.
+    //   descent_negative_final: "" | "position" | "collision"
+    //   descent_negative_truth: "" | "unavailable" | "offset"
+    std::string descent_negative_final_;
+    std::string descent_negative_truth_;
+
+    // A1 P3a-2b: fresh joint feedback for the arrival window.
+    //
+    // `getCurrentState()` returns whatever the monitor last assembled; calling
+    // it twice in a row can hand back the same sample, so it cannot by itself
+    // prove that new feedback arrived. This subscription carries the joint
+    // values together with a monotonically increasing sequence number and the
+    // moment the message arrived, which is what the arrival window counts.
+    struct JointFeedback {
+        unsigned long long seq {0};
+        double recv_steady_sec {0.0};
+        rclcpp::Time stamp;
+        bool stamp_valid {false};
+        std::map<std::string, double> positions;
+    };
+    std::string joint_states_topic_ {"/joint_states"};
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_sub_;
+    mutable std::mutex joint_feedback_mutex_;
+    JointFeedback latest_joint_feedback_;
+
+    struct GripperContactFeedback {
+        std::string arm;
+        double q1 {0.0};
+        double q2 {0.0};
+        bool left_contact {false};
+        bool right_contact {false};
+        unsigned long long seq {0};
+        std::int64_t stamp_ns {0};
+        double recv_steady_sec {0.0};
+    };
+    rclcpp::Subscription<dual_arm_a1_msgs::msg::GripperContactFeedback>::SharedPtr
+        gripper_contact_sub_;
+    mutable std::mutex gripper_contact_mutex_;
+    std::map<std::string, GripperContactFeedback> gripper_contact_feedback_;
+    void receiveGripperContact(const dual_arm_a1_msgs::msg::GripperContactFeedback& msg) {
+        std::lock_guard<std::mutex> guard(gripper_contact_mutex_);
+        auto& sample = gripper_contact_feedback_[msg.arm];
+        sample.arm = msg.arm;
+        sample.q1 = msg.finger_q1;
+        sample.q2 = msg.finger_q2;
+        sample.left_contact = msg.left_finger_rod_contact;
+        sample.right_contact = msg.right_finger_rod_contact;
+        sample.seq = msg.update_seq;
+        sample.stamp_ns = static_cast<std::int64_t>(msg.header.stamp.sec) * 1000000000LL +
+                          static_cast<std::int64_t>(msg.header.stamp.nanosec);
+        sample.recv_steady_sec = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+    bool latestGripperContact(const std::string& arm, GripperContactFeedback& out) const {
+        std::lock_guard<std::mutex> guard(gripper_contact_mutex_);
+        const auto it = gripper_contact_feedback_.find(arm);
+        if (it == gripper_contact_feedback_.end() || it->second.seq == 0) return false;
+        out = it->second;
+        return true;
+    }
+
+    /// Copies the newest feedback under the lock. Returns false when nothing has
+    /// arrived yet, so "no feedback" can never be read as a sample.
+    bool latestJointFeedback(JointFeedback& out) const
+    {
+        std::lock_guard<std::mutex> guard(joint_feedback_mutex_);
+        if (latest_joint_feedback_.seq == 0) {
+            return false;
+        }
+        out = latest_joint_feedback_;
+        return true;
+    }
 
     // A1 P3a-2a: gripper action interface bounds. The stage budgets are
     // per-stage and are additionally clamped by the single total budget, so two

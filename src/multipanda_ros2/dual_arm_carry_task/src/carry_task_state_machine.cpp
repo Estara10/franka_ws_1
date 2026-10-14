@@ -1,5 +1,5 @@
 #include "dual_arm_carry_task/carry_task_context.hpp"
-#include "dual_arm_carry_task/gripper_controller.hpp"
+#include "dual_arm_carry_task/gripper_client.hpp"
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
 
 namespace {
@@ -19,6 +19,8 @@ const char* to_stage_name(TaskState state)
         case TaskState::RETREAT: return "RETREAT";
         case TaskState::PREPARED: return "PREPARED";
         case TaskState::PREGRASP_REACHED: return "PREGRASP_REACHED";
+        case TaskState::GRASP_POSE_REACHED: return "GRASP_POSE_REACHED";
+        case TaskState::GRASP_CONTACT_CONFIRMED: return "GRASP_CONTACT_CONFIRMED";
         case TaskState::GRIPPER_TEST_DONE: return "GRIPPER_TEST_DONE";
         case TaskState::DONE: return "DONE";
         case TaskState::ERROR: return "ERROR";
@@ -102,6 +104,26 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<double>("pregrasp_stable_window_sec", 0.3);
         this->declare_parameter<double>("pregrasp_stable_tol_rad", 0.002);
         this->declare_parameter<double>("pregrasp_exec_timeout_sec", 90.0);
+
+        // A1 P3a-2b: descend from the reached pre-grasp pose to the grasp pose.
+        // Off by default, and only reachable on top of a pre-grasp this run
+        // actually reached.
+        this->declare_parameter<bool>("grasp_descent", false);
+        this->declare_parameter<bool>("grasp_contact_close", false);
+        this->declare_parameter<std::string>("grasp_model", "none");
+        this->declare_parameter<int>("descent_steps", 20);
+        this->declare_parameter<double>("descent_max_xy_dev_m", 0.002);
+        this->declare_parameter<double>("descent_max_angle_dev_deg", 1.0);
+        this->declare_parameter<std::string>("mujoco_get_body_state_service",
+                                             "/get_body_state");
+        this->declare_parameter<std::string>("mujoco_rod_body_name", "obj_rod_01");
+        this->declare_parameter<std::string>("mujoco_admin_hash", "");
+        this->declare_parameter<double>("mujoco_truth_timeout_sec", 2.0);
+        this->declare_parameter<double>("descent_truth_pos_tol_m", 0.005);
+        this->declare_parameter<double>("descent_truth_angle_tol_deg", 5.0);
+        this->declare_parameter<std::string>("descent_negative_final", "");
+        this->declare_parameter<std::string>("descent_negative_truth", "");
+        this->declare_parameter<std::string>("joint_states_topic", "/joint_states");
         this->declare_parameter<double>("gripper_total_timeout_sec", 20.0);
         this->declare_parameter<double>("gripper_server_timeout_sec", 10.0);
         this->declare_parameter<double>("gripper_goal_timeout_sec", 5.0);
@@ -173,6 +195,28 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         pregrasp_stable_window_sec_ = this->get_parameter("pregrasp_stable_window_sec").as_double();
         pregrasp_stable_tol_rad_ = this->get_parameter("pregrasp_stable_tol_rad").as_double();
         pregrasp_exec_timeout_sec_ = this->get_parameter("pregrasp_exec_timeout_sec").as_double();
+        grasp_descent_ = this->get_parameter("grasp_descent").as_bool();
+        grasp_contact_close_ = this->get_parameter("grasp_contact_close").as_bool();
+        grasp_model_ = this->get_parameter("grasp_model").as_string();
+        RCLCPP_INFO(this->get_logger(),
+                    "[P3A2C_CONFIG] grasp_contact_close=%s (parameter default=false), grasp_descent=%s",
+                    grasp_contact_close_ ? "true" : "false",
+                    grasp_descent_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "[S1_CONFIG] grasp_model=%s (default=none)", grasp_model_.c_str());
+        descent_steps_ = this->get_parameter("descent_steps").as_int();
+        descent_max_xy_dev_m_ = this->get_parameter("descent_max_xy_dev_m").as_double();
+        descent_max_angle_dev_deg_ =
+            this->get_parameter("descent_max_angle_dev_deg").as_double();
+        mujoco_get_body_state_service_ =
+            this->get_parameter("mujoco_get_body_state_service").as_string();
+        mujoco_rod_body_name_ = this->get_parameter("mujoco_rod_body_name").as_string();
+        mujoco_admin_hash_ = this->get_parameter("mujoco_admin_hash").as_string();
+        mujoco_truth_timeout_sec_ = this->get_parameter("mujoco_truth_timeout_sec").as_double();
+        descent_truth_pos_tol_m_ = this->get_parameter("descent_truth_pos_tol_m").as_double();
+        descent_truth_angle_tol_deg_ =
+            this->get_parameter("descent_truth_angle_tol_deg").as_double();
+        descent_negative_final_ = this->get_parameter("descent_negative_final").as_string();
+        descent_negative_truth_ = this->get_parameter("descent_negative_truth").as_string();
         gripper_total_timeout_sec_ = this->get_parameter("gripper_total_timeout_sec").as_double();
         gripper_server_timeout_sec_ = this->get_parameter("gripper_server_timeout_sec").as_double();
         gripper_goal_timeout_sec_ = this->get_parameter("gripper_goal_timeout_sec").as_double();
@@ -218,6 +262,12 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
 
         // 创建MuJoCo weld约束控制发布器
         weld_pub_ = this->create_publisher<std_msgs::msg::Bool>("/grasp_weld_active", 10);
+        weld_state_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/grasp_weld_state", rclcpp::QoS(10),
+            [this](std_msgs::msg::Bool::ConstSharedPtr msg) {
+                weld_state_active_.store(msg->data, std::memory_order_release);
+                weld_state_received_.store(true, std::memory_order_release);
+            });
 
         // Mode B: subscribe to detected rod pose from vision node
         if (rod_pose_source_ == kRodPoseSourceVision) {
@@ -277,6 +327,35 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
                         expected_run_id_.empty() ? "<UNSET>" : expected_run_id_.c_str());
         }
 
+        // A1 P3a-2b: the arrival window needs feedback that is provably NEW.
+        // The callback only records values, a sequence number and the arrival
+        // moment, under a short lock; it does no work and never blocks.
+        joint_states_topic_ = this->get_parameter("joint_states_topic").as_string();
+        joint_states_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+            joint_states_topic_, rclcpp::QoS(10),
+            [this](sensor_msgs::msg::JointState::SharedPtr msg) {
+                JointFeedback sample;
+                std::lock_guard<std::mutex> guard(joint_feedback_mutex_);
+                sample.seq = latest_joint_feedback_.seq + 1;
+                sample.recv_steady_sec = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                sample.stamp = msg->header.stamp;
+                sample.stamp_valid = (msg->header.stamp.sec != 0 || msg->header.stamp.nanosec != 0);
+                for (std::size_t i = 0; i < msg->name.size() && i < msg->position.size(); ++i) {
+                    sample.positions[msg->name[i]] = msg->position[i];
+                }
+                latest_joint_feedback_ = std::move(sample);
+            });
+        RCLCPP_INFO(this->get_logger(),
+                    "A1 到位新鲜度: 订阅 %s（序号 + 到达时刻；重复旧样本不计数）",
+                    joint_states_topic_.c_str());
+        gripper_contact_sub_ = this->create_subscription<
+            dual_arm_a1_msgs::msg::GripperContactFeedback>(
+            "/gripper_contact_feedback", rclcpp::QoS(20),
+            [this](dual_arm_a1_msgs::msg::GripperContactFeedback::SharedPtr msg) {
+                receiveGripperContact(*msg);
+            });
+
         // A1 P3a-1: the explicit pre-grasp execution entry. Its parameter
         // combinations are fixed and checked here, so that turning it on can
         // never silently start the legacy FSM instead.
@@ -321,9 +400,71 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             }
         }
 
+        // A1 P3a-2b: the descent switch. It is a strict extension of the
+        // pre-grasp entry, so every pre-grasp requirement applies, plus its own.
+        // Enabling it can never open the legacy carrying FSM.
+        if (grasp_descent_) {
+            if (gripper_selftest_) {
+                RCLCPP_ERROR(this->get_logger(),
+                             "  ✗ grasp_descent 与 gripper_selftest 互斥：空载自检不动机械臂");
+                setCurrentState(TaskState::ERROR);
+                publish_stage(task_stage_pub_, getCurrentState());
+                return;
+            }
+            if (!pregrasp_execute_) {
+                RCLCPP_ERROR(this->get_logger(),
+                             "  ✗ grasp_descent=true 需要 pregrasp_execute=true"
+                             "（下降必须从本轮实际达到的预抓取位姿开始）");
+                setCurrentState(TaskState::ERROR);
+                publish_stage(task_stage_pub_, getCurrentState());
+                return;
+            }
+            if (descent_steps_ <= 0) {
+                RCLCPP_ERROR(this->get_logger(),
+                             "  ✗ descent_steps 必须为正（当前 %d），不把一次跳跃当作下降轨迹",
+                             descent_steps_);
+                setCurrentState(TaskState::ERROR);
+                publish_stage(task_stage_pub_, getCurrentState());
+                return;
+            }
+        }
+        if (grasp_contact_close_ && !grasp_descent_) {
+            RCLCPP_ERROR(this->get_logger(),
+                         "  ✗ grasp_contact_close=true 需要 grasp_descent=true；闭合入口必须以本轮 GRASP_POSE_REACHED 为前置条件");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (grasp_model_ != "none" && grasp_model_ != "ideal_weld") {
+            RCLCPP_ERROR(this->get_logger(), "✗ grasp_model must be none or ideal_weld");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (grasp_model_ == "ideal_weld" &&
+            (!prepare_only_ || rod_pose_source_ != kRodPoseSourceA1Truth || !p2a_check_ ||
+             !p2b_check_ || !pregrasp_execute_ || !grasp_descent_ || grasp_contact_close_ ||
+             gripper_selftest_)) {
+            RCLCPP_ERROR(this->get_logger(),
+                         "✗ ideal_weld requires A1 truth, prepare_only, P2a/P2b, pregrasp_execute, "
+                         "grasp_descent; it is exclusive with contact-close and gripper-selftest");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+
         setCurrentState(TaskState::INIT);
         publish_stage(task_stage_pub_, getCurrentState());
-        grippers_ = std::make_shared<GripperController>(this);
+        // The client takes the node and its bounds explicitly, so the same
+        // production client can be driven by the interface test.
+        GripperClientConfig gripper_cfg;
+        gripper_cfg.server_timeout_sec = gripper_server_timeout_sec_;
+        gripper_cfg.goal_timeout_sec = gripper_goal_timeout_sec_;
+        gripper_cfg.result_timeout_sec = gripper_result_timeout_sec_;
+        gripper_cfg.total_timeout_sec = gripper_total_timeout_sec_;
+        gripper_cfg.max_effort = gripper_max_effort_;
+        gripper_cfg.close_threshold = gripper_close_threshold_;
+        grippers_ = std::make_shared<GripperController>(this, gripper_cfg);
         arms_ = std::make_shared<DualArmController>(this);
 
         RCLCPP_INFO(this->get_logger(), "\n配置参数:");
@@ -342,6 +483,10 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
                         p2b_check_ ? "启用（联合预抓取路径规划与校验）" : "禁用");
             RCLCPP_INFO(this->get_logger(), "  预抓取执行(pregrasp_execute): %s",
                         pregrasp_execute_ ? "启用（执行本轮校验过的同一 Plan，到位即停）" : "禁用");
+            RCLCPP_INFO(this->get_logger(), "  下降到抓取位姿(grasp_descent): %s",
+                        grasp_descent_ ? "启用（预抓取→打开双爪→沿世界 Z 下降到抓取位姿即停；"
+                                         "不闭合、不 weld、不 attach、不抬升）"
+                                       : "禁用");
         }
         if (rod_pose_source_ == kRodPoseSourceVision) {
             RCLCPP_INFO(this->get_logger(), "  视觉模式: 启用 (目标: %.3f, %.3f, yaw=%.1f°)",
@@ -364,6 +509,8 @@ void DualArmCarryTask::executeTask()
             const TaskState state = getCurrentState();
             if (state == TaskState::DONE || state == TaskState::ERROR ||
                 state == TaskState::PREPARED || state == TaskState::PREGRASP_REACHED ||
+                state == TaskState::GRASP_POSE_REACHED ||
+                state == TaskState::GRASP_CONTACT_CONFIRMED ||
                 state == TaskState::GRIPPER_TEST_DONE) {
                 break;
             }
@@ -432,6 +579,27 @@ void DualArmCarryTask::executeTask()
             task_status_pub_->publish(msg);
             RCLCPP_INFO(get_logger(), "已发布预抓取到位状态(PREGRASP_REACHED)，不是任务 DONE。");
             RCLCPP_INFO(get_logger(), "========================================\n");
+        } else if (final_state == TaskState::GRASP_POSE_REACHED) {
+            // A1 P3a-2b: the arms descended to the grasp pose and stopped. Its
+            // own stage result -- deliberately NOT task DONE: the gripper is
+            // still OPEN, nothing was grasped, welded, attached or carried.
+            publish_stage(task_stage_pub_, TaskState::GRASP_POSE_REACHED);
+            RCLCPP_INFO(get_logger(), "\n========================================");
+            RCLCPP_INFO(get_logger(),
+                        "    ✓ 已到达抓取位姿（GRASP_POSE_REACHED）—— 夹爪保持打开，"
+                        "未闭合、未 weld、未 attach、未抬升、未搬运");
+            std_msgs::msg::String msg;
+            msg.data = "GRASP_POSE_REACHED";
+            task_status_pub_->publish(msg);
+            RCLCPP_INFO(get_logger(), "已发布抓取位姿到位状态(GRASP_POSE_REACHED)，不是任务 DONE。");
+            RCLCPP_INFO(get_logger(), "========================================\n");
+        } else if (final_state == TaskState::GRASP_CONTACT_CONFIRMED) {
+            publish_stage(task_stage_pub_, TaskState::GRASP_CONTACT_CONFIRMED);
+            std_msgs::msg::String msg;
+            msg.data = "GRASP_CONTACT_CONFIRMED";
+            task_status_pub_->publish(msg);
+            RCLCPP_INFO(get_logger(),
+                        "[P3A2C_RESULT] state=GRASP_CONTACT_CONFIRMED; 双臂静止；未启用 weld/attach，未抬升/搬运；杆仍由支撑面托住");
         } else if (final_state == TaskState::PREPARED) {
             // A1 P1b: preparation finished. This is deliberately NOT reported as
             // DONE -- nothing has been carried. It only means the truth input was

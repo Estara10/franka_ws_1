@@ -1,0 +1,5 @@
+runner_pid=152494; awaiting manifest and published truth
+truth_ready=1; manifest validated; starting feedback recorder
+task_started=1 task_pid=152582
+task_state=TASK_PROCESS_EXITED
+7797

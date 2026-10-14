@@ -1,0 +1,2 @@
+[92mjoint_state_broadcaster  [0m joint_state_broadcaster/JointStateBroadcaster          [92mactive[0m
+[92mdual_panda_arm_controller[0m joint_trajectory_controller/JointTrajectoryController  [92mactive[0m

@@ -36,7 +36,8 @@ ResultClassification classifyResult(ActionCode code,
                                     bool reached_goal,
                                     double achieved_gap_m,
                                     double commanded_gap_m,
-                                    double max_gap_m)
+                                    double max_gap_m,
+                                    double soft_limit_tol_m)
 {
   ResultClassification r;
 
@@ -56,11 +57,13 @@ ResultClassification classifyResult(ActionCode code,
                " m is negative; a physical opening cannot be negative";
     return r;
   }
-  if (std::isfinite(max_gap_m) && max_gap_m > 0.0 && achieved_gap_m > max_gap_m + 1e-9) {
+  const double allowed = soft_limit_tol_m > 0.0 ? soft_limit_tol_m : 0.0;
+  if (std::isfinite(max_gap_m) && max_gap_m > 0.0 && achieved_gap_m > max_gap_m + allowed) {
     r.ok = false;
     r.reason_code = "E_GRIPPER_GAP_OUT_OF_RANGE";
     r.detail = "reported gap " + std::to_string(achieved_gap_m) + " m exceeds the model maximum " +
-               std::to_string(max_gap_m) + " m";
+               std::to_string(max_gap_m) + " m (soft-limit tolerance " +
+               std::to_string(allowed) + " m)";
     return r;
   }
   switch (code) {
@@ -132,6 +135,40 @@ double remainingBudget(double elapsed_total_sec, double total_budget_sec)
     return 0.0;
   }
   return std::max(0.0, total_budget_sec - elapsed_total_sec);
+}
+
+BilateralContactWindow::BilateralContactWindow(std::size_t required_samples,
+                                               double max_gap_spread_m)
+    : required_(std::max<std::size_t>(1, required_samples)),
+      max_gap_spread_m_(std::max(0.0, max_gap_spread_m))
+{
+}
+
+bool BilateralContactWindow::update(unsigned long long seq, double q1_m, double q2_m,
+                                    bool left_contact, bool right_contact)
+{
+  if (seq == 0 || seq <= last_seq_) return false;
+  last_seq_ = seq;
+  if (!std::isfinite(q1_m) || !std::isfinite(q2_m) || q1_m < 0.0 || q2_m < 0.0 ||
+      !left_contact || !right_contact) {
+    gaps_.clear();
+    return false;
+  }
+  gaps_.push_back(q1_m + q2_m);
+  if (gaps_.size() > required_) gaps_.erase(gaps_.begin());
+  return confirmed();
+}
+
+bool BilateralContactWindow::confirmed() const
+{
+  return gaps_.size() == required_ && spread() <= max_gap_spread_m_;
+}
+
+double BilateralContactWindow::spread() const
+{
+  if (gaps_.empty()) return 0.0;
+  const auto bounds = std::minmax_element(gaps_.begin(), gaps_.end());
+  return *bounds.second - *bounds.first;
 }
 
 }  // namespace a1g

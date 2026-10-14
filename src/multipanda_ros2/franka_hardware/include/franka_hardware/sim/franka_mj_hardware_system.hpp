@@ -118,7 +118,9 @@ class FrankaMjHardwareSystem : public mujoco_ros2_control::MujocoRos2SystemInter
   std::map<std::string, franka::RobotState*> state_pointers_;
   std::map<std::string, ModelBase*> model_pointers_;
   std::map<std::string, std::shared_ptr<franka_gripper::GripperSimActionServer>> gripper_nodes_;
-  std::map<std::string, std::shared_ptr<std::array<double, 3>>> gripper_states_ptrs_; // cmd, width, force
+  std::map<std::string, std::shared_ptr<franka_gripper::GripperSharedState>> gripper_states_ptrs_;  // guarded handoff, see gripper_shared_state.hpp
+  struct GripperContactBodyIds { int left_finger {-1}; int right_finger {-1}; int rod {-1}; };
+  std::map<std::string, GripperContactBodyIds> gripper_contact_body_ids_;
 
   /// \brief last time the write method was called.
   rclcpp::Time last_update_sim_time_mj_;
@@ -150,6 +152,7 @@ class FrankaMjHardwareSystem : public mujoco_ros2_control::MujocoRos2SystemInter
   std::atomic<bool> weld_active_desired_{false};
   bool weld_currently_active_ = false;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr weld_sub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr weld_state_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr adaptive_pub_;
   rclcpp::Node::SharedPtr weld_node_;
   void updateWeldRelpose();       // 计算左手→铝棒 relpose

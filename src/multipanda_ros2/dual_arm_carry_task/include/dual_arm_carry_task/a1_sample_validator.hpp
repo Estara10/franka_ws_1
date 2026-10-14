@@ -14,6 +14,10 @@
 
 #include <cstddef>
 #include <functional>
+#include <deque>
+#include <array>
+#include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -25,6 +29,57 @@ using a1t::Quat;
 using a1t::Vec3;
 
 constexpr double kPi = 3.14159265358979323846;
+
+// A measured four-finger snapshot uses the private hardware feedback as its
+// source of truth and checks it against the aggregated /joint_states sample.
+// Order is deliberately fixed and shared by mapping, logs, and tests.
+inline const std::array<std::string, 4>& fingerJointNames()
+{
+  static const std::array<std::string, 4> names {{
+      "mj_left_finger_joint1", "mj_left_finger_joint2",
+      "mj_right_finger_joint1", "mj_right_finger_joint2"}};
+  return names;
+}
+
+struct FingerFeedbackSample {
+  double q1 {0.0};
+  double q2 {0.0};
+  std::uint64_t seq {0};
+  std::int64_t stamp_ns {0};
+  double recv_steady_sec {0.0};
+};
+
+struct FingerJointSnapshot {
+  std::array<double, 4> positions {{0.0, 0.0, 0.0, 0.0}};
+  std::array<std::uint64_t, 2> source_seq {{0, 0}};
+  std::array<std::int64_t, 2> source_stamp_ns {{0, 0}};
+  std::array<double, 2> source_recv_steady_sec {{0.0, 0.0}};
+  bool global_joint_state_matched {false};
+};
+
+// Validate a new, recent private feedback sample for each hand, require a
+// recent aggregated joint_states sample containing the same four measured
+// positions, then map the values by explicit joint name. No default or command
+// values are substituted when a source is incomplete or contradictory.
+bool makeFingerJointSnapshot(const FingerFeedbackSample& left,
+                             const FingerFeedbackSample& right,
+                             const std::map<std::string, double>& global_positions,
+                             std::int64_t global_stamp_ns,
+                             double global_recv_steady_sec,
+                             double opened_after_steady_sec,
+                             double now_steady_sec,
+                             const std::array<std::uint64_t, 2>& baseline_seq,
+                             double max_age_sec,
+                             double source_tolerance_m,
+                             FingerJointSnapshot& out,
+                             std::string& reason);
+bool mapMeasuredFingerPositions(const std::array<double, 4>& positions,
+                                std::map<std::string, double>& by_joint_name,
+                                std::string& reason);
+
+// Finger joints move along hand-local ±Y. Apply the real non-commuting link8
+// and hand rotations: Rz(yaw+45) Rx(pi) Rz(-45), then rotate the local +Y axis.
+Vec3 fingerClosureAxisForRodYaw(double rod_yaw_rad);
 
 // ---------------------------------------------------------------------------
 // Per-item outcome
@@ -98,6 +153,110 @@ DualTarget buildDualTarget(const a1t::TruthPayload& truth,
                            const GraspGeometry& geom,
                            double height_m,
                            double* yaw_out = nullptr);
+
+// ---------------------------------------------------------------------------
+// A1 P3a-2b: the descent schedule and its straightness measure
+// ---------------------------------------------------------------------------
+
+// The planned descent from the pre-grasp height to the grasp height.
+//
+// `steps` is the number of SEGMENTS, so the result holds steps+1 targets and
+// always includes both ends. Between consecutive entries ONLY the height
+// changes: the offsets along the rod and the wrist orientation come from the
+// same builder as the pre-grasp and grasp targets, so at t=0 and t=1 this
+// reproduces `buildPreGraspTarget` and `buildGraspTarget` exactly. A non-positive
+// `steps` yields an empty schedule, which the caller must treat as unusable
+// rather than silently descending in one jump.
+std::vector<DualTarget> buildDescentSchedule(const a1t::TruthPayload& truth,
+                                             const GraspGeometry& geom,
+                                             int steps,
+                                             double* yaw_out = nullptr);
+
+struct StraightDescentDeviation {
+  bool ok {false};
+  // Largest horizontal distance of any sample from the FIRST sample's XY.
+  double max_xy_m {0.0};
+  // Largest rotation of any sample from the FIRST sample's orientation.
+  double max_angle_rad {0.0};
+  // Index of the worst XY sample, and of the worst angle sample.
+  std::size_t worst_xy_index {0};
+  std::size_t worst_angle_index {0};
+  std::string reason_code;
+  std::string detail;
+};
+
+// ---------------------------------------------------------------------------
+// A1 P3a-2b: a window of feedback that must each be a NEW sample
+// ---------------------------------------------------------------------------
+
+// Accumulates the arrival window.
+//
+// The requirement it enforces is that a sample only counts when its sequence
+// number has advanced. Polling `getCurrentState()` twice can return the same
+// assembled state, so a loop that counted iterations could "confirm" arrival
+// from one sample read repeatedly. It also judges settle on the WHOLE window's
+// per-joint spread rather than the difference between two adjacent samples.
+class FreshWindow {
+ public:
+  FreshWindow(std::vector<std::string> joint_names, int min_samples, double min_span_sec,
+              double settle_tol_rad);
+
+  // Feeds one sample. Returns false and sets `reject_reason` when the sample was
+  // stale (its sequence number was already counted) or did not carry every
+  // named joint. A rejected sample never extends the window.
+  //
+  // The window SLIDES: once it spans more than `min_span_sec`, older samples
+  // fall out. Judging the whole run instead would keep the tail of the motion in
+  // view forever -- an arm that had come to rest would still be failed by the
+  // large step it took at the start.
+  bool add(unsigned long long seq, double recv_sec,
+           const std::map<std::string, double>& positions, std::string& reject_reason);
+
+  // True once enough NEW samples spanning at least `min_span_sec` are in the
+  // window right now.
+  bool ready() const;
+
+  // The verdict on the window as it stands. `ok` implies ready() and that the
+  // whole-window spread is inside the tolerance.
+  struct Verdict {
+    bool ready {false};
+    bool ok {false};
+    std::string reason_code;
+    std::string detail;
+    std::size_t samples {0};
+    double span_sec {0.0};
+    double worst_change_rad {0.0};
+    std::string worst_joint;
+    std::map<std::string, double> last_positions;
+    unsigned long long last_seq {0};
+  };
+  Verdict verdict() const;
+
+ private:
+  struct Sample {
+    unsigned long long seq {0};
+    double recv_sec {0.0};
+    std::map<std::string, double> positions;
+  };
+
+  std::vector<std::string> joints_;
+  int min_samples_;
+  double min_span_sec_;
+  double tol_rad_;
+  bool have_ {false};
+  unsigned long long last_seq_ {0};
+  std::deque<Sample> window_;
+};
+
+// Measures how far a sequence of achieved end-effector poses departs from a
+// straight vertical descent.
+//
+// This is the honest substitute for calling the descent "vertical": a
+// joint-space path (PTP or a joint interpolation) is NOT a straight line, and
+// only a measurement of the achieved poses can say how far off it is. The
+// reference is the first sample's XY and orientation, since the descent starts
+// wherever the arm actually is.
+StraightDescentDeviation straightDescentDeviation(const std::vector<ArmTarget>& achieved);
 
 DualTarget buildPreGraspTarget(const a1t::TruthPayload& truth,
                                const GraspGeometry& geom,

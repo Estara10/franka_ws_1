@@ -1,0 +1,15 @@
+5:[dual_arm_carry_task_node-1] [INFO] [1791952713.811598184] [dual_arm_carry_task]: [P3A2C_CONFIG] grasp_contact_close=true (parameter default=false), grasp_descent=true
+96:[dual_arm_carry_task_node-1] [INFO] [1791952715.905128682] [dual_arm_carry_task]: [P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null
+97:[dual_arm_carry_task_node-1] [INFO] [1791952715.905134259] [dual_arm_carry_task]: [P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null static_passed=true
+223:[dual_arm_carry_task_node-1] [INFO] [1791952715.980532900] [dual_arm_carry_task]: [P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=passed p2_acceptance=true
+242:[dual_arm_carry_task_node-1] [INFO] [1791952727.008616371] [dual_arm_carry_task]: [P3A_RESULT] state=PREGRASP_REACHED detail=PREGRASP_REACHED
+288:[dual_arm_carry_task_node-1] [INFO] [1791952732.808508664] [dual_arm_carry_task]: [P3A2B_RESULT] state=GRASP_POSE_REACHED detail=GRASP_POSE_REACHED
+291:[dual_arm_carry_task_node-1] [ERROR] [1791952740.819373132] [dual_arm_carry_task]: [夹爪接触] left result timeout; cancel requested, task failed
+292:[dual_arm_carry_task_node-1] [INFO] [1791952740.830561021] [dual_arm_carry_task]: [P3A2C_FEEDBACK] arm=mj_left q1=0.020502 m q2=0.020502 m total_gap=0.041004 m left_finger_obj_rod_01=1 right_finger_obj_rod_01=1 update_seq=46905 action_protocol=FAILED window_samples=0
+293:[dual_arm_carry_task_node-1] [INFO] [1791952740.830697499] [dual_arm_carry_task]: [P3A2C_FEEDBACK] arm=mj_right q1=0.040000 m q2=0.040000 m total_gap=0.080000 m left_finger_obj_rod_01=0 right_finger_obj_rod_01=0 update_seq=46900 action_protocol=FAILED window_samples=0
+294:[dual_arm_carry_task_node-1] [INFO] [1791952740.830738299] [dual_arm_carry_task]: [P3A2C_RECORD] arm_max_joint_delta=0.007788 rad worst_joint=mj_left_joint7 limit=0.002000; rod_before=(0.500000,0.000000,0.020654) rod_after_valid=1 rod_delta=0.000362 m rod_angle_delta=0.02342 deg
+295:[dual_arm_carry_task_node-1] [INFO] [1791952740.830804889] [dual_arm_carry_task]: [P3A2C_RESULT] state=FAILED detail=E_P3A2C_ACTION_FAILED_OR_UNCERTAIN
+297:[dual_arm_carry_task_node-1] [ERROR] [1791952741.031013195] [dual_arm_carry_task]: 
+299:[dual_arm_carry_task_node-1] [ERROR] [1791952741.031108526] [dual_arm_carry_task]:     ✗ 任务失败！
+300:[dual_arm_carry_task_node-1] [INFO] [1791952741.031151472] [dual_arm_carry_task]: 已发布任务失败状态(ERROR)。
+301:[dual_arm_carry_task_node-1] [ERROR] [1791952741.031173714] [dual_arm_carry_task]: ========================================

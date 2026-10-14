@@ -1,0 +1,10 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "a1_p3a2c_contact_statefix_yawp10",
+  "stage": "prepare",
+  "outcome_code": "E_TRUTH_NOT_PUBLISHED",
+  "detail": "runner did not publish truth in time",
+  "ros_domain_id": "77",
+  "ros_localhost_only": "1",
+  "manifest_present": true
+}

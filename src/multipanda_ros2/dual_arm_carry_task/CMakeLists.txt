@@ -19,6 +19,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
+find_package(franka_msgs REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(multi_mode_control_msgs REQUIRED)
 find_package(shape_msgs REQUIRED)
@@ -38,8 +39,8 @@ include_directories(
 )
 
 # Dual arm carry task node
-add_executable(dual_arm_carry_task_node 
-  src/carry_task_state_machine.cpp src/dual_arm_controller.cpp src/gripper_controller.cpp
+add_executable(dual_arm_carry_task_node
+  src/carry_task_state_machine.cpp src/dual_arm_controller.cpp
 )
 
 add_executable(communication_latency_monitor_node
@@ -70,6 +71,22 @@ target_include_directories(gripper_protocol PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
+# A1 P3a-2a: the gripper action client. It takes a plain node and a bounds
+# struct rather than the whole task context, so the interface test can drive
+# THIS client against a fake action server.
+add_library(gripper_client src/gripper_client.cpp)
+target_include_directories(gripper_client PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(gripper_client
+  rclcpp
+  rclcpp_action
+  control_msgs
+  franka_msgs
+)
+target_link_libraries(gripper_client gripper_protocol)
+
 # A1 P2a: pure, offline-testable sample validity checks (rotated footprint,
 # workspace/support judgement, shared pre-grasp/grasp target construction,
 # joint-limit and residual helpers). No ROS dependency.
@@ -98,6 +115,7 @@ ament_target_dependencies(dual_arm_carry_task_node
   tf2_geometry_msgs
   std_msgs
   control_msgs
+  franka_msgs
   moveit_msgs
   shape_msgs
   tf2_eigen
@@ -153,9 +171,12 @@ ament_target_dependencies(dual_arm_carry_task_node
   dual_arm_a1_msgs
   ament_index_cpp
   controller_manager_msgs
+  # A1 P3a-2b: the task reads the rod's physical pose from MuJoCo before and
+  # after the descent, so physics and the planning scene are never confused.
+  mujoco_ros_msgs
 )
 
-target_link_libraries(dual_arm_carry_task_node a1_truth a1_sample_validator gripper_protocol)
+target_link_libraries(dual_arm_carry_task_node a1_truth a1_sample_validator gripper_protocol gripper_client)
 
 # Install targets
 install(TARGETS
@@ -168,6 +189,7 @@ install(TARGETS
   a1_truth
   a1_sample_validator
   gripper_protocol
+  gripper_client
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -204,8 +226,21 @@ if(BUILD_TESTING)
   ament_add_gtest(test_a1_sample_validator test/test_a1_sample_validator.cpp)
   target_link_libraries(test_a1_sample_validator a1_sample_validator)
 
+  ament_add_gtest(test_s1_object_pose test/test_s1_object_pose.cpp)
+
+  ament_add_gtest(test_s1_time_scaling test/test_s1_time_scaling.cpp)
+
   ament_add_gtest(test_gripper_protocol test/test_gripper_protocol.cpp)
   target_link_libraries(test_gripper_protocol gripper_protocol)
+
+  ament_add_gtest(test_grasp_contact_acceptance test/test_grasp_contact_acceptance.cpp)
+
+  # Interface test: the production client driven against a minimal ROS fake
+  # action server. Not a helper test.
+  ament_add_gtest(test_gripper_client_faults test/test_gripper_client_faults.cpp)
+  ament_target_dependencies(test_gripper_client_faults rclcpp rclcpp_action control_msgs)
+  target_link_libraries(test_gripper_client_faults gripper_client)
+  set_tests_properties(test_gripper_client_faults PROPERTIES TIMEOUT 120)
 endif()
 
 ament_package()

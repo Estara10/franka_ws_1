@@ -1,4 +1,6 @@
 #include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
+#include <moveit/trajectory_processing/iterative_time_parameterization.h>
+#include <moveit/robot_state/conversions.h>
 #if __has_include(<moveit/trajectory_processing/ruckig_traj_smoothing.h>)
 #include <moveit/trajectory_processing/ruckig_traj_smoothing.h>
 #define DUAL_ARM_HAS_RUCKIG 1
@@ -7,17 +9,28 @@
 #endif
 #include <cctype>
 #include <cmath>
+#include <array>
+#include <fstream>
+#include <limits>
 #include <memory>
+#include <deque>
 #include <unordered_map>
 #include <vector>
 #include <moveit/collision_detection/collision_matrix.h>
+#include <moveit/robot_model/prismatic_joint_model.h>
 #include <moveit_msgs/srv/get_planning_scene.hpp>
 #include <controller_manager_msgs/srv/list_controllers.hpp>
+#include <mujoco_ros_msgs/srv/get_body_state.hpp>
+#include <cstdio>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <srdfdom/model.h>
 #include <urdf_parser/urdf_parser.h>
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
-#include "dual_arm_carry_task/gripper_controller.hpp"
+#include "dual_arm_carry_task/gripper_protocol.hpp"
+#include "dual_arm_carry_task/gripper_client.hpp"
+#include "dual_arm_carry_task/grasp_contact_acceptance.hpp"
+#include "dual_arm_carry_task/s1_object_pose.hpp"
+#include "dual_arm_carry_task/s1_time_scaling.hpp"
 
 namespace {
 constexpr double kReleaseHeightTolerance = 0.004;
@@ -928,28 +941,34 @@ void DualArmController::runGripperSelftest()
 
         // The finger joints are prismatic with limits [0.0, 0.04] and their
         // position IS the per-finger displacement, so they can be compared
-        // directly with command.position. The server's reported `position` is a
-        // separate internal width model and is recorded alongside, not instead.
+        // directly with command.position. All FOUR joints are read separately:
+        // the gripper nodes publish the two real finger values, so a total gap
+        // is q1 + q2 per gripper and not one finger doubled.
         auto logFingerJoints = [&](const char* label) {
             const moveit::core::RobotStatePtr st = ctx_->dual_arm_->getCurrentState();
             std::string vars;
             for (const std::string& v : st->getVariableNames()) {
                 vars += " " + v;
             }
-            const bool has_fingers = vars.find("finger_joint1") != std::string::npos;
-            if (!has_fingers) {
-                RCLCPP_WARN(ctx_->get_logger(),
-                            "  [P3A-2A] %s: 机器人模型中不含 finger_joint，无法读取实测指关节",
-                            label);
-                return;
+            static const char* kFour[] = {"mj_left_finger_joint1", "mj_left_finger_joint2",
+                                          "mj_right_finger_joint1", "mj_right_finger_joint2"};
+            for (const char* v : kFour) {
+                if (vars.find(v) == std::string::npos) {
+                    RCLCPP_WARN(ctx_->get_logger(),
+                                "  [P3A-2A] %s: 机器人模型中不含 %s，无法读取实测指关节",
+                                label, v);
+                    return;
+                }
             }
             st->update();
-            const double l = st->getVariablePosition("mj_left_finger_joint1");
-            const double r = st->getVariablePosition("mj_right_finger_joint1");
+            const double l1 = st->getVariablePosition(kFour[0]);
+            const double l2 = st->getVariablePosition(kFour[1]);
+            const double r1 = st->getVariablePosition(kFour[2]);
+            const double r2 = st->getVariablePosition(kFour[3]);
             RCLCPP_INFO(ctx_->get_logger(),
-                        "  [P3A-2A] %s 实测指关节: 左=%.4f m 右=%.4f m（单指位移，"
-                        "关节范围 [0.0000, 0.0400]）⇒ 实测总开口 左=%.4f 右=%.4f m",
-                        label, l, r, 2.0 * l, 2.0 * r);
+                        "  [P3A-2A] %s 实测四指: 左(%.4f, %.4f) 右(%.4f, %.4f) m ⇒ "
+                        "实测总开口 左=%.4f 右=%.4f m（各为两指之和）",
+                        label, l1, l2, r1, r2, l1 + l2, r1 + r2);
         };
 
         const char* step = "open";
@@ -1215,7 +1234,57 @@ bool DualArmController::prepareFromA1Truth()
                         } else {
                             ctx_->setCurrentState(TaskState::ERROR);
                         }
-                        return arrived;
+                        if (!arrived) {
+                            return false;
+                        }
+                        // A1 P3a-2b: with the descent switch on, continue from
+                        // the pose just reached to the grasp pose and stop.
+                        // This is a strict continuation of the pre-grasp entry:
+                        // it can never reach the legacy GRASP/FSM.
+                        if (ctx_->grasp_descent_) {
+                            std::string descent_detail;
+                            const bool descended = runGraspDescent(truth, descent_detail);
+                            RCLCPP_INFO(ctx_->get_logger(),
+                                        "[P3A2B_RESULT] state=%s detail=%s",
+                                        descended ? "GRASP_POSE_REACHED" : "FAILED",
+                                        descent_detail.c_str());
+                            if (descended) {
+                                if (ctx_->grasp_contact_close_) {
+                                    std::string contact_detail;
+                                    const bool contact = runGraspContact(truth, contact_detail);
+                                    RCLCPP_INFO(ctx_->get_logger(),
+                                        "[P3A2C_RESULT] state=%s detail=%s",
+                                        contact ? "GRASP_CONTACT_CONFIRMED" : "FAILED",
+                                        contact_detail.c_str());
+                                    RCLCPP_INFO(ctx_->get_logger(),
+                                        "  [P3A-2C] action 协议成功与任务双侧接触验收分开记录；"
+                                        "weld=0 attach=0 lift=0 carry=0");
+                                    ctx_->setCurrentState(contact ? TaskState::GRASP_CONTACT_CONFIRMED
+                                                                  : TaskState::ERROR);
+                                } else if (ctx_->grasp_model_ == "ideal_weld") {
+                                    std::string carry_detail;
+                                    const bool carried = runIdealWeldCarry(truth, carry_detail);
+                                    RCLCPP_INFO(ctx_->get_logger(),
+                                        "[S1_IDEAL_WELD_RESULT] state=%s detail=%s",
+                                        carried ? "DONE" : "FAILED", carry_detail.c_str());
+                                    ctx_->setCurrentState(carried ? TaskState::DONE : TaskState::ERROR);
+                                } else {
+                                    RCLCPP_INFO(ctx_->get_logger(),
+                                        "  [P3A-2B] 本轮结束于 GRASP_POSE_REACHED；夹爪保持打开，"
+                                        "未闭合、未 weld、未 attach、未抬升、未搬运");
+                                    ctx_->setCurrentState(TaskState::GRASP_POSE_REACHED);
+                                }
+                            } else {
+                                RCLCPP_INFO(ctx_->get_logger(),
+                                            "  [P3A-2B] 下降失败；不开始闭合");
+                                ctx_->setCurrentState(TaskState::ERROR);
+                            }
+                            return (descended && !ctx_->grasp_contact_close_ &&
+                                    ctx_->grasp_model_ != "ideal_weld") ||
+                                   (ctx_->getCurrentState() == TaskState::GRASP_CONTACT_CONFIRMED) ||
+                                   (ctx_->getCurrentState() == TaskState::DONE);
+                        }
+                        return true;
                     }
                     if (path_ok) {
                         RCLCPP_INFO(ctx_->get_logger(),
@@ -2284,6 +2353,7 @@ bool DualArmController::runP2aChecks(const a1t::TruthPayload& truth, a1v::Sample
         a1_verify_.mesh_path = hand_aabb_ok ? mesh_path : std::string();
         a1_verify_.hand_aabb = hand_aabb;
         a1_verify_.pregrasp_target = pre;
+        a1_verify_.grasp_target = grasp;
         a1_verify_.left_eef = left_eef;
         a1_verify_.right_eef = right_eef;
         a1_verify_.start = std::make_shared<moveit::core::RobotState>(mapState(*start));
@@ -2291,6 +2361,9 @@ bool DualArmController::runP2aChecks(const a1t::TruthPayload& truth, a1v::Sample
         a1_verify_.grasp = std::make_shared<moveit::core::RobotState>(mj_grasp_state);
         for (const std::string& v : pre_state.getVariableNames()) {
             a1_verify_.pregrasp_joints[v] = pre_state.getVariablePosition(v);
+        }
+        for (const std::string& v : mj_grasp_state.getVariableNames()) {
+            a1_verify_.grasp_joints[v] = mj_grasp_state.getVariablePosition(v);
         }
     } else {
         RCLCPP_WARN(ctx_->get_logger(),
@@ -3355,38 +3428,40 @@ bool DualArmController::executePregrasp(const a1t::TruthPayload& truth, std::str
         return false;
     }
 
-    // ---- 5. Arrival: fresh, settled state versus this round's target. ------
+    // ---- 5. Arrival: a short window of PROVABLY FRESH feedback. ------------
+    // Same helper and the same semantics as the descent stage: only samples
+    // whose joint_states sequence number has advanced are counted, the settle
+    // test is the whole window's per-joint spread, and the end-effector error is
+    // read from the newest fresh sample.
     {
-        const auto w0 = std::chrono::steady_clock::now();
-        double settled_delta = 0.0;
-        std::size_t samples = 0;
-        moveit::core::RobotStatePtr prev = ctx_->dual_arm_->getCurrentState();
-        while (std::chrono::duration<double>(std::chrono::steady_clock::now() - w0).count() <
-               ctx_->pregrasp_stable_window_sec_) {
-            std::this_thread::sleep_for(50ms);
-            const moveit::core::RobotStatePtr now = ctx_->dual_arm_->getCurrentState();
-            double worst = 0.0;
-            for (const std::string& j : traj.joint_names) {
-                worst = std::max(worst, std::fabs(now->getVariablePosition(j) -
-                                                  prev->getVariablePosition(j)));
-            }
-            settled_delta = std::max(settled_delta, worst);
-            prev = now;
-            ++samples;
+        const FreshArrival arrival = awaitFreshArrival(
+            traj.joint_names, ctx_->pregrasp_stable_window_sec_, ctx_->pregrasp_stable_tol_rad_);
+        if (!arrival.ok) {
+            detail = "E_P3A_" + arrival.reason_code + ": " + arrival.detail;
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-1] %s", detail.c_str());
+            return false;
         }
-        // The state is read live over a window; a settled reading cannot come
-        // from a stale cache.
-        const moveit::core::RobotStatePtr arrived = ctx_->dual_arm_->getCurrentState();
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-1] 到位窗口（**新鲜反馈**）: %zu 个样本 / %.3f s（序号 %llu），"
+                    "窗口内最大单关节变化 %.6f rad（%s，阈值 %.6f）",
+                    arrival.samples, arrival.window_sec, arrival.last_seq,
+                    arrival.worst_joint_change_rad,
+                    arrival.worst_joint.empty() ? "-" : arrival.worst_joint.c_str(),
+                    ctx_->pregrasp_stable_tol_rad_);
+
+        moveit::core::RobotState arrived(ctx_->dual_arm_->getRobotModel());
+        if (!freshStateFor(arrival.last_positions, arrived)) {
+            detail = "E_P3A_ARRIVAL_STATE_INVALID: the fresh sample could not build a robot state";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-1] %s", detail.c_str());
+            return false;
+        }
         const a1v::ArmTarget got_left =
-            fromEigenPose(arrived->getGlobalLinkTransform(a1_verify_.left_eef));
+            fromEigenPose(arrived.getGlobalLinkTransform(a1_verify_.left_eef));
         const a1v::ArmTarget got_right =
-            fromEigenPose(arrived->getGlobalLinkTransform(a1_verify_.right_eef));
+            fromEigenPose(arrived.getGlobalLinkTransform(a1_verify_.right_eef));
         const a1v::PoseError el = a1v::poseError(a1_verify_.pregrasp_target.left, got_left);
         const a1v::PoseError er = a1v::poseError(a1_verify_.pregrasp_target.right, got_right);
 
-        RCLCPP_INFO(ctx_->get_logger(),
-                    "  [P3A-1] 到位实测（%zu 次采样，窗口 %.2f s，窗口内最大关节变化 %.6f rad）:",
-                    samples, ctx_->pregrasp_stable_window_sec_, settled_delta);
         RCLCPP_INFO(ctx_->get_logger(),
                     "     左臂 位置误差 %.4f mm，姿态误差 %.4f°  |  右臂 位置误差 %.4f mm，"
                     "姿态误差 %.4f°",
@@ -3396,12 +3471,6 @@ bool DualArmController::executePregrasp(const a1t::TruthPayload& truth, std::str
                     ctx_->pregrasp_arrival_pos_tol_m_ * 1000.0,
                     ctx_->pregrasp_arrival_angle_tol_deg_);
 
-        if (settled_delta > ctx_->pregrasp_stable_tol_rad_) {
-            detail = "E_P3A_NOT_SETTLED: the joints were still moving at the end of the window "
-                     "(max change " + std::to_string(settled_delta) + " rad)";
-            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
-            return false;
-        }
         const double ang_tol = ctx_->pregrasp_arrival_angle_tol_deg_ * M_PI / 180.0;
         if (el.pos_m > ctx_->pregrasp_arrival_pos_tol_m_ ||
             er.pos_m > ctx_->pregrasp_arrival_pos_tol_m_ || el.angle_rad > ang_tol ||
@@ -3414,7 +3483,9 @@ bool DualArmController::executePregrasp(const a1t::TruthPayload& truth, std::str
             return false;
         }
 
-        // Observation only: the rod must not have been disturbed.
+        // Observation only: the rod must not have been disturbed. This reads the
+        // PLANNING SCENE object, not MuJoCo physics; the physical check belongs
+        // to the descent stage's before/after comparison.
         moveit::planning_interface::PlanningSceneInterface psi;
         const auto objects = psi.getObjects(std::vector<std::string>{"aluminum_rod"});
         const auto it = objects.find("aluminum_rod");
@@ -3437,6 +3508,10 @@ bool DualArmController::executePregrasp(const a1t::TruthPayload& truth, std::str
     }
 
     detail = "PREGRASP_REACHED";
+    // Record for the next stage: the descent may only start from a pre-grasp
+    // pose that was actually reached in THIS process, by the plan verified in
+    // THIS round -- not from a pose that merely looks similar.
+    a1_verify_.pregrasp_reached_this_round = true;
     return true;
 }
 
@@ -3715,11 +3790,14 @@ bool DualArmController::attachObject()
         
         // 定义接触链接（允许这些链接与物体碰撞）
         std::vector<std::string> touch_links = {
-            "mj_left_link5", "mj_left_link6", "mj_left_link7", "mj_left_link8", "mj_left_hand",
+            // MoveIt reports the attached body colliding with its exact parent
+            // link at the closed rigid grasp. Permit only this attachment-parent
+            // left/right grasp-parent pairs plus the four finger links; all
+            // arm links and environment pairs remain under existing rules.
+            "mj_left_hand",
+            "mj_right_hand",
             "mj_left_leftfinger", "mj_left_rightfinger",
-            "mj_right_link5", "mj_right_link6", "mj_right_link7", "mj_right_link8", "mj_right_hand",
-            "mj_right_rightfinger", "mj_right_leftfinger"
-        };
+            "mj_right_leftfinger", "mj_right_rightfinger"};
         
         // 附着目标连杆
         std::string attach_link = "mj_left_hand";
@@ -3740,10 +3818,23 @@ bool DualArmController::attachObject()
         geometry_msgs::msg::Pose object_world_pose;
         if (existing_objects.count("aluminum_rod") > 0 && 
             !existing_objects["aluminum_rod"].primitive_poses.empty()) {
-            object_world_pose = existing_objects["aluminum_rod"].primitive_poses[0];
+            // PlanningSceneInterface can store the world placement in the
+            // CollisionObject pose and leave primitive_poses[0] at identity.
+            // Compose both frames; using only the primitive pose attaches the
+            // rod at the world origin for A1 truth-synchronised objects.
+            tf2::Transform object_frame_tf;
+            tf2::Transform primitive_tf;
+            tf2::fromMsg(existing_objects["aluminum_rod"].pose, object_frame_tf);
+            tf2::fromMsg(existing_objects["aluminum_rod"].primitive_poses[0], primitive_tf);
+            tf2::toMsg(object_frame_tf * primitive_tf, object_world_pose);
             RCLCPP_INFO(ctx_->get_logger(), "    ✓ 从 PlanningScene 获取物体位姿: [%.3f, %.3f, %.3f]",
                        object_world_pose.position.x, object_world_pose.position.y, object_world_pose.position.z);
         } else {
+            if (ctx_->grasp_model_ == "ideal_weld") {
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "    ✗ ideal_weld 不允许从检测或硬编码位置回退：PlanningScene 真值物体缺失");
+                return false;
+            }
             // 回退：使用视觉检测位姿或已知初始位置
             RCLCPP_WARN(ctx_->get_logger(), "    ! 无法从PlanningScene获取物体，使用回退位姿");
             geometry_msgs::msg::Pose detected_pose;
@@ -3757,6 +3848,33 @@ bool DualArmController::attachObject()
                 object_world_pose.orientation.x = 0.0;
                 object_world_pose.orientation.y = 0.0;
                 object_world_pose.orientation.z = 0.0;
+            }
+        }
+
+        if (ctx_->grasp_model_ == "ideal_weld") {
+            const MujocoRodTruth physical = readMujocoRodTruth();
+            if (!physical.ok) {
+                RCLCPP_ERROR(ctx_->get_logger(), "    ✗ 附着前物理杆真值不可用: %s",
+                             physical.detail.c_str());
+                return false;
+            }
+            const double dx = object_world_pose.position.x - physical.position.x;
+            const double dy = object_world_pose.position.y - physical.position.y;
+            const double dz = object_world_pose.position.z - physical.position.z;
+            const double pos_err = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const a1t::Quat scene_q{object_world_pose.orientation.x, object_world_pose.orientation.y,
+                                    object_world_pose.orientation.z, object_world_pose.orientation.w};
+            const double angle_err = a1t::rotationDistanceRad(scene_q, physical.orientation);
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[S1_ATTACH_ALIGNMENT] planning_scene=(%.6f,%.6f,%.6f) physical=(%.6f,%.6f,%.6f) "
+                "position_error=%.3fmm angle_error=%.3fdeg",
+                object_world_pose.position.x, object_world_pose.position.y, object_world_pose.position.z,
+                physical.position.x, physical.position.y, physical.position.z, pos_err * 1000.0,
+                angle_err * 180.0 / M_PI);
+            if (pos_err > 0.005 || angle_err > 5.0 * M_PI / 180.0) {
+                RCLCPP_ERROR(ctx_->get_logger(),
+                             "    ✗ PlanningScene 与物理杆相差超过 5 mm / 5°，保留 world object 并拒绝 attach");
+                return false;
             }
         }
         
@@ -4923,4 +5041,3273 @@ void DualArmController::executeRetreat()
         } catch (const std::exception& e) {
             ctx_->current_state_ = TaskState::ERROR;
         }
+}
+
+// ===========================================================================
+// A1 P3a-2b: descend from the reached pre-grasp pose to the grasp pose, then
+// stop. Nothing here closes the gripper, welds, attaches or lifts.
+// ===========================================================================
+
+DualArmController::FreshArrival DualArmController::awaitFreshArrival(
+    const std::vector<std::string>& joint_names, double window_sec, double settle_tol_rad)
+{
+    using namespace std::chrono_literals;
+    FreshArrival out;
+    if (joint_names.empty() || !(window_sec > 0.0)) {
+        out.reason_code = "E_ARRIVAL_BAD_CONFIG";
+        out.detail = "the arrival window needs joint names and a positive window length";
+        return out;
+    }
+    // The accumulation itself lives in the pure, offline-testable FreshWindow,
+    // so the "a repeated read is not a new sample" rule is the SAME code that
+    // the unit tests drive. Only the polling lives here.
+    a1v::FreshWindow window(joint_names, /*min_samples=*/2, window_sec, settle_tol_rad);
+
+    // Bounded: the window plus a fixed allowance to collect it. Running out of
+    // time is a failure, never a silent pass.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::duration<double>(window_sec + 2.0);
+    bool incomplete = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        DualArmCarryTask::JointFeedback sample;
+        if (!ctx_->latestJointFeedback(sample)) {
+            std::this_thread::sleep_for(10ms);
+            continue;
+        }
+        std::string reject;
+        window.add(sample.seq, sample.recv_steady_sec, sample.positions, reject);
+        if (reject == "E_FRESH_INCOMPLETE") {
+            incomplete = true;
+            break;
+        }
+        // Keep going until a WHOLE window is quiet, not merely until one is
+        // full: the first full window still contains the tail of the motion.
+        // The window slides, so a stretch that settles later is found, and the
+        // tolerance is unchanged.
+        if (window.verdict().ok) {
+            break;
+        }
+        std::this_thread::sleep_for(10ms);
+    }
+    if (incomplete) {
+        out.reason_code = "E_ARRIVAL_FEEDBACK_INCOMPLETE";
+        out.detail = "a fresh joint_states sample did not carry every arm joint";
+        return out;
+    }
+
+    const a1v::FreshWindow::Verdict v = window.verdict();
+    out.ok = v.ok;
+    out.samples = v.samples;
+    out.window_sec = v.span_sec;
+    out.worst_joint_change_rad = v.worst_change_rad;
+    out.worst_joint = v.worst_joint;
+    out.last_seq = v.last_seq;
+    out.last_positions = v.last_positions;
+    out.reason_code = v.reason_code;
+    out.detail = v.detail;
+    return out;
+}
+
+bool DualArmController::freshStateFor(const std::map<std::string, double>& positions,
+                                      moveit::core::RobotState& out)
+{
+    // The live model is used for kinematics; it and the criterion model share
+    // the same joint values and differ only in hand collision geometry.
+    std::vector<std::string> names;
+    std::vector<double> values;
+    for (const auto& kv : positions) {
+        names.push_back(kv.first);
+        values.push_back(kv.second);
+    }
+    if (names.empty()) {
+        return false;
+    }
+    out.setVariablePositions(names, values);
+    out.update();
+    return true;
+}
+
+MujocoRodTruth DualArmController::readMujocoRodTruth(const std::string& service_override)
+{
+    using namespace std::chrono_literals;
+    MujocoRodTruth out;
+    const std::string& service =
+        service_override.empty() ? ctx_->mujoco_get_body_state_service_ : service_override;
+    auto client = ctx_->create_client<mujoco_ros_msgs::srv::GetBodyState>(service);
+    const auto budget = std::chrono::duration<double>(ctx_->mujoco_truth_timeout_sec_);
+    if (!client->wait_for_service(std::chrono::duration_cast<std::chrono::milliseconds>(budget))) {
+        out.detail = "the MuJoCo truth service is unavailable; the physical rod was NOT measured";
+        return out;
+    }
+    auto request = std::make_shared<mujoco_ros_msgs::srv::GetBodyState::Request>();
+    request->name = ctx_->mujoco_rod_body_name_;
+    request->admin_hash = ctx_->mujoco_admin_hash_;
+    auto future = client->async_send_request(request);
+    if (future.wait_for(budget) != std::future_status::ready) {
+        out.detail = "the MuJoCo truth call timed out; the physical rod was NOT measured";
+        return out;
+    }
+    const auto response = future.get();
+    if (!response->success) {
+        out.detail = "MuJoCo refused the truth request: " + response->status_message;
+        return out;
+    }
+    const auto& p = response->state.pose.pose;
+    out.position = {p.position.x, p.position.y, p.position.z};
+    out.orientation = {p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w};
+    const auto& twist = response->state.twist.twist;
+    out.linear_velocity = {twist.linear.x, twist.linear.y, twist.linear.z};
+    out.angular_velocity = {twist.angular.x, twist.angular.y, twist.angular.z};
+    if (!std::isfinite(out.position.x) || !std::isfinite(out.position.y) ||
+        !std::isfinite(out.position.z) || !std::isfinite(out.orientation.x) ||
+        !std::isfinite(out.orientation.y) || !std::isfinite(out.orientation.z) ||
+        !std::isfinite(out.orientation.w) || !std::isfinite(out.linear_velocity.x) ||
+        !std::isfinite(out.linear_velocity.y) || !std::isfinite(out.linear_velocity.z) ||
+        !std::isfinite(out.angular_velocity.x) || !std::isfinite(out.angular_velocity.y) ||
+        !std::isfinite(out.angular_velocity.z)) {
+        out.detail = "MuJoCo returned a non-finite rod pose";
+        return out;
+    }
+    out.ok = true;
+    out.detail = "ok";
+    return out;
+}
+
+namespace {
+
+// The planning-scene pose of the rod, composed exactly as the prepare step does
+// (object.pose * primitive_poses[0]; the primitive pose alone is the identity).
+bool readSceneRodPose(const std::string& id, a1v::Vec3& pos, a1v::Quat& quat)
+{
+    moveit::planning_interface::PlanningSceneInterface psi;
+    const auto objects = psi.getObjects(std::vector<std::string>{id});
+    const auto it = objects.find(id);
+    if (it == objects.end() || it->second.primitive_poses.empty()) {
+        return false;
+    }
+    tf2::Transform object_tf;
+    tf2::Transform primitive_tf;
+    tf2::fromMsg(it->second.pose, object_tf);
+    tf2::fromMsg(it->second.primitive_poses[0], primitive_tf);
+    geometry_msgs::msg::Pose actual;
+    tf2::toMsg(object_tf * primitive_tf, actual);
+    pos = {actual.position.x, actual.position.y, actual.position.z};
+    quat = {actual.orientation.x, actual.orientation.y, actual.orientation.z,
+            actual.orientation.w};
+    return true;
+}
+
+std::string rodDeltaText(const a1v::Vec3& a, const a1v::Quat& qa, const a1v::Vec3& b,
+                         const a1v::Quat& qb)
+{
+    const double d = std::sqrt(std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) +
+                               std::pow(a.z - b.z, 2));
+    const double ang = a1t::rotationDistanceRad(qa, qb);
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "位移 %.4f mm，转角 %.4f°", d * 1000.0,
+                  ang * 180.0 / M_PI);
+    return std::string(buf);
+}
+
+}  // namespace
+
+bool DualArmController::awaitFreshOpenFingerSnapshot(
+    double opened_after_steady_sec,
+    const std::array<std::uint64_t, 2>& baseline_seq,
+    a1v::FingerJointSnapshot& out,
+    std::string& detail)
+{
+    using namespace std::chrono_literals;
+    constexpr double kFeedbackWaitSec = 2.0;
+    constexpr double kMaxSampleAgeSec = 0.50;
+    constexpr double kSourceToleranceM = 1e-4;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::duration<double>(kFeedbackWaitSec);
+    std::string last_reason = "no feedback samples received";
+    while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+        DualArmCarryTask::GripperContactFeedback left;
+        DualArmCarryTask::GripperContactFeedback right;
+        DualArmCarryTask::JointFeedback global;
+        if (ctx_->latestGripperContact("mj_left", left) &&
+            ctx_->latestGripperContact("mj_right", right) &&
+            ctx_->latestJointFeedback(global)) {
+            const auto to_sample = [](const DualArmCarryTask::GripperContactFeedback& src) {
+                a1v::FingerFeedbackSample out_sample;
+                out_sample.q1 = src.q1;
+                out_sample.q2 = src.q2;
+                out_sample.seq = src.seq;
+                out_sample.stamp_ns = src.stamp_ns;
+                out_sample.recv_steady_sec = src.recv_steady_sec;
+                return out_sample;
+            };
+            const std::int64_t global_stamp_ns = global.stamp_valid
+                ? global.stamp.nanoseconds() : 0;
+            const double now_sec = std::chrono::duration<double>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (a1v::makeFingerJointSnapshot(
+                    to_sample(left), to_sample(right), global.positions, global_stamp_ns,
+                    global.recv_steady_sec, opened_after_steady_sec, now_sec, baseline_seq,
+                    kMaxSampleAgeSec, kSourceToleranceM, out, last_reason)) {
+                const auto& names = a1v::fingerJointNames();
+                RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B][finger_snapshot] source=typed_hardware global_joint_states_match=%d "
+                    "seq(left=%llu,right=%llu) stamp_ns(left=%lld,right=%lld) "
+                    "recv_age=(%.3f,%.3f) s tolerance=%.6f m",
+                    out.global_joint_state_matched ? 1 : 0,
+                    static_cast<unsigned long long>(out.source_seq[0]),
+                    static_cast<unsigned long long>(out.source_seq[1]),
+                    static_cast<long long>(out.source_stamp_ns[0]),
+                    static_cast<long long>(out.source_stamp_ns[1]),
+                    now_sec - out.source_recv_steady_sec[0],
+                    now_sec - out.source_recv_steady_sec[1], kSourceToleranceM);
+                for (std::size_t i = 0; i < names.size(); ++i) {
+                    const auto global_it = global.positions.find(names[i]);
+                    if (global_it == global.positions.end()) {
+                        RCLCPP_WARN(ctx_->get_logger(),
+                            "  [P3A-2B][finger_snapshot] %s measured=%.6f m "
+                            "global_joint_states=<missing>; measured hardware snapshot will be "
+                            "explicitly mapped into IK/criterion state",
+                            names[i].c_str(), out.positions[i]);
+                    } else {
+                        RCLCPP_INFO(ctx_->get_logger(),
+                            "  [P3A-2B][finger_snapshot] %s measured=%.6f m global=%.6f m",
+                            names[i].c_str(), out.positions[i], global_it->second);
+                    }
+                }
+                return true;
+            }
+        }
+        rclcpp::sleep_for(20ms);
+    }
+    detail = "E_2B_FINGER_SNAPSHOT_INVALID: fresh measured four-finger feedback and matching "
+             "global /joint_states were not available within " +
+             std::to_string(kFeedbackWaitSec) + " s: " + last_reason;
+    return false;
+}
+
+bool DualArmController::buildAndVerifyGraspDescent(
+    const a1t::TruthPayload& truth,
+    const a1v::FingerJointSnapshot& fingers,
+    std::string& detail)
+{
+    a1_verify_.descent_plan_valid = false;
+    a1_verify_.descent_waypoints.clear();
+
+    const auto model = a1_verify_.model;
+    const auto scene = a1_verify_.scene;
+    const moveit::core::JointModelGroup* dual_jmg =
+        model->getJointModelGroup(ctx_->dual_arm_group_);
+    const moveit::core::JointModelGroup* left_jmg = model->getJointModelGroup(ctx_->left_arm_group_);
+    const moveit::core::JointModelGroup* right_jmg =
+        model->getJointModelGroup(ctx_->right_arm_group_);
+    if (dual_jmg == nullptr || left_jmg == nullptr || right_jmg == nullptr) {
+        detail = "E_2B_NO_GROUP: a joint group is missing from the criterion model";
+        return false;
+    }
+
+    // (a) The schedule: same frozen truth, same generator, same height / offset /
+    //     yaw definitions as the pre-grasp and grasp targets.
+    a1v::GraspGeometry gg;
+    gg.grasp_offset_m = ctx_->p2a_grasp_offset_m_;
+    gg.eef_base_yaw_rad = ctx_->p2a_eef_base_yaw_deg_ * M_PI / 180.0;
+    gg.pre_grasp_height_m = ctx_->approach_height_;
+    gg.grasp_height_m = ctx_->grasp_height_;
+    double yaw = 0.0;
+    const std::vector<a1v::DualTarget> schedule =
+        a1v::buildDescentSchedule(truth, gg, ctx_->descent_steps_, &yaw);
+    if (schedule.empty()) {
+        detail = "E_2B_BAD_CONFIG: descent_steps must be positive; refusing to descend in one jump";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+        return false;
+    }
+    a1_verify_.descent_span_m = gg.pre_grasp_height_m - gg.grasp_height_m;
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-2B] 下降计划: 自 z=%.4f 到 z=%.4f（跨度 %.4f m），%zu 个目标（%d 段），"
+                "杆 yaw=%.2f°，抓手偏移 %.4f m，末端基准 yaw=%.1f°",
+                gg.pre_grasp_height_m, gg.grasp_height_m, a1_verify_.descent_span_m,
+                schedule.size(), ctx_->descent_steps_, yaw * 180.0 / M_PI, gg.grasp_offset_m,
+                ctx_->p2a_eef_base_yaw_deg_);
+
+    // The schedule's own endpoints must reproduce the two targets this round
+    // already validated, or the descent would be aimed at something else.
+    {
+        const a1v::PoseError s0l = a1v::poseError(a1_verify_.pregrasp_target.left, schedule.front().left);
+        const a1v::PoseError sNl = a1v::poseError(a1_verify_.grasp_target.left, schedule.back().left);
+        const a1v::PoseError s0r = a1v::poseError(a1_verify_.pregrasp_target.right, schedule.front().right);
+        const a1v::PoseError sNr = a1v::poseError(a1_verify_.grasp_target.right, schedule.back().right);
+        const double worst = std::max({s0l.pos_m, sNl.pos_m, s0r.pos_m, sNr.pos_m});
+        const double worst_ang = std::max({s0l.angle_rad, sNl.angle_rad, s0r.angle_rad, sNr.angle_rad});
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 计划端点核对（对 P2a 的预抓取/抓取目标）: 最大位置差 %.6f mm，"
+                    "最大姿态差 %.6f°",
+                    worst * 1000.0, worst_ang * 180.0 / M_PI);
+        if (worst > 1e-9 || worst_ang > 1e-9) {
+            detail = "E_2B_SCHEDULE_ENDPOINT_MISMATCH: the descent schedule does not start at the "
+                     "verified pre-grasp target or end at the verified grasp target";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // (b) The start is the ACTUAL current state, mapped into the criterion
+    //     model. Never a stored or default pose.
+    auto mapInto = [&](const moveit::core::RobotState& src) {
+        moveit::core::RobotState dst(model);
+        std::vector<std::string> names;
+        std::vector<double> values;
+        std::set<std::string> dst_vars;
+        for (const std::string& v : dst.getVariableNames()) {
+            dst_vars.insert(v);
+        }
+        for (const std::string& v : src.getVariableNames()) {
+            if (dst_vars.count(v) != 0) {
+                names.push_back(v);
+                values.push_back(src.getVariablePosition(v));
+            }
+        }
+        dst.setVariablePositions(names, values);
+        dst.update();
+        return dst;
+    };
+    moveit::core::RobotState live_start(*ctx_->dual_arm_->getCurrentState());
+    const std::set<std::string> live_variable_names(
+        live_start.getVariableNames().begin(), live_start.getVariableNames().end());
+    std::map<std::string, double> measured_fingers_by_name;
+    if (!a1v::mapMeasuredFingerPositions(fingers.positions, measured_fingers_by_name, detail)) {
+        detail = "E_2B_FINGER_MAPPING_INVALID: " + detail;
+        return false;
+    }
+    std::vector<std::string> finger_names;
+    std::vector<double> finger_values;
+    for (const auto& entry : measured_fingers_by_name) {
+        if (live_variable_names.count(entry.first) == 0) {
+            detail = "E_2B_FINGER_JOINT_MISSING: live model has no " + entry.first;
+            return false;
+        }
+        const double csm_value = live_start.getVariablePosition(entry.first);
+        RCLCPP_INFO(ctx_->get_logger(),
+            "  [P3A-2B][finger_map] %s private_measured=%.6f m CurrentStateMonitor=%.6f m "
+            "mapped=%.6f m source_seq(left=%llu,right=%llu)",
+            entry.first.c_str(), entry.second, csm_value, entry.second,
+            static_cast<unsigned long long>(fingers.source_seq[0]),
+            static_cast<unsigned long long>(fingers.source_seq[1]));
+        finger_names.push_back(entry.first);
+        finger_values.push_back(entry.second);
+    }
+    // The arm values remain the live CurrentStateMonitor snapshot. The four
+    // passive finger values are explicitly replaced by the new, source-checked
+    // hardware snapshot above, so IK and criterion validation start identically.
+    live_start.setVariablePositions(finger_names, finger_values);
+    live_start.update();
+    moveit::core::RobotState seed = mapInto(live_start);
+    a1_verify_.descent_start = std::make_shared<moveit::core::RobotState>(seed);
+
+    // IK is solved on the LIVE model and the solutions are mapped into the
+    // criterion model, exactly as P2a does. The criterion model is assembled
+    // from URDF + SRDF alone and therefore carries no IK solver plugin, so
+    // asking it to solve would fail for reasons that have nothing to do with
+    // the descent.
+    auto live_model = ctx_->dual_arm_->getRobotModel();
+    const moveit::core::JointModelGroup* live_left_jmg =
+        live_model->getJointModelGroup(ctx_->left_arm_group_);
+    const moveit::core::JointModelGroup* live_right_jmg =
+        live_model->getJointModelGroup(ctx_->right_arm_group_);
+    if (live_left_jmg == nullptr || live_right_jmg == nullptr) {
+        detail = "E_2B_NO_LIVE_GROUP: an arm group is missing from the live model";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+        return false;
+    }
+    moveit::core::RobotState live_seed(live_start);
+    live_seed.update();
+
+    // Check the actual URDF finger-joint axis through runtime FK. In this
+    // model finger_joint1 is +Y in its joint frame (finger_joint2 is -Y),
+    // while hand orientation is the full non-commuting chain from link8.
+    const double rod_yaw = a1v::quatYaw(truth.orientation);
+    const Eigen::Quaterniond rod_rotation(truth.orientation.w, truth.orientation.x,
+                                          truth.orientation.y, truth.orientation.z);
+    const Eigen::Vector3d rod_long_axis =
+        rod_rotation.normalized() * Eigen::Vector3d::UnitY();
+    const a1v::Vec3 predicted_axis = a1v::fingerClosureAxisForRodYaw(rod_yaw);
+    const Eigen::Vector3d predicted(predicted_axis.x, predicted_axis.y, predicted_axis.z);
+    for (const std::string& arm : {std::string("mj_left"), std::string("mj_right")}) {
+        const std::string joint_name = arm + "_finger_joint1";
+        const auto* joint = dynamic_cast<const moveit::core::PrismaticJointModel*>(
+            live_model->getJointModel(joint_name));
+        if (joint == nullptr || joint->getChildLinkModel() == nullptr) {
+            detail = "E_2B_FINGER_AXIS_UNAVAILABLE: runtime model has no prismatic " + joint_name;
+            return false;
+        }
+        const Eigen::Isometry3d& child_tf =
+            live_seed.getGlobalLinkTransform(joint->getChildLinkModel()->getName());
+        const Eigen::Vector3d actual_axis = (child_tf.linear() * joint->getAxis()).normalized();
+        const double axis_error = std::acos(std::clamp(
+            std::fabs(actual_axis.dot(rod_long_axis)), 0.0, 1.0)) * 180.0 / M_PI;
+        const double fk_vs_chain = std::min((actual_axis - predicted).norm(),
+                                            (actual_axis + predicted).norm());
+        RCLCPP_INFO(ctx_->get_logger(),
+            "  [P3A-2B][finger_axis_fk] arm=%s joint=%s local_axis=(%.1f,%.1f,%.1f) "
+            "world_axis=(%.6f,%.6f,%.6f) rod_localY_world=(%.6f,%.6f,%.6f) "
+            "unoriented_angle_to_rod_long=%.3f deg chain_error=%.6g",
+            arm.c_str(), joint_name.c_str(), joint->getAxis().x(), joint->getAxis().y(),
+            joint->getAxis().z(), actual_axis.x(), actual_axis.y(), actual_axis.z(),
+            rod_long_axis.x(), rod_long_axis.y(), rod_long_axis.z(), axis_error, fk_vs_chain);
+    }
+    std::vector<moveit::core::RobotState> live_waypoints;
+
+    auto mapLiveInto = [&](const moveit::core::RobotState& src) {
+        moveit::core::RobotState dst(model);
+        std::vector<std::string> names;
+        std::vector<double> values;
+        std::set<std::string> dst_vars;
+        for (const std::string& v : dst.getVariableNames()) {
+            dst_vars.insert(v);
+        }
+        for (const std::string& v : src.getVariableNames()) {
+            if (dst_vars.count(v) != 0) {
+                names.push_back(v);
+                values.push_back(src.getVariablePosition(v));
+            }
+        }
+        dst.setVariablePositions(names, values);
+        dst.update();
+        return dst;
+    };
+
+    // The start must still be the pre-grasp solution this round executed, not
+    // merely somewhere plausible. Only the ARM joints are compared: the descent
+    // is run after deliberately opening the grippers, so the finger variables
+    // have moved on purpose and must not count as a start mismatch.
+    {
+        double worst = 0.0;
+        std::string worst_joint;
+        for (const std::string& name : dual_jmg->getVariableNames()) {
+            const auto it = a1_verify_.pregrasp_joints.find(name);
+            if (it == a1_verify_.pregrasp_joints.end()) {
+                continue;
+            }
+            const double d = std::fabs(seed.getVariablePosition(name) - it->second);
+            if (d > worst) {
+                worst = d;
+                worst_joint = name;
+            }
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 下降起点 = 本次实际状态；与已到位预抓取解的最大**手臂**关节差 "
+                    "%.6f rad（%s）；夹爪指关节因本轮开爪而变化，不参与此判据",
+                    worst, worst_joint.empty() ? "-" : worst_joint.c_str());
+        if (worst > 0.02) {
+            detail = "E_2B_START_NOT_PREGRASP: the current state is not this round's reached "
+                     "pre-grasp solution (max arm joint delta " + std::to_string(worst) + " rad at " +
+                     worst_joint + ")";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // (c) Combined-state IK. Each target is solved ON THE SAME RobotState, seeded
+    //     by the previous solution, so the two arms are solved as one
+    //     configuration and the path stays continuous. Two independent
+    //     single-arm trajectories are deliberately NOT produced.
+    const double ang_tol = ctx_->p2a_ik_angle_tol_deg_ * M_PI / 180.0;
+    for (std::size_t i = 0; i < schedule.size(); ++i) {
+        // KDL restarts randomly inside its timeout, so a single call can fail
+        // even from a seed that already satisfies the target. Several attempts
+        // are made and the one that changes the arm configuration least is
+        // kept, which is what keeps the descent continuous rather than jumping
+        // between IK branches.
+        std::vector<double> seed_q, l3, u3;
+        std::vector<std::string> vars;
+        collectArmJoints(live_seed, live_left_jmg, seed_q, l3, u3, vars);
+        collectArmJoints(live_seed, live_right_jmg, seed_q, l3, u3, vars);
+
+        moveit::core::RobotState best(live_seed);
+        bool have = false;
+        double best_delta = std::numeric_limits<double>::infinity();
+        std::string last_failure;
+        for (int attempt = 0; attempt < ctx_->p2a_ik_attempts_; ++attempt) {
+            moveit::core::RobotState trial(live_seed);
+            const bool solved =
+                trial.setFromIK(live_left_jmg, toEigenPose(schedule[i].left),
+                                ctx_->p2a_ik_timeout_sec_) &&
+                trial.setFromIK(live_right_jmg, toEigenPose(schedule[i].right),
+                                ctx_->p2a_ik_timeout_sec_);
+            if (!solved) {
+                last_failure = "no combined solution";
+                continue;
+            }
+            trial.update();
+
+            std::vector<double> q, lo, hi;
+            std::vector<std::string> nm;
+            collectArmJoints(trial, live_left_jmg, q, lo, hi, nm);
+            collectArmJoints(trial, live_right_jmg, q, lo, hi, nm);
+            const a1v::JointLimitCheck lim = a1v::checkJointLimits(q, lo, hi, nm);
+            if (!lim.ok) {
+                last_failure = "joint " + lim.offending_name + " outside limits";
+                continue;
+            }
+            const a1v::PoseError el = a1v::poseError(
+                schedule[i].left, fromEigenPose(trial.getGlobalLinkTransform(a1_verify_.left_eef)));
+            const a1v::PoseError er = a1v::poseError(
+                schedule[i].right, fromEigenPose(trial.getGlobalLinkTransform(a1_verify_.right_eef)));
+            if (el.pos_m > ctx_->p2a_ik_pos_tol_m_ || er.pos_m > ctx_->p2a_ik_pos_tol_m_ ||
+                el.angle_rad > ang_tol || er.angle_rad > ang_tol) {
+                last_failure = "FK residual left " + std::to_string(el.pos_m * 1000.0) +
+                               " mm, right " + std::to_string(er.pos_m * 1000.0) + " mm";
+                continue;
+            }
+            const double d = a1v::maxAbsJointDelta(seed_q, q);
+            if (!have || d < best_delta) {
+                have = true;
+                best_delta = d;
+                best = trial;
+            }
+        }
+        if (!have) {
+            detail = "E_2B_IK_NO_SOLUTION at step " + std::to_string(i) + " (z=" +
+                     std::to_string(schedule[i].left.position.z) + "): " +
+                     (last_failure.empty() ? "no attempt succeeded" : last_failure) + " (" +
+                     std::to_string(ctx_->p2a_ik_attempts_) + " attempts)";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        // The criterion-model twin is what the collision checks and the
+        // straightness report use; the live-model state is what the dispatched
+        // trajectory is built from. The kinematics are identical -- the
+        // criterion model only differs in hand collision geometry.
+        a1_verify_.descent_waypoints.push_back(
+            std::make_shared<moveit::core::RobotState>(mapLiveInto(best)));
+        live_waypoints.push_back(best);
+        live_seed = best;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-2B] 组合状态 IK: %zu 个航点全部求解成功（同一 RobotState 内两臂联合，"
+                "非两条独立单臂轨迹）",
+                a1_verify_.descent_waypoints.size());
+
+    // The arm-joint naming, fixed once. collectArmJoints APPENDS, so a shared
+    // name vector would grow with every call and stop matching the values.
+    std::vector<std::string> arm_names;
+    {
+        std::vector<double> v, lo, hi;
+        collectArmJoints(*a1_verify_.descent_waypoints.front(), left_jmg, v, lo, hi, arm_names);
+        collectArmJoints(*a1_verify_.descent_waypoints.front(), right_jmg, v, lo, hi, arm_names);
+    }
+    auto armValues = [&](const moveit::core::RobotState& st) {
+        std::vector<double> v, lo, hi;
+        std::vector<std::string> discard;
+        collectArmJoints(st, left_jmg, v, lo, hi, discard);
+        collectArmJoints(st, right_jmg, v, lo, hi, discard);
+        return v;
+    };
+
+    // Continuity between adjacent solutions.
+    double max_jump = 0.0;
+    std::size_t worst_jump_index = 0;
+    for (std::size_t i = 1; i < a1_verify_.descent_waypoints.size(); ++i) {
+        const std::vector<double> a = armValues(*a1_verify_.descent_waypoints[i - 1]);
+        const std::vector<double> b = armValues(*a1_verify_.descent_waypoints[i]);
+        if (a.size() != arm_names.size() || b.size() != arm_names.size()) {
+            detail = "E_2B_INTERNAL_DIM: arm joint count mismatch";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        const double d = a1v::maxAbsJointDelta(a, b);
+        if (d > max_jump) {
+            max_jump = d;
+            worst_jump_index = i;
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-2B] 相邻航点最大单关节变化 %.4f rad（第 %zu 段，阈值 %.4f）", max_jump,
+                worst_jump_index, ctx_->p2a_max_joint_jump_rad_);
+    if (max_jump > ctx_->p2a_max_joint_jump_rad_) {
+        detail = "E_2B_JOINT_JUMP: adjacent descent waypoints differ by " + std::to_string(max_jump) +
+                 " rad, above the configured gate";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+        return false;
+    }
+
+    // (d) Straightness of the planned path, measured by FK. This is what the
+    //     report may call "along world Z" -- and only to this measured extent.
+    {
+        std::vector<a1v::ArmTarget> pl;
+        std::vector<a1v::ArmTarget> pr;
+        for (const auto& wp : a1_verify_.descent_waypoints) {
+            pl.push_back(fromEigenPose(wp->getGlobalLinkTransform(a1_verify_.left_eef)));
+            pr.push_back(fromEigenPose(wp->getGlobalLinkTransform(a1_verify_.right_eef)));
+        }
+        const a1v::StraightDescentDeviation dl = a1v::straightDescentDeviation(pl);
+        const a1v::StraightDescentDeviation dr = a1v::straightDescentDeviation(pr);
+        a1_verify_.descent_deviation = dl;
+        const double ang_lim = ctx_->descent_max_angle_dev_deg_ * M_PI / 180.0;
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 计划竖直性（FK 实测，对首点）: 左 max XY %.4f mm / max 姿态 %.4f°；"
+                    "右 max XY %.4f mm / max 姿态 %.4f°（阈值 XY %.4f mm / 姿态 %.4f°）",
+                    dl.max_xy_m * 1000.0, dl.max_angle_rad * 180.0 / M_PI, dr.max_xy_m * 1000.0,
+                    dr.max_angle_rad * 180.0 / M_PI, ctx_->descent_max_xy_dev_m_ * 1000.0,
+                    ctx_->descent_max_angle_dev_deg_);
+        if (!dl.ok || !dr.ok) {
+            detail = "E_2B_DEVIATION_UNMEASURABLE: " + dl.reason_code;
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        if (dl.max_xy_m > ctx_->descent_max_xy_dev_m_ || dr.max_xy_m > ctx_->descent_max_xy_dev_m_ ||
+            dl.max_angle_rad > ang_lim || dr.max_angle_rad > ang_lim) {
+            detail = "E_2B_NOT_STRAIGHT: the descent departs from a straight vertical line by more "
+                     "than the configured gate (left " + std::to_string(dl.max_xy_m * 1000.0) +
+                     " mm, right " + std::to_string(dr.max_xy_m * 1000.0) + " mm)";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // (e) Time parameterisation FIRST, so that everything checked below is the
+    //     trajectory that would actually be dispatched -- not the pre-TOTG
+    //     waypoints, which are a different message with a different point count.
+    auto traj = std::make_shared<robot_trajectory::RobotTrajectory>(
+        live_model, ctx_->dual_arm_group_);
+    for (const auto& wp : live_waypoints) {
+        traj->addSuffixWayPoint(wp, 0.0);
+    }
+    trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+    if (!totg.computeTimeStamps(*traj, ctx_->pregrasp_vel_scale_, ctx_->pregrasp_acc_scale_)) {
+        detail = "E_2B_TIME_PARAMETERISATION_FAILED";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+        return false;
+    }
+    traj->getRobotTrajectoryMsg(a1_verify_.descent_plan.trajectory_);
+    a1_verify_.descent_plan.planning_time_ = 0.0;
+
+    const auto& jt = a1_verify_.descent_plan.trajectory_.joint_trajectory;
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-2B] TOTG: %zu 轨迹点（IK 航点 %zu），时长 %.3f s —— 以下所有检查针对"
+                "**这条最终轨迹**，不再针对 TOTG 之前的航点",
+                jt.points.size(), a1_verify_.descent_waypoints.size(),
+                rclcpp::Duration(jt.points.back().time_from_start).seconds());
+
+    const double step = ctx_->p2b_max_joint_step_rad_;
+    constexpr std::size_t kMaxSubdivisions = 2000;
+
+    // Test-only negative injection, applied to the FINAL message so that the
+    // checks below are the ones under test. Empty by default.
+    bool injected_obstacle = false;
+    if (ctx_->descent_negative_final_ == "position") {
+        a1_verify_.descent_plan.trajectory_.joint_trajectory.points.back().positions[0] += 100.0;
+        RCLCPP_WARN(ctx_->get_logger(),
+                    "  [P3A-2B][负例-注入] 已把最终轨迹末点的第 1 个关节位置 +100 rad"
+                    "（仅验证用；不执行任何运动）");
+    }
+
+    // (f) Structure of the FINAL message.
+    {
+        const a1v::JointNameCheck nc =
+            a1v::validateJointNames(jt.joint_names, dual_jmg->getVariableNames());
+        if (!nc.ok) {
+            detail = "E_2B_JOINT_NAMES: " + nc.detail;
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        if (jt.points.empty()) {
+            detail = "E_2B_EMPTY_TRAJECTORY: the final trajectory carries no points";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        for (std::size_t pi = 0; pi < jt.points.size(); ++pi) {
+            const auto& pos = jt.points[pi].positions;
+            if (pos.size() != jt.joint_names.size()) {
+                detail = "E_2B_DIM_MISMATCH: final point " + std::to_string(pi) + " has " +
+                         std::to_string(pos.size()) + " values for " +
+                         std::to_string(jt.joint_names.size()) + " names";
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+                return false;
+            }
+            for (std::size_t ji = 0; ji < pos.size(); ++ji) {
+                if (!std::isfinite(pos[ji])) {
+                    detail = "E_2B_NOT_FINITE: final point " + std::to_string(pi) + ", joint " +
+                             jt.joint_names[ji];
+                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+                    return false;
+                }
+            }
+        }
+        std::vector<double> times;
+        times.reserve(jt.points.size());
+        for (const auto& pt : jt.points) {
+            times.push_back(rclcpp::Duration(pt.time_from_start).seconds());
+        }
+        const a1v::TimeCheck tc = a1v::validateTimeFromStart(times);
+        if (!tc.ok) {
+            detail = "E_2B_TIME: " + tc.detail;
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // (g) The final trajectory, state by state, in the criterion model. The base
+    //     state carries THIS round's real finger values -- the grippers are open
+    //     by now and that is the configuration that will be dispatched -- so the
+    //     collision picture includes the actually-open fingers.
+    moveit::core::RobotState final_base(mapLiveInto(live_start));
+    final_base.update();
+    {
+        double worst_finger = 0.0;
+        for (const std::string& v : final_base.getVariableNames()) {
+            if (v.find("finger_joint") != std::string::npos) {
+                worst_finger = std::max(worst_finger, final_base.getVariablePosition(v));
+            }
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 最终轨迹检查基线: 判据模型 + 本轮**真实打开的指关节**"
+                    "（最大指位移 %.4f m）",
+                    worst_finger);
+    }
+    auto finalStateOf = [&](const std::vector<double>& pos) {
+        moveit::core::RobotState st(final_base);
+        st.setVariablePositions(jt.joint_names, pos);
+        st.update();
+        return st;
+    };
+
+    if (ctx_->descent_negative_final_ == "collision") {
+        // Placed on the FINAL point's own end-effector link, so the injected
+        // obstacle is guaranteed to overlap the robot: a box parked somewhere
+        // "near the grasp" would prove nothing if the hands were not there.
+        const moveit::core::RobotState last = finalStateOf(jt.points.back().positions);
+        const Eigen::Isometry3d eef = last.getGlobalLinkTransform(a1_verify_.left_eef);
+        moveit_msgs::msg::CollisionObject obstacle;
+        obstacle.header.frame_id = scene->getPlanningFrame();
+        obstacle.id = "a1_descent_final_obstacle_injected";
+        obstacle.primitives.clear();
+        shape_msgs::msg::SolidPrimitive box;
+        box.type = shape_msgs::msg::SolidPrimitive::BOX;
+        box.dimensions = {0.04, 0.04, 0.04};
+        obstacle.primitives.push_back(box);
+        geometry_msgs::msg::Pose op;
+        op.position.x = eef.translation().x();
+        op.position.y = eef.translation().y();
+        op.position.z = eef.translation().z();
+        op.orientation.w = 1.0;
+        obstacle.primitive_poses.push_back(op);
+        obstacle.operation = moveit_msgs::msg::CollisionObject::ADD;
+        scene->processCollisionObjectMsg(obstacle);
+        injected_obstacle = true;
+        RCLCPP_WARN(ctx_->get_logger(),
+                    "  [P3A-2B][负例-注入] 已在最终轨迹**末点**的左末端(%.3f, %.3f, %.3f) 插入"
+                    " 4 cm 验证障碍（仅验证用；不执行任何运动）",
+                    op.position.x, op.position.y, op.position.z);
+    }
+
+    std::size_t final_checked = 0;
+    ContactTally final_tally;
+    for (std::size_t pi = 0; pi < jt.points.size(); ++pi) {
+        const moveit::core::RobotState st = finalStateOf(jt.points[pi].positions);
+        std::vector<double> q, lo, hi;
+        std::vector<std::string> nm;
+        collectArmJoints(st, left_jmg, q, lo, hi, nm);
+        collectArmJoints(st, right_jmg, q, lo, hi, nm);
+        const a1v::JointLimitCheck lim = a1v::checkJointLimits(q, lo, hi, nm);
+        if (!lim.ok) {
+            detail = "E_2B_FINAL_LIMIT at point " + std::to_string(pi) + ": joint " +
+                     lim.offending_name + " = " + std::to_string(lim.value);
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        const ContactTally t = tallyContactsIn(scene, model, st, a1_verify_.base_acm,
+                                               a1_verify_.rod_id, a1_verify_.support_id);
+        ++final_checked;
+        if (t.total() > 0) {
+            final_tally.rod += t.rod;
+            final_tally.support += t.support;
+            final_tally.dual_arm += t.dual_arm;
+            final_tally.self += t.self;
+            final_tally.world += t.world;
+            if (final_tally.examples.empty()) {
+                final_tally.examples = t.examples;
+            }
+        }
+    }
+
+    // Segments of the FINAL trajectory, interpolated between its own points.
+    std::size_t final_subdivisions = 0;
+    for (std::size_t pi = 0; pi + 1 < jt.points.size(); ++pi) {
+        const auto& a = jt.points[pi].positions;
+        const auto& b = jt.points[pi + 1].positions;
+        const std::size_t n = a1v::subdivisionsFor(a1v::maxAbsJointDelta(a, b), step);
+        if (n > kMaxSubdivisions) {
+            detail = "E_2B_FINAL_SEGMENT_TOO_LONG: final segment " + std::to_string(pi) +
+                     " needs " + std::to_string(n) + " subdivisions; refusing to skip any of it";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        final_subdivisions += n;
+        for (std::size_t k = 0; k < n; ++k) {
+            const double t = static_cast<double>(k) / static_cast<double>(n);
+            const std::vector<double> pos = a1v::interpolateJoints(a, b, t);
+            const moveit::core::RobotState st = finalStateOf(pos);
+            const ContactTally tly = tallyContactsIn(scene, model, st, a1_verify_.base_acm,
+                                                     a1_verify_.rod_id, a1_verify_.support_id);
+            ++final_checked;
+            if (tly.total() > 0) {
+                final_tally.rod += tly.rod;
+                final_tally.support += tly.support;
+                final_tally.dual_arm += tly.dual_arm;
+                final_tally.self += tly.self;
+                final_tally.world += tly.world;
+                if (final_tally.examples.empty()) {
+                    final_tally.examples = tly.examples;
+                }
+            }
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-2B] 最终轨迹碰撞检查（严格 ACM，未放行指-杆）: %zu 个状态"
+                "（含 %zu 个航点、%zu 段细分），碰撞 %zu 处",
+                final_checked, jt.points.size(), final_subdivisions, final_tally.total());
+    if (final_tally.total() > 0) {
+        detail = "E_2B_FINAL_PATH_COLLISION: " + describeTally(final_tally) +
+                 " -- stopping and reporting instead of exempting the contact";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+        return false;
+    }
+
+    // (i) Endpoint FK from the LAST point of the FINAL message, not from the
+    //     pre-TOTG IK waypoints.
+    {
+        const moveit::core::RobotState end = finalStateOf(jt.points.back().positions);
+        const a1v::PoseError fl = a1v::poseError(
+            a1_verify_.grasp_target.left, fromEigenPose(end.getGlobalLinkTransform(a1_verify_.left_eef)));
+        const a1v::PoseError fr = a1v::poseError(
+            a1_verify_.grasp_target.right, fromEigenPose(end.getGlobalLinkTransform(a1_verify_.right_eef)));
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 最终轨迹**末点** FK 残差（对抓取目标，取自最终消息）: "
+                    "左 %.4f mm/%.4f°，右 %.4f mm/%.4f°",
+                    fl.pos_m * 1000.0, fl.angle_rad * 180.0 / M_PI, fr.pos_m * 1000.0,
+                    fr.angle_rad * 180.0 / M_PI);
+        if (fl.pos_m > ctx_->p2a_ik_pos_tol_m_ || fr.pos_m > ctx_->p2a_ik_pos_tol_m_ ||
+            fl.angle_rad > ang_tol || fr.angle_rad > ang_tol) {
+            detail = "E_2B_ENDPOINT_MISMATCH: the final point does not reproduce the grasp target";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // (j) Derivative fields against the LIVE model's limits. A trajectory that
+    //     has not passed every check above never becomes valid, so nothing is
+    //     dispatched on a partially verified message.
+    {
+        std::vector<double> vel_limits, acc_limits;
+        std::vector<bool> vel_bounded, acc_bounded;
+        for (const std::string& j : jt.joint_names) {
+            double vmax = 0.0, amax = 0.0;
+            bool vb = false, ab = false;
+            const moveit::core::JointModel* jm = ctx_->dual_arm_->getRobotModel()->getJointModel(j);
+            if (jm != nullptr) {
+                const moveit::core::VariableBounds& b = jm->getVariableBounds(j);
+                vmax = std::max(std::fabs(b.min_velocity_), std::fabs(b.max_velocity_));
+                vb = b.velocity_bounded_;
+                amax = std::max(std::fabs(b.min_acceleration_), std::fabs(b.max_acceleration_));
+                ab = b.acceleration_bounded_;
+            }
+            vel_limits.push_back(vmax);
+            vel_bounded.push_back(vb);
+            acc_limits.push_back(amax);
+            acc_bounded.push_back(ab);
+        }
+        double vel_worst = 0.0;
+        double acc_worst = 0.0;
+        std::size_t vel_points = 0;
+        std::size_t acc_points = 0;
+        for (std::size_t pi = 0; pi < jt.points.size(); ++pi) {
+            if (!jt.points[pi].velocities.empty()) {
+                ++vel_points;
+                const a1v::DerivativeCheck c = a1v::checkDerivativeField(
+                    jt.points[pi].velocities, vel_limits, vel_bounded, jt.joint_names);
+                if (!c.ok) {
+                    detail = "E_2B_VELOCITY_INVALID at point " + std::to_string(pi) + ": " +
+                             c.reason_code + " (" + c.detail + ")";
+                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+                    return false;
+                }
+                vel_worst = std::max(vel_worst, c.worst_ratio);
+            }
+            if (!jt.points[pi].accelerations.empty()) {
+                ++acc_points;
+                const a1v::DerivativeCheck c = a1v::checkDerivativeField(
+                    jt.points[pi].accelerations, acc_limits, acc_bounded, jt.joint_names);
+                if (!c.ok) {
+                    detail = "E_2B_ACCELERATION_INVALID at point " + std::to_string(pi) + ": " +
+                             c.reason_code + " (" + c.detail + ")";
+                    RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+                    return false;
+                }
+                acc_worst = std::max(acc_worst, c.worst_ratio);
+            }
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 最终轨迹复核: %zu 关节名唯一完整；末点 t=%.3f s；"
+                    "速度字段 %zu/%zu 点（最大占用比 %.4f）；加速度字段 %zu/%zu 点"
+                    "（最大占用比 %.4f）",
+                    jt.joint_names.size(),
+                    rclcpp::Duration(jt.points.back().time_from_start).seconds(), vel_points,
+                    jt.points.size(), vel_worst, acc_points, jt.points.size(), acc_worst);
+    }
+
+    if (injected_obstacle) {
+        // The negative example must not leak into the criterion scene.
+        moveit_msgs::msg::CollisionObject rm;
+        rm.id = "a1_descent_final_obstacle_injected";
+        rm.operation = moveit_msgs::msg::CollisionObject::REMOVE;
+        rm.header.frame_id = scene->getPlanningFrame();
+        scene->processCollisionObjectMsg(rm);
+        RCLCPP_INFO(ctx_->get_logger(), "  [P3A-2B][负例-注入] 验证障碍已移除");
+    }
+
+    a1_verify_.descent_plan_valid = true;
+    detail = "DESCENT_VERIFIED";
+    return true;
+}
+
+bool DualArmController::runGraspContact(const a1t::TruthPayload& truth, std::string& detail)
+{
+    using namespace std::chrono_literals;
+    constexpr int kWindowSamples = 16;
+    constexpr double kGapSpreadTolM = 0.0002;
+    constexpr double kArmSpreadTolRad = 0.002;
+    constexpr double kArmStableWindowSec = 0.30;
+    constexpr double kEefPositionTolM = 0.005;
+    constexpr double kEefAngleTolRad = 2.0 * M_PI / 180.0;
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[P3A-2C] 接触窗口预设: 每手16个新序号样本(约0.30 s)，总gap整窗spread<=%.4f m；"
+        "接触后关节新反馈窗>=%.2f s、逐关节range<=%.4f rad；末端相对原抓取目标<=%.3f m/%.2f deg；"
+        "杆真值复用下降门槛 %.4f m / %.2f deg",
+        kGapSpreadTolM, kArmStableWindowSec, kArmSpreadTolRad, kEefPositionTolM,
+        kEefAngleTolRad * 180.0 / M_PI, ctx_->descent_truth_pos_tol_m_,
+        ctx_->descent_truth_angle_tol_deg_);
+
+    const MujocoRodTruth before = readMujocoRodTruth();
+    auto quaternionDistance = [](const a1t::Quat& a, const a1t::Quat& b) {
+        const double an = std::sqrt(a.x*a.x + a.y*a.y + a.z*a.z + a.w*a.w);
+        const double bn = std::sqrt(b.x*b.x + b.y*b.y + b.z*b.z + b.w*b.w);
+        if (!(an > 1e-12) || !(bn > 1e-12)) return std::numeric_limits<double>::infinity();
+        const double dot = std::abs((a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w) / (an*bn));
+        return 2.0 * std::acos(std::clamp(dot, 0.0, 1.0));
+    };
+    const a1v::Vec3 frozen{truth.position.x, truth.position.y, truth.position.z};
+    auto positionDistance = [](const a1v::Vec3& a, const a1v::Vec3& b) {
+        const double x = a.x-b.x, y = a.y-b.y, z = a.z-b.z;
+        return std::sqrt(x*x+y*y+z*z);
+    };
+    const a1t::Quat frozen_q{truth.orientation.x, truth.orientation.y,
+                             truth.orientation.z, truth.orientation.w};
+    if (!before.ok) {
+        detail = "E_P3A2C_TRUTH_BEFORE_UNAVAILABLE: " + before.detail;
+        RCLCPP_ERROR(ctx_->get_logger(), "%s", detail.c_str());
+        return false;
+    }
+    const double before_pos_err = positionDistance(before.position, frozen);
+    const double before_ang_err = quaternionDistance(before.orientation, frozen_q);
+    if (before_pos_err > ctx_->descent_truth_pos_tol_m_ ||
+        before_ang_err > ctx_->descent_truth_angle_tol_deg_ * M_PI / 180.0) {
+        detail = "E_P3A2C_TRUTH_REFERENCE_STALE";
+        RCLCPP_ERROR(ctx_->get_logger(),
+            "[P3A-2C] 闭合前杆真值偏离冻结参考: pos=%.6f m angle=%.4f deg; 停止，不闭合",
+            before_pos_err, before_ang_err * 180.0 / M_PI);
+        return false;
+    }
+
+    const std::string arm_names[2] = {"mj_left", "mj_right"};
+    DualArmCarryTask::JointFeedback arm_before;
+    if (!ctx_->latestJointFeedback(arm_before)) {
+        detail = "E_P3A2C_ARM_FEEDBACK_UNAVAILABLE_BEFORE";
+        return false;
+    }
+
+    // Separate natural arm drift from motion that occurs during the contact
+    // action. Observe a short fixed hold before sending either Grasp goal.
+    constexpr auto kPreContactHold = 300ms;
+    constexpr auto kArmSamplePeriod = 20ms;
+    DualArmCarryTask::JointFeedback arm_contact_start = arm_before;
+    unsigned long long previous_arm_seq = arm_before.seq;
+    int pre_hold_fresh_samples = 0;
+    double pre_hold_max_delta = 0.0;
+    std::string pre_hold_worst_joint = "-";
+    const auto hold_start = std::chrono::steady_clock::now();
+    while (rclcpp::ok() && std::chrono::steady_clock::now() - hold_start < kPreContactHold) {
+        std::this_thread::sleep_for(kArmSamplePeriod);
+        DualArmCarryTask::JointFeedback sample;
+        if (!ctx_->latestJointFeedback(sample) || sample.seq <= previous_arm_seq) continue;
+        previous_arm_seq = sample.seq;
+        ++pre_hold_fresh_samples;
+        arm_contact_start = sample;
+        for (int side = 0; side < 2; ++side) {
+            for (int joint = 1; joint <= 7; ++joint) {
+                const std::string name = arm_names[side] + "_joint" + std::to_string(joint);
+                const auto initial = arm_before.positions.find(name);
+                const auto current = sample.positions.find(name);
+                if (initial == arm_before.positions.end() || current == sample.positions.end()) continue;
+                const double delta = std::abs(current->second - initial->second);
+                if (delta > pre_hold_max_delta) {
+                    pre_hold_max_delta = delta;
+                    pre_hold_worst_joint = name;
+                }
+            }
+        }
+    }
+    if (pre_hold_fresh_samples < 5) {
+        detail = "E_P3A2C_PRECONTACT_ARM_HOLD_FEEDBACK_STALE";
+        RCLCPP_ERROR(ctx_->get_logger(),
+            "[P3A2C_ARM_BASELINE] only %d fresh joint samples during %.3f s pre-contact hold; no Grasp goal sent",
+            pre_hold_fresh_samples,
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - hold_start).count());
+        return false;
+    }
+
+    auto handTransforms = [&](const DualArmCarryTask::JointFeedback& feedback,
+                              Eigen::Isometry3d& left, Eigen::Isometry3d& right) {
+        if (!a1_verify_.model) return false;
+        moveit::core::RobotState state(a1_verify_.model);
+        for (int side = 0; side < 2; ++side) {
+            for (int joint = 1; joint <= 7; ++joint) {
+                const std::string name = arm_names[side] + "_joint" + std::to_string(joint);
+                const auto it = feedback.positions.find(name);
+                if (it == feedback.positions.end() || !std::isfinite(it->second)) return false;
+                state.setVariablePosition(name, it->second);
+            }
+        }
+        state.update();
+        left = state.getGlobalLinkTransform(a1_verify_.left_eef);
+        right = state.getGlobalLinkTransform(a1_verify_.right_eef);
+        return true;
+    };
+    auto poseDelta = [](const Eigen::Isometry3d& before_pose,
+                        const Eigen::Isometry3d& after_pose) {
+        const double position_m = (after_pose.translation() - before_pose.translation()).norm();
+        const Eigen::AngleAxisd rotation(before_pose.linear().transpose() * after_pose.linear());
+        return std::pair<double, double>{position_m, rotation.angle()};
+    };
+    Eigen::Isometry3d left_before_fk, right_before_fk, left_contact_fk, right_contact_fk;
+    const bool fk_baseline_valid = handTransforms(arm_before, left_before_fk, right_before_fk) &&
+                                   handTransforms(arm_contact_start, left_contact_fk, right_contact_fk);
+    double baseline_left_pos = std::numeric_limits<double>::quiet_NaN();
+    double baseline_left_ang = std::numeric_limits<double>::quiet_NaN();
+    double baseline_right_pos = std::numeric_limits<double>::quiet_NaN();
+    double baseline_right_ang = std::numeric_limits<double>::quiet_NaN();
+    if (fk_baseline_valid) {
+        const auto left = poseDelta(left_before_fk, left_contact_fk);
+        const auto right = poseDelta(right_before_fk, right_contact_fk);
+        baseline_left_pos = left.first; baseline_left_ang = left.second;
+        baseline_right_pos = right.first; baseline_right_ang = right.second;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[P3A2C_ARM_BASELINE] hold=%.3f s fresh_samples=%d seq=%llu->%llu max_joint_excursion=%.6f rad joint=%s FK_valid=%d left_dpos=%.6f m left_drot=%.5f deg right_dpos=%.6f m right_drot=%.5f deg",
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - hold_start).count(),
+        pre_hold_fresh_samples, arm_before.seq, arm_contact_start.seq,
+        pre_hold_max_delta, pre_hold_worst_joint.c_str(), fk_baseline_valid ? 1 : 0,
+        baseline_left_pos, baseline_left_ang * 180.0 / M_PI,
+        baseline_right_pos, baseline_right_ang * 180.0 / M_PI);
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "[P3A-2C] contact action protocol start; grasp action only; weld=0 attach=0");
+    const bool action_ok = ctx_->grippers_->controlDualGrippersContact();
+
+    a1g::BilateralContactWindow windows[2] = {
+        a1g::BilateralContactWindow(kWindowSamples, kGapSpreadTolM),
+        a1g::BilateralContactWindow(kWindowSamples, kGapSpreadTolM)};
+    bool contact_ok = false;
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (action_ok && rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+        for (int i = 0; i < 2; ++i) {
+            DualArmCarryTask::GripperContactFeedback fb;
+            if (!ctx_->latestGripperContact(arm_names[i], fb)) continue;
+            windows[i].update(fb.seq, fb.q1, fb.q2, fb.left_contact, fb.right_contact);
+        }
+        contact_ok = windows[0].confirmed() && windows[1].confirmed();
+        if (contact_ok) break;
+        std::this_thread::sleep_for(20ms);
+    }
+
+    // Arm stability is a fresh 0.30 s observation after both action results;
+    // cumulative displacement from the original snapshot remains a separate
+    // reported metric and is not compared to this short-window threshold.
+    a1g::JointStabilityWindow arm_window(kArmStableWindowSec, kArmSpreadTolRad);
+    DualArmCarryTask::JointFeedback arm_after;
+    bool arm_after_valid = false;
+    const auto arm_window_start = std::chrono::steady_clock::now();
+    DualArmCarryTask::JointFeedback arm_window_fence;
+    const bool have_arm_window_fence = ctx_->latestJointFeedback(arm_window_fence);
+    unsigned long long arm_window_seq = have_arm_window_fence ? arm_window_fence.seq : 0;
+    while (rclcpp::ok() && std::chrono::steady_clock::now() - arm_window_start < 360ms) {
+        DualArmCarryTask::JointFeedback sample;
+        if (ctx_->latestJointFeedback(sample) && sample.seq > arm_window_seq) {
+            std::vector<double> positions;
+            positions.reserve(14);
+            bool complete = true;
+            for (int side = 0; side < 2; ++side) {
+                for (int joint = 1; joint <= 7; ++joint) {
+                    const std::string name = arm_names[side] + "_joint" + std::to_string(joint);
+                    const auto it = sample.positions.find(name);
+                    if (it == sample.positions.end() || !std::isfinite(it->second)) {
+                        complete = false;
+                        break;
+                    }
+                    positions.push_back(it->second);
+                }
+                if (!complete) break;
+            }
+            if (complete && arm_window.update(sample.seq, sample.recv_steady_sec, positions)) {
+                arm_window_seq = sample.seq;
+                arm_after = sample;
+                arm_after_valid = true;
+            }
+        }
+        std::this_thread::sleep_for(10ms);
+    }
+    double arm_max_delta = 0.0;
+    double contact_arm_max_delta = 0.0;
+    std::string worst_joint = "-";
+    std::string contact_worst_joint = "-";
+    bool arm_feedback_complete = arm_after_valid && arm_after.seq > arm_before.seq;
+    if (arm_after_valid) {
+        for (int side = 0; side < 2; ++side) {
+            for (int joint = 1; joint <= 7; ++joint) {
+                const std::string name = arm_names[side] + "_joint" + std::to_string(joint);
+                const auto b = arm_before.positions.find(name);
+                const auto a = arm_after.positions.find(name);
+                if (b == arm_before.positions.end() || a == arm_after.positions.end() ||
+                    !std::isfinite(b->second) || !std::isfinite(a->second)) {
+                    arm_feedback_complete = false;
+                    continue;
+                }
+                const double delta = std::abs(a->second - b->second);
+                if (delta > arm_max_delta) { arm_max_delta = delta; worst_joint = name; }
+                const auto c = arm_contact_start.positions.find(name);
+                if (c != arm_contact_start.positions.end() && std::isfinite(c->second)) {
+                    const double contact_delta = std::abs(a->second - c->second);
+                    if (contact_delta > contact_arm_max_delta) {
+                        contact_arm_max_delta = contact_delta;
+                        contact_worst_joint = name;
+                    }
+                }
+            }
+        }
+    }
+    Eigen::Isometry3d left_after_fk, right_after_fk;
+    const bool fk_after_valid = arm_after_valid &&
+        handTransforms(arm_after, left_after_fk, right_after_fk);
+    double contact_left_pos = std::numeric_limits<double>::quiet_NaN();
+    double contact_left_ang = std::numeric_limits<double>::quiet_NaN();
+    double contact_right_pos = std::numeric_limits<double>::quiet_NaN();
+    double contact_right_ang = std::numeric_limits<double>::quiet_NaN();
+    if (fk_after_valid) {
+        const auto left = poseDelta(left_contact_fk, left_after_fk);
+        const auto right = poseDelta(right_contact_fk, right_after_fk);
+        contact_left_pos = left.first; contact_left_ang = left.second;
+        contact_right_pos = right.first; contact_right_ang = right.second;
+    }
+    a1v::PoseError left_target_error{std::numeric_limits<double>::infinity(),
+                                     std::numeric_limits<double>::infinity()};
+    a1v::PoseError right_target_error = left_target_error;
+    if (fk_after_valid) {
+        left_target_error = a1v::poseError(a1_verify_.grasp_target.left,
+                                           fromEigenPose(left_after_fk));
+        right_target_error = a1v::poseError(a1_verify_.grasp_target.right,
+                                            fromEigenPose(right_after_fk));
+    }
+    const double arm_feedback_age_sec = arm_after_valid
+        ? std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() -
+              arm_after.recv_steady_sec
+        : std::numeric_limits<double>::infinity();
+    const bool arm_short_window_ok = arm_window.stable() && arm_after_valid &&
+        arm_feedback_age_sec <= 0.10 && arm_after.seq == arm_window.lastSeq();
+    const bool eef_target_ok = fk_after_valid &&
+        a1g::poseWithinLimits(left_target_error.pos_m, left_target_error.angle_rad,
+                             kEefPositionTolM, kEefAngleTolRad) &&
+        a1g::poseWithinLimits(right_target_error.pos_m, right_target_error.angle_rad,
+                             kEefPositionTolM, kEefAngleTolRad);
+    const MujocoRodTruth after = readMujocoRodTruth();
+    double rod_delta = std::numeric_limits<double>::infinity();
+    double rod_angle_delta = std::numeric_limits<double>::infinity();
+    if (after.ok) {
+        rod_delta = positionDistance(after.position, before.position);
+        rod_angle_delta = quaternionDistance(after.orientation, before.orientation);
+    }
+
+    bool collision_ok = false;
+    std::string collision_detail = "verification model unavailable";
+    if (action_ok && contact_ok && a1_verify_.valid && a1_verify_.model && a1_verify_.scene) {
+        DualArmCarryTask::JointFeedback joints;
+        if (ctx_->latestJointFeedback(joints)) {
+            moveit::core::RobotState closed_state(a1_verify_.model);
+            bool complete = true;
+            for (const auto& variable : a1_verify_.model->getVariableNames()) {
+                const auto it = joints.positions.find(variable);
+                if (it == joints.positions.end() || !std::isfinite(it->second)) {
+                    complete = false;
+                    collision_detail = "missing/non-finite joint feedback for " + variable;
+                    break;
+                }
+                closed_state.setVariablePosition(variable, it->second);
+            }
+            if (complete) {
+                closed_state.update();
+                if (!closed_state.satisfiesBounds()) {
+                    collision_detail = "closed-state joint limit violation";
+                } else {
+                    collision_detection::CollisionRequest request;
+                    request.contacts = true;
+                    request.max_contacts = 100;
+                    collision_detection::CollisionResult result;
+                    a1_verify_.scene->checkCollision(request, result, closed_state, a1_verify_.grasp_acm);
+                    collision_ok = !result.collision;
+                    collision_detail = result.collision
+                        ? "collision remains after allowing only the four finger-to-rod pairs"
+                        : "no other collision; only four finger-to-rod pairs allowed in validation ACM";
+                    RCLCPP_INFO(ctx_->get_logger(),
+                        "[P3A2C_COLLISION] result=%s contact_pairs=%zu bounds=PASS detail=%s",
+                        collision_ok ? "PASS" : "FAIL", result.contacts.size(), collision_detail.c_str());
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        DualArmCarryTask::GripperContactFeedback fb;
+        ctx_->latestGripperContact(arm_names[i], fb);
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[P3A2C_FEEDBACK] arm=%s q1=%.6f m q2=%.6f m total_gap=%.6f m left_finger_obj_rod_01=%d "
+            "right_finger_obj_rod_01=%d update_seq=%llu action_protocol=%s window_samples=%zu",
+            arm_names[i].c_str(), fb.q1, fb.q2, fb.q1+fb.q2, fb.left_contact ? 1 : 0,
+            fb.right_contact ? 1 : 0, fb.seq, action_ok ? "SUCCEEDED" : "FAILED",
+            windows[i].count());
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[P3A2C_ARM_CONTACT_DELTA] max_joint_delta=%.6f rad joint=%s left_dpos=%.6f m left_drot=%.5f deg right_dpos=%.6f m right_drot=%.5f deg FK_valid=%d",
+        contact_arm_max_delta, contact_worst_joint.c_str(),
+        contact_left_pos, contact_left_ang * 180.0 / M_PI,
+        contact_right_pos, contact_right_ang * 180.0 / M_PI, fk_after_valid ? 1 : 0);
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[P3A2C_ARM_STABILITY] fresh_window=%.3f s samples=%zu seq=%llu range=%.6f rad limit=%.6f pass=%d feedback_age=%.3f s; "
+        "eef_target left=%.6f m/%.4f deg right=%.6f m/%.4f deg limits=%.3f m/%.2f deg pass=%d; "
+        "cumulative_duration=%.3f s max_joint_delta=%.6f rad joint=%s contact_delta=%.6f rad contact_joint=%s baseline_excursion=%.6f rad; "
+        "rod_before=(%.6f,%.6f,%.6f) rod_after_valid=%d rod_delta=%.6f m rod_angle_delta=%.5f deg",
+        arm_window.duration(), arm_window.samples(), arm_window.lastSeq(), arm_window.maxSpread(),
+        kArmSpreadTolRad, arm_short_window_ok ? 1 : 0, arm_feedback_age_sec,
+        left_target_error.pos_m, left_target_error.angle_rad * 180.0 / M_PI,
+        right_target_error.pos_m, right_target_error.angle_rad * 180.0 / M_PI,
+        kEefPositionTolM, kEefAngleTolRad * 180.0 / M_PI, eef_target_ok ? 1 : 0,
+        arm_after_valid ? arm_after.recv_steady_sec - arm_before.recv_steady_sec : 0.0,
+        arm_max_delta, worst_joint.c_str(), contact_arm_max_delta, contact_worst_joint.c_str(),
+        pre_hold_max_delta,
+        before.position.x, before.position.y, before.position.z, after.ok ? 1 : 0,
+        rod_delta, rod_angle_delta * 180.0 / M_PI);
+
+    if (!action_ok) {
+        detail = "E_P3A2C_ACTION_FAILED_OR_UNCERTAIN";
+        return false;
+    }
+    if (!contact_ok) {
+        detail = "E_P3A2C_BILATERAL_CONTACT_WINDOW_FAILED";
+        return false;
+    }
+    if (!collision_ok) {
+        detail = "E_P3A2C_CLOSED_STATE_COLLISION: " + collision_detail;
+        return false;
+    }
+    if (!arm_feedback_complete || !arm_short_window_ok) {
+        detail = "E_P3A2C_ARM_SHORT_WINDOW_UNSTABLE_OR_FEEDBACK_INCOMPLETE";
+        return false;
+    }
+    if (!eef_target_ok) {
+        detail = "E_P3A2C_EEF_OUTSIDE_GRASP_TARGET_TOLERANCE";
+        return false;
+    }
+    if (!after.ok || rod_delta > ctx_->descent_truth_pos_tol_m_ ||
+        rod_angle_delta > ctx_->descent_truth_angle_tol_deg_ * M_PI / 180.0) {
+        detail = "E_P3A2C_ROD_TRUTH_CHANGED_OR_UNAVAILABLE";
+        return false;
+    }
+    detail = "both grippers have fresh bilateral obj_rod_01 contacts; gap windows stable; no weld/attach/lift";
+    return true;
+}
+
+bool DualArmController::runIdealWeldCarry(const a1t::TruthPayload& truth, std::string& detail)
+{
+    using namespace std::chrono_literals;
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1] grasp_model=ideal_weld: 理想刚性抓持；未验证摩擦夹持或抗滑。"
+        "不要求真实双指接触，不执行接触闭合验收。");
+
+    auto awaitStableRodTruth = [&](const char* phase, MujocoRodTruth& stable,
+                                   std::string& reason) {
+        using Sample = std::pair<std::chrono::steady_clock::time_point, MujocoRodTruth>;
+        std::deque<Sample> window;
+        const auto deadline = std::chrono::steady_clock::now() + 6s;
+        std::size_t total_samples = 0;
+        while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+            MujocoRodTruth sample = readMujocoRodTruth();
+            if (!sample.ok) {
+                reason = sample.detail;
+                return false;
+            }
+            const auto now = std::chrono::steady_clock::now();
+            ++total_samples;
+            window.emplace_back(now, sample);
+            while (!window.empty() && now - window.front().first > 600ms) window.pop_front();
+            if (window.size() >= 8 && now - window.front().first >= 500ms) {
+                double max_position_spread = 0.0;
+                double max_angle_spread = 0.0;
+                double max_linear_speed = 0.0;
+                double max_angular_speed = 0.0;
+                const auto& reference = window.front().second;
+                for (const auto& entry : window) {
+                    const auto& s = entry.second;
+                    max_position_spread = std::max(max_position_spread,
+                        std::sqrt(std::pow(s.position.x - reference.position.x, 2) +
+                                  std::pow(s.position.y - reference.position.y, 2) +
+                                  std::pow(s.position.z - reference.position.z, 2)));
+                    max_angle_spread = std::max(max_angle_spread,
+                        a1t::rotationDistanceRad(s.orientation, reference.orientation));
+                    max_linear_speed = std::max(max_linear_speed,
+                        std::sqrt(s.linear_velocity.x * s.linear_velocity.x +
+                                  s.linear_velocity.y * s.linear_velocity.y +
+                                  s.linear_velocity.z * s.linear_velocity.z));
+                    max_angular_speed = std::max(max_angular_speed,
+                        std::sqrt(s.angular_velocity.x * s.angular_velocity.x +
+                                  s.angular_velocity.y * s.angular_velocity.y +
+                                  s.angular_velocity.z * s.angular_velocity.z));
+                }
+                if (max_position_spread <= 0.0005 && max_angle_spread <= 0.2 * M_PI / 180.0 &&
+                    max_linear_speed <= 0.01 && max_angular_speed <= 0.05) {
+                    stable = window.back().second;
+                    RCLCPP_INFO(ctx_->get_logger(),
+                        "[S1_ROD_STABILITY] phase=%s samples=%zu window=%.3fs pos_spread=%.3fmm "
+                        "angle_spread=%.3fdeg max_linear_speed=%.5fm/s max_angular_speed=%.5frad/s",
+                        phase, window.size(), std::chrono::duration<double>(
+                            window.back().first - window.front().first).count(),
+                        max_position_spread * 1000.0, max_angle_spread * 180.0 / M_PI,
+                        max_linear_speed, max_angular_speed);
+                    return true;
+                }
+            }
+            std::this_thread::sleep_for(30ms);
+        }
+        reason = std::string("stable rod truth window not achieved within bound; samples=") +
+                 std::to_string(total_samples);
+        return false;
+    };
+
+    if (!a1_verify_.valid || !a1_verify_.pregrasp_reached_this_round ||
+        !a1_verify_.descent_plan_valid || ctx_->getCurrentState() != TaskState::PREGRASP_REACHED) {
+        detail = "E_S1_PRECONDITION: this run did not pass verified A1 pregrasp and descent";
+        return false;
+    }
+    std::string controller_detail;
+    if (!checkControllerStatesEnabled(controller_detail)) {
+        detail = "E_S1_CONTROLLER_GATE: " + controller_detail;
+        return false;
+    }
+
+    auto physical_before = readMujocoRodTruth();
+    if (!physical_before.ok) {
+        detail = "E_S1_TRUTH_BEFORE_WELD: " + physical_before.detail;
+        return false;
+    }
+    const a1v::Vec3 frozen{truth.position.x, truth.position.y, truth.position.z};
+    if (std::sqrt(std::pow(physical_before.position.x - frozen.x, 2) +
+                  std::pow(physical_before.position.y - frozen.y, 2) +
+                  std::pow(physical_before.position.z - frozen.z, 2)) >
+            ctx_->descent_truth_pos_tol_m_ ||
+        a1t::rotationDistanceRad(physical_before.orientation,
+            {truth.orientation.x, truth.orientation.y, truth.orientation.z, truth.orientation.w}) >
+            ctx_->descent_truth_angle_tol_deg_ * M_PI / 180.0) {
+        detail = "E_S1_TRUTH_REFERENCE_MISMATCH: physical rod no longer matches frozen A1 truth";
+        return false;
+    }
+
+    auto model = ctx_->dual_arm_->getRobotModel();
+    auto current = ctx_->dual_arm_->getCurrentState();
+    if (!model || !current || a1_verify_.left_eef.empty() || a1_verify_.right_eef.empty()) {
+        detail = "E_S1_ROBOT_STATE_UNAVAILABLE";
+        return false;
+    }
+    const Eigen::Isometry3d object_initial = toEigenPose(a1v::ArmTarget{
+        {physical_before.position.x, physical_before.position.y, physical_before.position.z},
+        {physical_before.orientation.x, physical_before.orientation.y,
+         physical_before.orientation.z, physical_before.orientation.w}});
+    const Eigen::Isometry3d left_hand_initial = current->getGlobalLinkTransform(a1_verify_.left_eef);
+    const Eigen::Isometry3d right_hand_initial = current->getGlobalLinkTransform(a1_verify_.right_eef);
+    const Eigen::Isometry3d object_to_left = object_initial.inverse() * left_hand_initial;
+    const Eigen::Isometry3d object_to_right = object_initial.inverse() * right_hand_initial;
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_GRASP_TRANSFORM] object->left_hand=(%.5f,%.5f,%.5f) object->right_hand=(%.5f,%.5f,%.5f)",
+        object_to_left.translation().x(), object_to_left.translation().y(),
+        object_to_left.translation().z(), object_to_right.translation().x(),
+        object_to_right.translation().y(), object_to_right.translation().z());
+
+    if (!ctx_->weld_pub_ || !ctx_->weld_state_sub_) {
+        detail = "E_S1_WELD_INTERFACE_UNAVAILABLE";
+        return false;
+    }
+    ctx_->weld_state_received_.store(false, std::memory_order_release);
+    std_msgs::msg::Bool weld_on;
+    weld_on.data = true;
+    ctx_->weld_pub_->publish(weld_on);
+    const auto weld_deadline = std::chrono::steady_clock::now() + 3s;
+    while (rclcpp::ok() && std::chrono::steady_clock::now() < weld_deadline &&
+           !ctx_->weld_state_received_.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(20ms);
+    }
+    if (!ctx_->weld_state_received_.load(std::memory_order_acquire) ||
+        !ctx_->weld_state_active_.load(std::memory_order_acquire)) {
+        detail = "E_S1_DUAL_WELD_NOT_CONFIRMED: physical-thread state feedback did not confirm both welds";
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "[S1_WELD_STATE] dual_weld_active=true confirmed by physics-thread feedback");
+    std::this_thread::sleep_for(100ms);
+    const MujocoRodTruth after_weld = readMujocoRodTruth();
+    if (!after_weld.ok) {
+        detail = "E_S1_TRUTH_AFTER_WELD: " + after_weld.detail;
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "[S1_WELD_CONTINUITY] before->after=%s",
+        rodDeltaText(physical_before.position, physical_before.orientation,
+                     after_weld.position, after_weld.orientation).c_str());
+    if (std::sqrt(std::pow(after_weld.position.x - physical_before.position.x, 2) +
+                  std::pow(after_weld.position.y - physical_before.position.y, 2) +
+                  std::pow(after_weld.position.z - physical_before.position.z, 2)) > 0.005 ||
+        a1t::rotationDistanceRad(after_weld.orientation, physical_before.orientation) >
+            2.0 * M_PI / 180.0) {
+        detail = "E_S1_WELD_POSE_JUMP: rod moved outside 5 mm / 2 deg during weld activation";
+        return false;
+    }
+
+    if (!attachObject()) {
+        std_msgs::msg::Bool weld_off;
+        weld_off.data = false;
+        ctx_->weld_pub_->publish(weld_off);
+        detail = "E_S1_MOVEIT_ATTACH_FAILED: dual weld rolled back";
+        return false;
+    }
+    moveit::planning_interface::PlanningSceneInterface psi;
+    const auto attached = psi.getAttachedObjects({"aluminum_rod"});
+    if (attached.count("aluminum_rod") != 1) {
+        detail = "E_S1_ATTACH_STATE_MISMATCH";
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_ATTACH_STATE] MoveIt attached aluminum_rod to mj_left_hand; touch_links are exact parent + finger grasp links only");
+
+    const auto* left_jmg = model->getJointModelGroup(ctx_->left_arm_group_);
+    const auto* right_jmg = model->getJointModelGroup(ctx_->right_arm_group_);
+    if (!left_jmg || !right_jmg) {
+        detail = "E_S1_JOINT_GROUP_MISSING";
+        return false;
+    }
+    auto interpolateObject = [](const Eigen::Isometry3d& a, const Eigen::Isometry3d& b, double t) {
+        Eigen::Isometry3d out = Eigen::Isometry3d::Identity();
+        out.translation() = (1.0 - t) * a.translation() + t * b.translation();
+        const Eigen::Quaterniond qa(a.linear()), qb(b.linear());
+        out.linear() = qa.slerp(t, qb).normalized().toRotationMatrix();
+        return out;
+    };
+    moveit::planning_interface::MoveGroupInterface::Plan carry_plan;
+    Eigen::Isometry3d object_place = Eigen::Isometry3d::Identity();
+    const std::array<std::array<double, 2>, 1> placement_candidates{{
+        {{ctx_->rod_target_x_, ctx_->rod_target_y_}}}};
+    int selected_candidate = -1;
+    for (std::size_t candidate_index = 0; candidate_index < placement_candidates.size(); ++candidate_index) {
+        const double target_x = placement_candidates[candidate_index][0];
+        const double target_y = placement_candidates[candidate_index][1];
+        detail.clear();
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[S1_CANDIDATE_BEGIN] index=%zu/%zu x=%.3f y=%.3f yaw_deg=%.3f mode=planning_only_until_selected",
+            candidate_index + 1, placement_candidates.size(), target_x, target_y,
+            ctx_->rod_target_yaw_rad_ * 180.0 / M_PI);
+        auto planPlacementCandidate = [&](double target_x, double target_y,
+                moveit::planning_interface::MoveGroupInterface::Plan& candidate_plan_out,
+                Eigen::Isometry3d& selected_place_out) -> bool {
+    const Eigen::Isometry3d object_start = object_initial;
+    const double lift_delta = std::max(0.0, ctx_->lift_height_ - ctx_->grasp_height_);
+    Eigen::Isometry3d object_lift = object_start;
+    object_lift.translation().z() += lift_delta;
+    Eigen::Isometry3d object_transport = object_lift;
+    object_transport.translation().x() = target_x;
+    object_transport.translation().y() = target_y;
+    Eigen::Isometry3d object_rotate = object_transport;
+    const double initial_yaw = std::atan2(object_transport.linear()(1, 0),
+                                          object_transport.linear()(0, 0));
+    const double yaw_delta = s1::absoluteYawDelta(initial_yaw, ctx_->rod_target_yaw_rad_);
+    object_rotate.linear() = Eigen::AngleAxisd(yaw_delta, Eigen::Vector3d::UnitZ()).toRotationMatrix() *
+                             object_transport.linear();
+    const double constructed_yaw = std::atan2(object_rotate.linear()(1, 0),
+                                              object_rotate.linear()(0, 0));
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_ROTATION_TARGET] semantics=absolute_world_yaw initial=%.3fdeg requested=%.3fdeg "
+        "delta=%.3fdeg constructed_endpoint=%.3fdeg rotation_tested=%s",
+        initial_yaw * 180.0 / M_PI, ctx_->rod_target_yaw_rad_ * 180.0 / M_PI,
+        yaw_delta * 180.0 / M_PI, constructed_yaw * 180.0 / M_PI,
+        std::abs(yaw_delta) > 1e-9 ? "true" : "false");
+    Eigen::Isometry3d object_place = object_rotate;
+    object_place.translation().z() = ctx_->rod_center_ground_z_;
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_TARGET] object_xyz=(%.4f,%.4f,%.4f) world_yaw=%.3fdeg rotation_delta=%.3fdeg",
+        object_place.translation().x(), object_place.translation().y(), object_place.translation().z(),
+        constructed_yaw * 180.0 / M_PI, yaw_delta * 180.0 / M_PI);
+
+    struct ObjectPathPoint { Eigen::Isometry3d pose; std::string stage; };
+    std::vector<ObjectPathPoint> object_path;
+    auto appendObjectSegment = [&](const Eigen::Isometry3d& from, const Eigen::Isometry3d& to,
+                                   const std::string& stage, int steps) {
+        for (int i = 1; i <= steps; ++i) {
+            object_path.push_back({interpolateObject(from, to,
+                static_cast<double>(i) / static_cast<double>(steps)), stage});
+        }
+    };
+    const double path_step_m = 0.005;
+    auto stepsForDistance = [&](const Eigen::Isometry3d& from, const Eigen::Isometry3d& to) {
+        return std::max(1, static_cast<int>(std::ceil(
+            (to.translation() - from.translation()).norm() / path_step_m)));
+    };
+    const int lift_steps = stepsForDistance(object_start, object_lift);
+    const int transport_steps = stepsForDistance(object_lift, object_transport);
+    const int place_steps = stepsForDistance(object_rotate, object_place);
+    appendObjectSegment(object_start, object_lift, "LIFT", lift_steps);
+    appendObjectSegment(object_lift, object_transport, "TRANSPORT", transport_steps);
+    if (std::abs(yaw_delta) > 1e-9) {
+        appendObjectSegment(object_transport, object_rotate, "ROTATE", 5);
+    } else {
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[S1_ROTATION_PLAN] rotation_delta=0 rotation_tested=false; no rotation waypoints added");
+    }
+    appendObjectSegment(object_rotate, object_place, "DESCEND_PLACE", place_steps);
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_OBJECT_PATH_SAMPLING] max_translation_step=%.1fmm lift=%d transport=%d place=%d total=%zu",
+        path_step_m * 1000.0, lift_steps, transport_steps, place_steps, object_path.size());
+
+    auto placementProjectionMatches = [&](const Eigen::Isometry3d& pose) {
+        const double xy = (pose.translation().head<2>() - object_place.translation().head<2>()).norm();
+        const double angle = Eigen::AngleAxisd(
+            pose.linear().transpose() * object_place.linear()).angle();
+        return xy <= 0.005 && angle <= 2.0 * M_PI / 180.0;
+    };
+    auto supportClearance = [&](const Eigen::Isometry3d& pose) {
+        return pose.translation().z() - ctx_->rod_half_height_ - ctx_->p2a_support_z_;
+    };
+    auto expectedSupportBand = [&](const Eigen::Isometry3d& pose) {
+        return placementProjectionMatches(pose) && s1::supportHeightEligible(
+            pose.translation().z(), ctx_->rod_half_height_, ctx_->p2a_support_z_,
+            ctx_->p2a_resting_z_tol_);
+    };
+
+    // Plan the complete object-space path before dispatching any part of it.
+    // This uses the same hand-adjusted criterion model, support plane, attached
+    // rod, actual finger positions, and narrow grasp ACM as the A1 checks.
+    if (!a1_verify_.valid || !a1_verify_.scene || !a1_verify_.model || !current) {
+        detail = "E_S1_CRITERION_SCENE_UNAVAILABLE";
+        return false;
+    }
+    const auto attached_objects = psi.getAttachedObjects({"aluminum_rod"});
+    if (attached_objects.count("aluminum_rod") != 1) {
+        detail = "E_S1_ATTACHED_ROD_MISSING_DURING_PREPLAN";
+        return false;
+    }
+    auto criterion_scene = a1_verify_.scene->diff();
+    if (!criterion_scene->processAttachedCollisionObjectMsg(attached_objects.at("aluminum_rod"))) {
+        detail = "E_S1_CRITERION_ATTACH_IMPORT_FAILED";
+        return false;
+    }
+    auto criterion_model = a1_verify_.model;
+    const auto* criterion_dual = criterion_model->getJointModelGroup(ctx_->dual_arm_group_);
+    const auto* criterion_left = criterion_model->getJointModelGroup(ctx_->left_arm_group_);
+    const auto* criterion_right = criterion_model->getJointModelGroup(ctx_->right_arm_group_);
+    if (!criterion_dual || !criterion_left || !criterion_right) {
+        detail = "E_S1_CRITERION_GROUP_MISSING";
+        return false;
+    }
+    const std::set<std::string> criterion_variables(
+        criterion_model->getVariableNames().begin(), criterion_model->getVariableNames().end());
+    const auto live_model = ctx_->dual_arm_->getRobotModel();
+    const auto* live_dual = live_model->getJointModelGroup(ctx_->dual_arm_group_);
+    const std::set<std::string> live_variables(
+        live_model->getVariableNames().begin(), live_model->getVariableNames().end());
+    if (!live_dual) {
+        detail = "E_S1_LIVE_JOINT_GROUP_MISSING";
+        return false;
+    }
+    moveit::core::RobotState criterion_start(*a1_verify_.start);
+    for (const auto& name : current->getVariableNames()) {
+        if (criterion_variables.count(name) != 0) {
+            criterion_start.setVariablePosition(name, current->getVariablePosition(name));
+        }
+    }
+    // The descent criterion's private feedback mapping is the authoritative
+    // measured finger snapshot. Preserve those four values if the live
+    // CurrentStateMonitor still carries an older/default value.
+    std::size_t mapped_finger_count = 0;
+    for (const auto& name : criterion_model->getVariableNames()) {
+        if (name.find("finger_joint") == std::string::npos) continue;
+        if (!a1_verify_.descent_start || live_variables.count(name) == 0) continue;
+        const double measured = a1_verify_.descent_start->getVariablePosition(name);
+        const double csm = current->getVariablePosition(name);
+        criterion_start.setVariablePosition(name, measured);
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[S1_FINGER_STATE] joint=%s measured_snapshot=%.6f live_CSM=%.6f criterion=%.6f",
+            name.c_str(), measured, csm, criterion_start.getVariablePosition(name));
+        ++mapped_finger_count;
+    }
+    if (mapped_finger_count != 4) {
+        detail = "E_S1_MEASURED_FINGER_SNAPSHOT_INCOMPLETE count=" +
+                 std::to_string(mapped_finger_count);
+        return false;
+    }
+    criterion_start.update();
+    if (!criterion_start.satisfiesBounds(criterion_dual, 1e-4)) {
+        detail = "E_S1_START_STATE_BOUNDS";
+        return false;
+    }
+    const Eigen::Isometry3d start_inferred_left =
+        criterion_start.getGlobalLinkTransform(a1_verify_.left_eef) * object_to_left.inverse();
+    const Eigen::Isometry3d start_inferred_right =
+        criterion_start.getGlobalLinkTransform(a1_verify_.right_eef) * object_to_right.inverse();
+    const double start_dual_position_residual =
+        (start_inferred_left.translation() - start_inferred_right.translation()).norm();
+    const double start_dual_angle_residual = Eigen::AngleAxisd(
+        start_inferred_left.linear().transpose() * start_inferred_right.linear()).angle();
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_FK_START] left_rod=(%.6f,%.6f,%.6f) right_rod=(%.6f,%.6f,%.6f) "
+        "dual_residual=(%.3fmm,%.3fdeg) measured_fingers_mapped=%zu",
+        start_inferred_left.translation().x(), start_inferred_left.translation().y(),
+        start_inferred_left.translation().z(), start_inferred_right.translation().x(),
+        start_inferred_right.translation().y(), start_inferred_right.translation().z(),
+        start_dual_position_residual * 1000.0, start_dual_angle_residual * 180.0 / M_PI,
+        mapped_finger_count);
+    if (!std::isfinite(start_dual_position_residual) || !std::isfinite(start_dual_angle_residual) ||
+        start_dual_position_residual > 0.005 || start_dual_angle_residual > 2.0 * M_PI / 180.0) {
+        detail = "E_S1_START_GRASP_MAPPING_RESIDUAL exceeds 5 mm / 2 deg";
+        return false;
+    }
+    auto logTransform = [&](const char* side, const Eigen::Isometry3d& transform) {
+        const Eigen::Quaterniond q(transform.linear());
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[S1_GRASP_TRANSFORM_FULL] side=%s xyz=(%.7f,%.7f,%.7f) qxyzw=(%.8f,%.8f,%.8f,%.8f)",
+            side, transform.translation().x(), transform.translation().y(), transform.translation().z(),
+            q.x(), q.y(), q.z(), q.w());
+    };
+    logTransform("left", object_to_left);
+    logTransform("right", object_to_right);
+    std::ofstream fk_replay;
+    if (!ctx_->expected_run_id_.empty()) {
+        std::string safe_run_id = ctx_->expected_run_id_;
+        for (auto& ch : safe_run_id) {
+            if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_' && ch != '-') ch = '_';
+        }
+        const std::string replay_path = "experiment_results/a1_runs/" + safe_run_id +
+            "/s1_fk_replay_candidate_" + std::to_string(candidate_index + 1) + ".csv";
+        fk_replay.open(replay_path, std::ios::out | std::ios::trunc);
+        if (fk_replay) {
+            fk_replay << "source,stage,index,alpha,left_x,left_y,left_z,left_qx,left_qy,left_qz,left_qw,"
+                         "right_x,right_y,right_z,right_qx,right_qy,right_qz,right_qw,dual_pos_mm,dual_angle_deg";
+            for (const auto& name : criterion_dual->getVariableNames()) fk_replay << ",q_" << name;
+            fk_replay << '\n';
+        } else {
+            RCLCPP_WARN(ctx_->get_logger(), "[S1_FK_REPLAY] could not open %s", replay_path.c_str());
+        }
+    }
+    auto writeFkReplay = [&](const char* source, const std::string& stage, std::size_t index,
+                             double alpha, const moveit::core::RobotState& state) {
+        if (!fk_replay) return;
+        const Eigen::Isometry3d left =
+            state.getGlobalLinkTransform(a1_verify_.left_eef) * object_to_left.inverse();
+        const Eigen::Isometry3d right =
+            state.getGlobalLinkTransform(a1_verify_.right_eef) * object_to_right.inverse();
+        const Eigen::Quaterniond ql(left.linear()), qr(right.linear());
+        fk_replay << source << ',' << stage << ',' << index << ',' << alpha << ','
+            << left.translation().x() << ',' << left.translation().y() << ',' << left.translation().z() << ','
+            << ql.x() << ',' << ql.y() << ',' << ql.z() << ',' << ql.w() << ','
+            << right.translation().x() << ',' << right.translation().y() << ',' << right.translation().z() << ','
+            << qr.x() << ',' << qr.y() << ',' << qr.z() << ',' << qr.w() << ','
+            << (left.translation() - right.translation()).norm() * 1000.0 << ','
+            << Eigen::AngleAxisd(left.linear().transpose() * right.linear()).angle() * 180.0 / M_PI;
+        for (const auto& name : criterion_dual->getVariableNames()) {
+            fk_replay << ',' << state.getVariablePosition(name);
+        }
+        fk_replay << '\n';
+    };
+    writeFkReplay("actual_start", "START", 0, 0.0, criterion_start);
+    moveit::core::RobotState seed_live(*current);
+    for (const auto& name : criterion_model->getVariableNames()) {
+        if (name.find("finger_joint") != std::string::npos && live_variables.count(name) != 0) {
+            seed_live.setVariablePosition(name, criterion_start.getVariablePosition(name));
+        }
+    }
+    seed_live.update();
+    collision_detection::CollisionRequest path_collision_request;
+    path_collision_request.contacts = true;
+    path_collision_request.max_contacts = 20;
+    path_collision_request.group_name = ctx_->dual_arm_group_;
+
+    auto makeEndpointPose = [](const Eigen::Isometry3d& tf) {
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = tf.translation().x();
+        pose.position.y = tf.translation().y();
+        pose.position.z = tf.translation().z();
+        const Eigen::Quaterniond q(tf.linear());
+        pose.orientation.x = q.x(); pose.orientation.y = q.y();
+        pose.orientation.z = q.z(); pose.orientation.w = q.w();
+        return pose;
+    };
+    std::size_t endpoint_ik_rejected = 0;
+    std::size_t endpoint_collision_rejected = 0;
+    std::size_t endpoint_bounds_rejected = 0;
+    bool endpoint_accepted = false;
+    std::string endpoint_reason = "all finite endpoint candidates rejected";
+    const Eigen::Isometry3d endpoint_left = object_place * object_to_left;
+    const Eigen::Isometry3d endpoint_right = object_place * object_to_right;
+    for (int endpoint_candidate = 0; endpoint_candidate < 5 && !endpoint_accepted; ++endpoint_candidate) {
+        moveit::core::RobotState live_candidate(seed_live);
+        if (endpoint_candidate > 0) {
+            const std::size_t joint_index = static_cast<std::size_t>(endpoint_candidate - 1) % 3 + 1;
+            const double sign = endpoint_candidate <= 3 ? 1.0 : -1.0;
+            for (const auto* arm : {left_jmg, right_jmg}) {
+                const auto& variables = arm->getVariableNames();
+                if (joint_index < variables.size()) {
+                    live_candidate.setVariablePosition(variables[joint_index],
+                        live_candidate.getVariablePosition(variables[joint_index]) + sign * 0.18);
+                }
+            }
+            live_candidate.update();
+        }
+        const bool left_ok = live_candidate.setFromIK(left_jmg, makeEndpointPose(endpoint_left), 0.30);
+        const bool right_ok = left_ok && live_candidate.setFromIK(right_jmg, makeEndpointPose(endpoint_right), 0.30);
+        if (!left_ok || !right_ok) {
+            ++endpoint_ik_rejected;
+            endpoint_reason = "combined endpoint IK failed";
+            continue;
+        }
+        live_candidate.update();
+        moveit::core::RobotState criterion_candidate(criterion_start);
+        for (const auto& name : live_candidate.getVariableNames()) {
+            if (criterion_variables.count(name) != 0) {
+                criterion_candidate.setVariablePosition(name, live_candidate.getVariablePosition(name));
+            }
+        }
+        criterion_candidate.update();
+        if (!criterion_candidate.satisfiesBounds(criterion_dual, 1e-4)) {
+            ++endpoint_bounds_rejected;
+            endpoint_reason = "endpoint IK solution exceeded joint limits";
+            continue;
+        }
+        const Eigen::Isometry3d inferred =
+            criterion_candidate.getGlobalLinkTransform(a1_verify_.left_eef) * object_to_left.inverse();
+        const Eigen::Isometry3d inferred_right =
+            criterion_candidate.getGlobalLinkTransform(a1_verify_.right_eef) * object_to_right.inverse();
+        const double endpoint_target_position_error =
+            (inferred.translation() - object_place.translation()).norm();
+        const double endpoint_target_angle_error = Eigen::AngleAxisd(
+            inferred.linear().transpose() * object_place.linear()).angle();
+        const double endpoint_position_residual =
+            (inferred.translation() - inferred_right.translation()).norm();
+        const double endpoint_angle_residual = Eigen::AngleAxisd(
+            inferred.linear().transpose() * inferred_right.linear()).angle();
+        if (!std::isfinite(endpoint_target_position_error) || !std::isfinite(endpoint_target_angle_error) ||
+            endpoint_target_position_error > 0.005 || endpoint_target_angle_error > 2.0 * M_PI / 180.0) {
+            ++endpoint_collision_rejected;
+            endpoint_reason = "endpoint object pose residual exceeds 5 mm / 2 deg";
+            continue;
+        }
+        if (!std::isfinite(endpoint_position_residual) || !std::isfinite(endpoint_angle_residual) ||
+            endpoint_position_residual > 0.005 || endpoint_angle_residual > 2.0 * M_PI / 180.0) {
+            ++endpoint_collision_rejected;
+            endpoint_reason = "endpoint dual-grasp residual exceeds 5 mm / 2 deg";
+            continue;
+        }
+        if (supportClearance(inferred) < -1e-4) {
+            ++endpoint_collision_rejected;
+            endpoint_reason = "attached rod would penetrate the support surface";
+            continue;
+        }
+        collision_detection::AllowedCollisionMatrix endpoint_acm = a1_verify_.grasp_acm;
+        if (expectedSupportBand(inferred)) endpoint_acm.setEntry(a1_verify_.rod_id, a1_verify_.support_id, true);
+        collision_detection::CollisionResult endpoint_collision;
+        criterion_scene->checkCollision(path_collision_request, endpoint_collision,
+                                        criterion_candidate, endpoint_acm);
+        if (endpoint_collision.collision) {
+            ++endpoint_collision_rejected;
+            endpoint_reason = endpoint_collision.contacts.empty() ? "criterion collision" :
+                endpoint_collision.contacts.begin()->first.first + "<->" +
+                endpoint_collision.contacts.begin()->first.second;
+            continue;
+        }
+        endpoint_accepted = true;
+        endpoint_reason = "accepted";
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_CANDIDATE_ENDPOINT] x=%.3f y=%.3f accepted=%s finite=5 ik_rejected=%zu "
+        "collision_rejected=%zu bounds_rejected=%zu reason=%s",
+        target_x, target_y, endpoint_accepted ? "true" : "false", endpoint_ik_rejected,
+        endpoint_collision_rejected, endpoint_bounds_rejected, endpoint_reason.c_str());
+    if (!endpoint_accepted) {
+        detail = "E_S1_ENDPOINT_REJECT x=" + std::to_string(target_x) + " y=" +
+            std::to_string(target_y) + " reason=" + endpoint_reason;
+        return false;
+    }
+    std::vector<moveit::core::RobotState> coordinated_states;
+    coordinated_states.emplace_back(criterion_start);
+    std::vector<moveit::core::RobotState> coordinated_live_states;
+    coordinated_live_states.emplace_back(seed_live);
+    moveit::core::RobotState seed(criterion_start);
+    std::size_t ik_rejected = 0, collision_rejected = 0, bounds_rejected = 0;
+    std::size_t geometry_rejected = 0, geometry_samples = 0;
+    double max_ik_dual_position_residual = 0.0, max_ik_dual_angle_residual = 0.0;
+    double max_geometry_dual_position_residual = 0.0, max_geometry_dual_angle_residual = 0.0;
+    std::string last_reject;
+    for (std::size_t wi = 0; wi < object_path.size(); ++wi) {
+        const Eigen::Isometry3d desired_left = object_path[wi].pose * object_to_left;
+        const Eigen::Isometry3d desired_right = object_path[wi].pose * object_to_right;
+        auto makePose = [](const Eigen::Isometry3d& tf) {
+            geometry_msgs::msg::Pose pose;
+            pose.position.x = tf.translation().x();
+            pose.position.y = tf.translation().y();
+            pose.position.z = tf.translation().z();
+            const Eigen::Quaterniond q(tf.linear());
+            pose.orientation.x = q.x(); pose.orientation.y = q.y();
+            pose.orientation.z = q.z(); pose.orientation.w = q.w();
+            return pose;
+        };
+        bool accepted = false;
+        for (int candidate_index = 0; candidate_index < 5 && !accepted; ++candidate_index) {
+            moveit::core::RobotState candidate_live(seed_live);
+            if (candidate_index > 0) {
+                const std::size_t joint_index = static_cast<std::size_t>(candidate_index - 1) % 3 + 1;
+                const double sign = candidate_index <= 3 ? 1.0 : -1.0;
+                for (const auto* arm : {left_jmg, right_jmg}) {
+                    const auto& variables = arm->getVariableNames();
+                    if (joint_index < variables.size()) {
+                        candidate_live.setVariablePosition(variables[joint_index],
+                            candidate_live.getVariablePosition(variables[joint_index]) + sign * 0.18);
+                    }
+                }
+                candidate_live.update();
+                if (!candidate_live.satisfiesBounds(ctx_->dual_arm_->getRobotModel()->getJointModelGroup(
+                        ctx_->dual_arm_group_), 1e-4)) {
+                    ++bounds_rejected;
+                    last_reject = "seed perturbation exceeded a joint limit";
+                    continue;
+                }
+            }
+            const bool left_ok = candidate_live.setFromIK(left_jmg, makePose(desired_left), 0.30);
+            const bool right_ok = left_ok && candidate_live.setFromIK(right_jmg, makePose(desired_right), 0.30);
+            if (!left_ok || !right_ok) {
+                ++ik_rejected;
+                last_reject = "coordinated left/right IK did not solve this candidate";
+                continue;
+            }
+            candidate_live.update();
+            moveit::core::RobotState candidate(seed);
+            for (const auto& name : candidate_live.getVariableNames()) {
+                if (criterion_variables.count(name) != 0) {
+                    candidate.setVariablePosition(name, candidate_live.getVariablePosition(name));
+                }
+            }
+            candidate.update();
+            if (!candidate.satisfiesBounds(criterion_dual, 1e-4)) {
+                ++bounds_rejected;
+                last_reject = "IK solution exceeded a joint limit";
+                continue;
+            }
+            const Eigen::Isometry3d inferred_left =
+                candidate.getGlobalLinkTransform(a1_verify_.left_eef) * object_to_left.inverse();
+            const Eigen::Isometry3d inferred_right =
+                candidate.getGlobalLinkTransform(a1_verify_.right_eef) * object_to_right.inverse();
+            writeFkReplay("pre_time_ik_candidate", object_path[wi].stage, wi, 1.0, candidate);
+            const double ik_position_residual =
+                (inferred_left.translation() - inferred_right.translation()).norm();
+            const double ik_angle_residual = Eigen::AngleAxisd(
+                inferred_left.linear().transpose() * inferred_right.linear()).angle();
+            const double left_target_position_error =
+                (inferred_left.translation() - object_path[wi].pose.translation()).norm();
+            const double right_target_position_error =
+                (inferred_right.translation() - object_path[wi].pose.translation()).norm();
+            const double left_target_angle_error = Eigen::AngleAxisd(
+                inferred_left.linear().transpose() * object_path[wi].pose.linear()).angle();
+            const double right_target_angle_error = Eigen::AngleAxisd(
+                inferred_right.linear().transpose() * object_path[wi].pose.linear()).angle();
+            if (!std::isfinite(ik_position_residual) || !std::isfinite(ik_angle_residual) ||
+                ik_position_residual > 0.005 || ik_angle_residual > 2.0 * M_PI / 180.0 ||
+                left_target_position_error > 0.005 || right_target_position_error > 0.005 ||
+                left_target_angle_error > 2.0 * M_PI / 180.0 ||
+                right_target_angle_error > 2.0 * M_PI / 180.0) {
+                ++geometry_rejected;
+                last_reject = "IK point violates fixed dual-grasp transform / object target residual";
+                continue;
+            }
+            const Eigen::Isometry3d inferred_object =
+                candidate.getGlobalLinkTransform(a1_verify_.left_eef) * object_to_left.inverse();
+            if (object_path[wi].stage == "DESCEND_PLACE" &&
+                placementProjectionMatches(inferred_object) && supportClearance(inferred_object) < -1e-4) {
+                ++collision_rejected;
+                last_reject = "attached rod would penetrate the support surface";
+                continue;
+            }
+            collision_detection::AllowedCollisionMatrix waypoint_acm = a1_verify_.grasp_acm;
+            if (object_path[wi].stage == "DESCEND_PLACE" && expectedSupportBand(inferred_object)) {
+                waypoint_acm.setEntry(a1_verify_.rod_id, a1_verify_.support_id, true);
+            }
+            collision_detection::CollisionResult collision;
+            criterion_scene->checkCollision(path_collision_request, collision, candidate,
+                                             waypoint_acm);
+            if (collision.collision) {
+                ++collision_rejected;
+                last_reject = collision.contacts.empty() ? "criterion collision" :
+                    collision.contacts.begin()->first.first + "<->" +
+                    collision.contacts.begin()->first.second;
+                continue;
+            }
+            const moveit::core::RobotState& previous = coordinated_states.back();
+            std::vector<double> previous_q, candidate_q;
+            previous.copyJointGroupPositions(criterion_dual, previous_q);
+            candidate.copyJointGroupPositions(criterion_dual, candidate_q);
+            const std::size_t segment_subdivisions = a1v::subdivisionsFor(
+                a1v::maxAbsJointDelta(previous_q, candidate_q), 0.01);
+            bool segment_valid = true;
+            const Eigen::Isometry3d previous_object = wi == 0 ? object_start : object_path[wi - 1].pose;
+            for (std::size_t si = 1; si < segment_subdivisions; ++si) {
+                const double alpha = static_cast<double>(si) / static_cast<double>(segment_subdivisions);
+                const auto q = a1v::interpolateJoints(previous_q, candidate_q, alpha);
+                moveit::core::RobotState interpolated(criterion_start);
+                interpolated.setJointGroupPositions(criterion_dual, q);
+                interpolated.update();
+                if (!interpolated.satisfiesBounds(criterion_dual, 1e-4)) {
+                    ++geometry_rejected;
+                    last_reject = "pre-time geometric interpolation exceeds joint limits";
+                    segment_valid = false;
+                    break;
+                }
+                const Eigen::Isometry3d expected_object =
+                    interpolateObject(previous_object, object_path[wi].pose, alpha);
+                const Eigen::Isometry3d segment_left =
+                    interpolated.getGlobalLinkTransform(a1_verify_.left_eef) * object_to_left.inverse();
+                const Eigen::Isometry3d segment_right =
+                    interpolated.getGlobalLinkTransform(a1_verify_.right_eef) * object_to_right.inverse();
+                writeFkReplay("geometric_interpolation", object_path[wi].stage, wi, alpha, interpolated);
+                const double segment_position_residual =
+                    (segment_left.translation() - segment_right.translation()).norm();
+                const double segment_angle_residual = Eigen::AngleAxisd(
+                    segment_left.linear().transpose() * segment_right.linear()).angle();
+                const bool segment_pose_ok =
+                    (segment_left.translation() - expected_object.translation()).norm() <= 0.005 &&
+                    (segment_right.translation() - expected_object.translation()).norm() <= 0.005 &&
+                    Eigen::AngleAxisd(segment_left.linear().transpose() * expected_object.linear()).angle() <=
+                        2.0 * M_PI / 180.0 &&
+                    Eigen::AngleAxisd(segment_right.linear().transpose() * expected_object.linear()).angle() <=
+                        2.0 * M_PI / 180.0;
+                if (!std::isfinite(segment_position_residual) || !std::isfinite(segment_angle_residual) ||
+                    segment_position_residual > 0.005 || segment_angle_residual > 2.0 * M_PI / 180.0 ||
+                    !segment_pose_ok) {
+                    ++geometry_rejected;
+                    last_reject = "pre-time geometric interpolation violates fixed dual-grasp transform";
+                    segment_valid = false;
+                    break;
+                }
+                max_geometry_dual_position_residual = std::max(
+                    max_geometry_dual_position_residual, segment_position_residual);
+                max_geometry_dual_angle_residual = std::max(
+                    max_geometry_dual_angle_residual, segment_angle_residual);
+                ++geometry_samples;
+                if (placementProjectionMatches(segment_left) && supportClearance(segment_left) < -1e-4) {
+                    ++collision_rejected;
+                    last_reject = "geometric interpolation makes attached rod penetrate support";
+                    segment_valid = false;
+                    break;
+                }
+                collision_detection::AllowedCollisionMatrix segment_acm = a1_verify_.grasp_acm;
+                if (expectedSupportBand(segment_left)) {
+                    segment_acm.setEntry(a1_verify_.rod_id, a1_verify_.support_id, true);
+                }
+                collision_detection::CollisionResult segment_collision;
+                criterion_scene->checkCollision(path_collision_request, segment_collision,
+                                               interpolated, segment_acm);
+                if (segment_collision.collision) {
+                    ++collision_rejected;
+                    last_reject = segment_collision.contacts.empty() ? "pre-time geometric interpolation collision" :
+                        segment_collision.contacts.begin()->first.first + "<->" +
+                        segment_collision.contacts.begin()->first.second;
+                    segment_valid = false;
+                    break;
+                }
+            }
+            if (!segment_valid) continue;
+            seed = candidate;
+            seed_live = candidate_live;
+            coordinated_states.emplace_back(candidate);
+            coordinated_live_states.emplace_back(candidate_live);
+            max_ik_dual_position_residual = std::max(max_ik_dual_position_residual, ik_position_residual);
+            max_ik_dual_angle_residual = std::max(max_ik_dual_angle_residual, ik_angle_residual);
+            accepted = true;
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[S1_PREPLAN_WAYPOINT] stage=%s index=%zu/%zu candidate=%d pos=(%.4f,%.4f,%.4f)",
+                object_path[wi].stage.c_str(), wi + 1, object_path.size(), candidate_index,
+                object_path[wi].pose.translation().x(), object_path[wi].pose.translation().y(),
+                object_path[wi].pose.translation().z());
+        }
+        if (!accepted) {
+            detail = "E_S1_PREPLAN_NO_CONTINUOUS_CANDIDATE at " + object_path[wi].stage +
+                " waypoint " + std::to_string(wi + 1) + "/" + std::to_string(object_path.size()) +
+                "; finite candidates=5 IK_rejected=" + std::to_string(ik_rejected) +
+                " collision_rejected=" + std::to_string(collision_rejected) +
+                " bounds_rejected=" + std::to_string(bounds_rejected) + " last=" + last_reject;
+            RCLCPP_ERROR(ctx_->get_logger(), "[S1_PREPLAN_REJECT] %s", detail.c_str());
+            return false;
+        }
+    }
+
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_GEOMETRY_VALIDATED] ik_points=%zu interpolated_samples=%zu "
+        "max_ik_residual=(%.3fmm,%.3fdeg) max_segment_residual=(%.3fmm,%.3fdeg)",
+        coordinated_states.size() - 1, geometry_samples,
+        max_ik_dual_position_residual * 1000.0, max_ik_dual_angle_residual * 180.0 / M_PI,
+        max_geometry_dual_position_residual * 1000.0,
+        max_geometry_dual_angle_residual * 180.0 / M_PI);
+    robot_trajectory::RobotTrajectory coordinated(live_model, ctx_->dual_arm_group_);
+    for (const auto& state : coordinated_live_states) coordinated.addSuffixWayPoint(state, 0.0);
+    trajectory_processing::IterativeParabolicTimeParameterization iptp;
+    if (!iptp.computeTimeStamps(coordinated, 0.15, 0.12)) {
+        detail = "E_S1_PREPLAN_IPTP_TIME_PARAMETERIZATION_FAILED";
+        return false;
+    }
+    moveit::planning_interface::MoveGroupInterface::Plan candidate_plan;
+    coordinated.getRobotTrajectoryMsg(candidate_plan.trajectory_);
+    moveit::core::robotStateToRobotStateMsg(*current, candidate_plan.start_state_);
+    auto& points = candidate_plan.trajectory_.joint_trajectory.points;
+    if (points.size() < 2 ||
+        points.front().positions.size() != candidate_plan.trajectory_.joint_trajectory.joint_names.size()) {
+        detail = "E_S1_PREPLAN_FINAL_TRAJECTORY_INVALID";
+        return false;
+    }
+    const auto& trajectory_names = candidate_plan.trajectory_.joint_trajectory.joint_names;
+    std::vector<s1::DirectionalJointLimits> time_limits;
+    time_limits.reserve(trajectory_names.size());
+    for (const auto& name : trajectory_names) {
+        const auto& bounds = live_model->getVariableBounds(name);
+        time_limits.push_back({bounds.min_velocity_, bounds.max_velocity_,
+            bounds.min_acceleration_, bounds.max_acceleration_,
+            bounds.velocity_bounded_, bounds.acceleration_bounded_});
+    }
+    std::vector<s1::TimedJointPoint> raw_iptp_points;
+    raw_iptp_points.reserve(points.size());
+    for (const auto& point : points) {
+        raw_iptp_points.push_back({
+            rclcpp::Duration(point.time_from_start).seconds(), point.positions,
+            point.velocities, point.accelerations});
+    }
+    const auto pre_scale_iptp_points = raw_iptp_points;
+    s1::TimeScalingReport time_scaling;
+    std::string time_scaling_error;
+    if (!s1::scaleTimedTrajectory(raw_iptp_points, time_limits, 0.15, 0.12, 0.01,
+                                  time_scaling, time_scaling_error)) {
+        detail = "E_S1_IPTP_TIME_SCALING_INPUT_INVALID: " + time_scaling_error;
+        return false;
+    }
+    struct LimitPeak
+    {
+        double ratio{0.0};
+        std::size_t point{0};
+        std::size_t joint{0};
+        double time{0.0};
+        double value{0.0};
+        double lower{0.0};
+        double upper{0.0};
+        double effective{0.0};
+    } max_velocity_peak, max_acceleration_peak;
+    for (std::size_t pi = 0; pi < pre_scale_iptp_points.size(); ++pi) {
+        const auto& point = pre_scale_iptp_points[pi];
+        for (std::size_t ji = 0; ji < trajectory_names.size(); ++ji) {
+            const auto& bounds = time_limits[ji];
+            const double effective_velocity = 0.15 *
+                (point.velocities[ji] >= 0.0 ? bounds.max_velocity : -bounds.min_velocity);
+            const double velocity_ratio = std::abs(point.velocities[ji]) / effective_velocity;
+            if (velocity_ratio > max_velocity_peak.ratio) {
+                max_velocity_peak = {velocity_ratio, pi, ji, point.time, point.velocities[ji],
+                    bounds.min_velocity, bounds.max_velocity, effective_velocity};
+            }
+            const double effective_acceleration = 0.12 *
+                (point.accelerations[ji] >= 0.0 ? bounds.max_acceleration : -bounds.min_acceleration);
+            const double acceleration_ratio = std::abs(point.accelerations[ji]) / effective_acceleration;
+            if (acceleration_ratio > max_acceleration_peak.ratio) {
+                max_acceleration_peak = {acceleration_ratio, pi, ji, point.time, point.accelerations[ji],
+                    bounds.min_acceleration, bounds.max_acceleration, effective_acceleration};
+            }
+        }
+    }
+    for (std::size_t pi = 0; pi < points.size(); ++pi) {
+        points[pi].time_from_start = static_cast<builtin_interfaces::msg::Duration>(
+            rclcpp::Duration::from_seconds(raw_iptp_points[pi].time));
+        points[pi].velocities = raw_iptp_points[pi].velocities;
+        points[pi].accelerations = raw_iptp_points[pi].accelerations;
+        if (points[pi].positions != pre_scale_iptp_points[pi].positions) {
+            detail = "E_S1_IPTP_TIME_STRETCH_CHANGED_POSITION at point " + std::to_string(pi);
+            return false;
+        }
+        if (pi > 0 && !(rclcpp::Duration(points[pi].time_from_start).seconds() >
+                        rclcpp::Duration(points[pi - 1].time_from_start).seconds())) {
+            detail = "E_S1_IPTP_TIME_STRETCH_INVALID_TIME at point " + std::to_string(pi);
+            return false;
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_IPTP_TIME_STRETCH] duration_before=%.9fs duration_after=%.9fs "
+        "scale=%.9f margin=0.010000 Rv_before=%.9f Ra_before=%.9f "
+        "Rv_after=%.9f Ra_after=%.9f max_velocity=(%s point=%zu t=%.9fs value=%.9g "
+        "live=[%.9g,%.9g] effective_signed=%.9g ratio=%.9f) "
+        "max_acceleration=(%s point=%zu t=%.9fs value=%.9g live=[%.9g,%.9g] "
+        "effective_signed=%.9g ratio=%.9f)",
+        time_scaling.duration_before, time_scaling.duration_after, time_scaling.scale,
+        time_scaling.velocity_ratio_before, time_scaling.acceleration_ratio_before,
+        time_scaling.velocity_ratio_after, time_scaling.acceleration_ratio_after,
+        trajectory_names[max_velocity_peak.joint].c_str(), max_velocity_peak.point,
+        max_velocity_peak.time, max_velocity_peak.value, max_velocity_peak.lower,
+        max_velocity_peak.upper, max_velocity_peak.effective, max_velocity_peak.ratio,
+        trajectory_names[max_acceleration_peak.joint].c_str(), max_acceleration_peak.point,
+        max_acceleration_peak.time, max_acceleration_peak.value, max_acceleration_peak.lower,
+        max_acceleration_peak.upper, max_acceleration_peak.effective, max_acceleration_peak.ratio);
+
+    // Export both the unmodified IPTP output and the uniformly stretched message values.
+    if (!ctx_->expected_run_id_.empty()) {
+        std::string safe_run_id = ctx_->expected_run_id_;
+        for (auto& ch : safe_run_id) {
+            if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_' && ch != '-') ch = '_';
+        }
+        const std::string path = "experiment_results/a1_runs/" + safe_run_id +
+            "/s1_iptp_trajectory_candidate_" + std::to_string(candidate_index + 1) + ".csv";
+        std::ofstream output(path, std::ios::out | std::ios::trunc);
+        if (output) {
+            output << "source,point,time_sec,time_scale";
+            for (const auto& name : trajectory_names) output << ",q_" << name;
+            for (const auto& name : trajectory_names) output << ",v_" << name;
+            for (const auto& name : trajectory_names) output << ",a_" << name;
+            output << '\n';
+            auto write_trajectory_row = [&](const char* source, std::size_t point_index,
+                                            const s1::TimedJointPoint& point, double scale) {
+                output << source << ',' << point_index << ',' << point.time << ',' << scale;
+                for (const auto value : point.positions) output << ',' << value;
+                for (const auto value : point.velocities) output << ',' << value;
+                for (const auto value : point.accelerations) output << ',' << value;
+                output << '\n';
+            };
+            for (std::size_t pi = 0; pi < pre_scale_iptp_points.size(); ++pi) {
+                write_trajectory_row("IPTP_RAW", pi, pre_scale_iptp_points[pi], 1.0);
+                write_trajectory_row("IPTP_STRETCHED", pi,
+                    s1::TimedJointPoint{rclcpp::Duration(points[pi].time_from_start).seconds(),
+                        raw_iptp_points[pi].positions, points[pi].velocities, points[pi].accelerations},
+                    time_scaling.scale);
+            }
+        } else {
+            RCLCPP_WARN(ctx_->get_logger(), "[S1_IPTP_EXPORT] could not open %s", path.c_str());
+        }
+    }
+
+    moveit::core::RobotState validation_base(criterion_start);
+    auto stateAt = [&](const std::vector<double>& positions) {
+        moveit::core::RobotState state(validation_base);
+        state.setVariablePositions(trajectory_names, positions);
+        state.update();
+        return state;
+    };
+    std::vector<std::vector<double>> geometric_joint_path;
+    geometric_joint_path.reserve(coordinated_live_states.size());
+    for (const auto& state : coordinated_live_states) {
+        std::vector<double> q;
+        q.reserve(trajectory_names.size());
+        for (const auto& name : trajectory_names) q.push_back(state.getVariablePosition(name));
+        geometric_joint_path.emplace_back(std::move(q));
+    }
+    auto distanceToGeometricPath = [&](const std::vector<double>& q) {
+        double min_distance_sq = std::numeric_limits<double>::infinity();
+        for (std::size_t segment = 0; segment + 1 < geometric_joint_path.size(); ++segment) {
+            const auto& a = geometric_joint_path[segment];
+            const auto& b = geometric_joint_path[segment + 1];
+            double dot = 0.0, norm_sq = 0.0;
+            for (std::size_t joint = 0; joint < q.size(); ++joint) {
+                const double d = b[joint] - a[joint];
+                dot += (q[joint] - a[joint]) * d;
+                norm_sq += d * d;
+            }
+            const double alpha = norm_sq > 1e-16 ? std::clamp(dot / norm_sq, 0.0, 1.0) : 0.0;
+            double distance_sq = 0.0;
+            for (std::size_t joint = 0; joint < q.size(); ++joint) {
+                const double nearest = a[joint] + alpha * (b[joint] - a[joint]);
+                const double delta = q[joint] - nearest;
+                distance_sq += delta * delta;
+            }
+            min_distance_sq = std::min(min_distance_sq, distance_sq);
+        }
+        return std::sqrt(min_distance_sq);
+    };
+    auto checkCoGrasp = [&](const moveit::core::RobotState& state, std::size_t index) {
+        const Eigen::Isometry3d inferred_left =
+            state.getGlobalLinkTransform(a1_verify_.left_eef) * object_to_left.inverse();
+        const Eigen::Isometry3d inferred_right =
+            state.getGlobalLinkTransform(a1_verify_.right_eef) * object_to_right.inverse();
+        const double position_residual = (inferred_left.translation() - inferred_right.translation()).norm();
+        const double angle_residual = Eigen::AngleAxisd(
+            inferred_left.linear().transpose() * inferred_right.linear()).angle();
+        if (!std::isfinite(position_residual) || !std::isfinite(angle_residual) ||
+            position_residual > 0.005 || angle_residual > 2.0 * M_PI / 180.0) {
+            last_reject = "dual hand-to-rod residual exceeds 5 mm / 2 deg at sample " +
+                std::to_string(index) + " (" + std::to_string(position_residual * 1000.0) +
+                " mm, " + std::to_string(angle_residual * 180.0 / M_PI) + " deg)";
+            return false;
+        }
+        return true;
+    };
+    for (std::size_t ji = 0; ji < trajectory_names.size(); ++ji) {
+        const double start_delta = wrappedAbsJointDelta(
+            points.front().positions[ji], criterion_start.getVariablePosition(trajectory_names[ji]));
+        if (start_delta > 0.002) {
+            detail = "E_S1_FINAL_START_STATE_MISMATCH at " + trajectory_names[ji] +
+                     " delta=" + std::to_string(start_delta) + " rad";
+            return false;
+        }
+    }
+    std::size_t checked_samples = 0;
+    double max_position_residual = 0.0, max_angle_residual = 0.0;
+    double max_time_geometry_deviation_rad = 0.0;
+    auto validateSample = [&](const std::vector<double>& positions, const char* source,
+                              std::size_t index, double alpha) {
+        moveit::core::RobotState state = stateAt(positions);
+        writeFkReplay(source, "IPTP", index, alpha, state);
+        max_time_geometry_deviation_rad = std::max(
+            max_time_geometry_deviation_rad, distanceToGeometricPath(positions));
+        if (!state.satisfiesBounds(criterion_dual, 1e-4) || !checkCoGrasp(state, checked_samples)) return false;
+        const Eigen::Isometry3d inferred_left =
+            state.getGlobalLinkTransform(a1_verify_.left_eef) * object_to_left.inverse();
+        const Eigen::Isometry3d inferred_right =
+            state.getGlobalLinkTransform(a1_verify_.right_eef) * object_to_right.inverse();
+        max_position_residual = std::max(max_position_residual,
+            (inferred_left.translation() - inferred_right.translation()).norm());
+        max_angle_residual = std::max(max_angle_residual,
+            Eigen::AngleAxisd(inferred_left.linear().transpose() * inferred_right.linear()).angle());
+        collision_detection::CollisionResult collision;
+        if (placementProjectionMatches(inferred_left) && supportClearance(inferred_left) < -1e-4) {
+            last_reject = "attached rod would penetrate the support surface";
+            return false;
+        }
+        collision_detection::AllowedCollisionMatrix sample_acm = a1_verify_.grasp_acm;
+        if (expectedSupportBand(inferred_left)) {
+            sample_acm.setEntry(a1_verify_.rod_id, a1_verify_.support_id, true);
+        }
+        criterion_scene->checkCollision(path_collision_request, collision, state, sample_acm);
+        ++checked_samples;
+        if (collision.collision) {
+            last_reject = collision.contacts.empty() ? "criterion collision" :
+                collision.contacts.begin()->first.first + "<->" + collision.contacts.begin()->first.second;
+            return false;
+        }
+        return true;
+    };
+    for (std::size_t pi = 0; pi < points.size(); ++pi) {
+        const auto& point = points[pi];
+        if (point.positions.size() != trajectory_names.size() ||
+            (!point.velocities.empty() && point.velocities.size() != trajectory_names.size()) ||
+            (!point.accelerations.empty() && point.accelerations.size() != trajectory_names.size())) {
+            detail = "E_S1_FINAL_DERIVATIVE_DIMENSION at point " + std::to_string(pi);
+            return false;
+        }
+        for (std::size_t ji = 0; ji < trajectory_names.size(); ++ji) {
+            const auto& bounds = live_model->getVariableBounds(trajectory_names[ji]);
+            const double effective_velocity_bound = 0.15 *
+                (point.velocities[ji] >= 0.0 ? bounds.max_velocity_ : -bounds.min_velocity_);
+            const double effective_acceleration_bound = 0.12 *
+                (point.accelerations[ji] >= 0.0 ? bounds.max_acceleration_ : -bounds.min_acceleration_);
+            if (!point.velocities.empty() && (!std::isfinite(point.velocities[ji]) ||
+                !bounds.velocity_bounded_ || !(effective_velocity_bound > 0.0) ||
+                std::abs(point.velocities[ji]) > effective_velocity_bound + 1e-9)) {
+                detail = "E_S1_FINAL_VELOCITY_LIMIT at " + trajectory_names[ji] +
+                         " point " + std::to_string(pi);
+                return false;
+            }
+            if (!point.accelerations.empty() && (!std::isfinite(point.accelerations[ji]) ||
+                !bounds.acceleration_bounded_ || !(effective_acceleration_bound > 0.0) ||
+                std::abs(point.accelerations[ji]) > effective_acceleration_bound + 1e-9)) {
+                detail = "E_S1_FINAL_ACCELERATION_LIMIT at " + trajectory_names[ji] +
+                         " point " + std::to_string(pi);
+                return false;
+            }
+        }
+        if (!validateSample(points[pi].positions, "totg_point", pi, 1.0)) {
+            detail = "E_S1_FINAL_TRAJECTORY_REJECTED at point " + std::to_string(pi) + ": " + last_reject;
+            return false;
+        }
+        if (pi + 1 < points.size()) {
+            const std::size_t subdivisions = a1v::subdivisionsFor(
+                a1v::maxAbsJointDelta(points[pi].positions, points[pi + 1].positions),
+                ctx_->p2b_max_joint_step_rad_);
+            if (subdivisions > 2000) {
+                detail = "E_S1_FINAL_SEGMENT_SUBDIVISION_LIMIT at segment " + std::to_string(pi);
+                return false;
+            }
+            for (std::size_t si = 1; si < subdivisions; ++si) {
+                const double alpha = static_cast<double>(si) / static_cast<double>(subdivisions);
+                const auto interpolated = a1v::interpolateJoints(
+                    points[pi].positions, points[pi + 1].positions, alpha);
+                if (!validateSample(interpolated, "totg_interpolation", pi, alpha)) {
+                    detail = "E_S1_FINAL_INTERPOLATION_REJECTED at segment " +
+                        std::to_string(pi) + ": " + last_reject;
+                    return false;
+                }
+            }
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_PREPLAN_VALIDATED] object_waypoints=%zu trajectory_points=%zu checked_waypoint_and_interpolated_states=%zu "
+        "max_dual_rod_residual=(%.3fmm,%.3fdeg) max_time_geometry_deviation=%.6frad timing=IPTP "
+        "velocity_scale=0.15 acceleration_scale=0.12",
+        object_path.size(), points.size(), checked_samples, max_position_residual * 1000.0,
+        max_angle_residual * 180.0 / M_PI, max_time_geometry_deviation_rad);
+    selected_place_out = object_place;
+    candidate_plan_out = std::move(candidate_plan);
+    return true;
+        };
+        if (planPlacementCandidate(target_x, target_y, carry_plan, object_place)) {
+            selected_candidate = static_cast<int>(candidate_index);
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[S1_CANDIDATE_ACCEPT] index=%zu x=%.3f y=%.3f full_path=validated",
+                candidate_index + 1, target_x, target_y);
+            break;
+        }
+        RCLCPP_WARN(ctx_->get_logger(),
+            "[S1_CANDIDATE_REJECT] index=%zu x=%.3f y=%.3f reason=%s",
+            candidate_index + 1, target_x, target_y, detail.c_str());
+    }
+    if (selected_candidate < 0) {
+        detail = "E_S1_FIXED_PLACEMENT_NOT_FEASIBLE x=" + std::to_string(ctx_->rod_target_x_) +
+                 " y=" + std::to_string(ctx_->rod_target_y_);
+        RCLCPP_ERROR(ctx_->get_logger(), "[S1_CANDIDATE_SET_REJECT] %s", detail.c_str());
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_CANDIDATE_FROZEN] x=%.3f y=%.3f world_yaw_deg=%.3f rotation_tested=false "
+        "planar_transport_distance=%.3fm",
+        object_place.translation().x(), object_place.translation().y(),
+        ctx_->rod_target_yaw_rad_ * 180.0 / M_PI,
+        std::hypot(object_place.translation().x() - object_initial.translation().x(),
+                   object_place.translation().y() - object_initial.translation().y()));
+    const auto& points = carry_plan.trajectory_.joint_trajectory.points;
+    const double planned = rclcpp::Duration(points.back().time_from_start).seconds();
+    auto iface = ctx_->dual_arm_;
+    auto dispatched = std::make_shared<moveit::planning_interface::MoveGroupInterface::Plan>(carry_plan);
+    const auto result = a1v::runBoundedExec(
+        [iface, dispatched]() { return iface->execute(*dispatched).val; },
+        [iface]() { iface->stop(); }, std::max(30.0, 3.0 * planned + 8.0), 0.2, 0.05);
+    if (result.status != a1v::BoundedExecOutcome::Status::COMPLETED ||
+        result.value != moveit::core::MoveItErrorCode::SUCCESS) {
+        detail = "E_S1_CARRY_EXECUTION_FAILED status=" + std::to_string(static_cast<int>(result.status)) +
+                 " code=" + std::to_string(result.value);
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "[S1_CARRY_EXECUTED] planned=%.3fs execute=%.3fs result=SUCCESS",
+                planned, result.elapsed_sec);
+
+    MujocoRodTruth placed;
+    std::string support_wait_detail;
+    if (!awaitStableRodTruth("pre_release_support", placed, support_wait_detail)) {
+        detail = "E_S1_SUPPORT_STABILITY_FAILED: " + support_wait_detail;
+        return false;
+    }
+    const a1v::Vec3 target_pos{object_place.translation().x(), object_place.translation().y(),
+                               object_place.translation().z()};
+    const Eigen::Quaterniond target_q(object_place.linear());
+    const a1t::Quat target_quat{target_q.x(), target_q.y(), target_q.z(), target_q.w()};
+    const double place_pos_err = std::sqrt(std::pow(placed.position.x - target_pos.x, 2) +
+        std::pow(placed.position.y - target_pos.y, 2) + std::pow(placed.position.z - target_pos.z, 2));
+    const double place_angle_err = a1t::rotationDistanceRad(placed.orientation, target_quat);
+    double support_clearance = 0.0;
+    const bool support_height_ok = s1::supportHeightEligible(
+        placed.position.z, ctx_->rod_half_height_, ctx_->p2a_support_z_,
+        ctx_->p2a_resting_z_tol_, &support_clearance);
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_RELEASE_TARGET_ERROR] physical_rod=(%.5f,%.5f,%.5f) target=(%.5f,%.5f,%.5f) "
+        "position_error=%.3fmm angle_error=%.3fdeg support_clearance=%.3fmm support_height_ok=%s",
+        placed.position.x, placed.position.y, placed.position.z, target_pos.x, target_pos.y,
+        target_pos.z, place_pos_err * 1000.0, place_angle_err * 180.0 / M_PI,
+        support_clearance * 1000.0, support_height_ok ? "true" : "false");
+    if (!support_height_ok) {
+        detail = "E_S1_SUPPORT_NOT_CONFIRMED: rod truth is outside the support-height band or penetrates ground";
+        return false;
+    }
+    if (place_pos_err > 0.01 || place_angle_err > 5.0 * M_PI / 180.0) {
+        detail = "E_S1_PLACE_ERROR: physical rod exceeds 10 mm / 5 deg target tolerance";
+        return false;
+    }
+
+    std_msgs::msg::Bool weld_off;
+    weld_off.data = false;
+    ctx_->weld_state_received_.store(false, std::memory_order_release);
+    ctx_->weld_pub_->publish(weld_off);
+    const auto off_deadline = std::chrono::steady_clock::now() + 3s;
+    while (rclcpp::ok() && std::chrono::steady_clock::now() < off_deadline &&
+           (!ctx_->weld_state_received_.load(std::memory_order_acquire) ||
+            ctx_->weld_state_active_.load(std::memory_order_acquire))) std::this_thread::sleep_for(20ms);
+    if (!ctx_->weld_state_received_.load(std::memory_order_acquire) ||
+        ctx_->weld_state_active_.load(std::memory_order_acquire)) {
+        detail = "E_S1_WELD_RELEASE_NOT_CONFIRMED";
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "[S1_WELD_STATE] dual_weld_active=false confirmed");
+
+    if (!ctx_->left_arm_->detachObject("aluminum_rod")) {
+        detail = "E_S1_MOVEIT_DETACH_FAILED";
+        return false;
+    }
+    bool detached = false;
+    for (int i = 0; i < 20; ++i) {
+        if (psi.getAttachedObjects({"aluminum_rod"}).count("aluminum_rod") == 0) {
+            detached = true;
+            break;
+        }
+        std::this_thread::sleep_for(100ms);
+    }
+    if (!detached) {
+        detail = "E_S1_MOVEIT_DETACH_NOT_VISIBLE";
+        return false;
+    }
+    moveit_msgs::msg::CollisionObject world_rod;
+    world_rod.header.frame_id = ctx_->dual_arm_->getPlanningFrame();
+    world_rod.id = "aluminum_rod";
+    shape_msgs::msg::SolidPrimitive box;
+    box.type = box.BOX;
+    box.dimensions = {truth.size.x, truth.size.y, truth.size.z};
+    geometry_msgs::msg::Pose actual_pose;
+    actual_pose.position.x = placed.position.x; actual_pose.position.y = placed.position.y;
+    actual_pose.position.z = placed.position.z;
+    actual_pose.orientation.x = placed.orientation.x; actual_pose.orientation.y = placed.orientation.y;
+    actual_pose.orientation.z = placed.orientation.z; actual_pose.orientation.w = placed.orientation.w;
+    world_rod.primitives.push_back(box);
+    world_rod.primitive_poses.push_back(actual_pose);
+    world_rod.operation = world_rod.ADD;
+    if (!psi.applyCollisionObject(world_rod)) {
+        detail = "E_S1_RELEASE_WORLD_OBJECT_SYNC_FAILED";
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "[S1_DETACH] MoveIt attached object removed and physical pose restored as world object");
+
+    std::array<std::uint64_t, 2> retreat_finger_baseline_seq {{0, 0}};
+    DualArmCarryTask::GripperContactFeedback retreat_feedback;
+    if (ctx_->latestGripperContact("mj_left", retreat_feedback)) {
+        retreat_finger_baseline_seq[0] = retreat_feedback.seq;
+    }
+    if (ctx_->latestGripperContact("mj_right", retreat_feedback)) {
+        retreat_finger_baseline_seq[1] = retreat_feedback.seq;
+    }
+    const bool open_ok = ctx_->grippers_->controlDualGrippers(0.04);
+    RCLCPP_INFO(ctx_->get_logger(), "[S1_RELEASE] open_action=%s", open_ok ? "SUCCESS" : "FAILED");
+    const double opened_after_steady_sec = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    MujocoRodTruth released_immediate = readMujocoRodTruth(ctx_->mujoco_get_body_state_service_);
+    if (released_immediate.ok) {
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[S1_POST_RELEASE_TRUTH] xyz=(%.6f,%.6f,%.6f) quat_xyzw=(%.7f,%.7f,%.7f,%.7f)",
+            released_immediate.position.x, released_immediate.position.y, released_immediate.position.z,
+            released_immediate.orientation.x, released_immediate.orientation.y,
+            released_immediate.orientation.z, released_immediate.orientation.w);
+    } else {
+        RCLCPP_ERROR(ctx_->get_logger(), "[S1_POST_RELEASE_TRUTH_UNAVAILABLE] %s",
+                     released_immediate.detail.c_str());
+    }
+    if (!open_ok) {
+        detail = "E_S1_GRIPPER_OPEN_FAILED";
+        if (!released_immediate.ok) detail += "; post-release truth unavailable: " + released_immediate.detail;
+        return false;
+    }
+    if (!released_immediate.ok) {
+        detail = "E_S1_POST_RELEASE_TRUTH_UNAVAILABLE: " + released_immediate.detail;
+        return false;
+    }
+    a1v::FingerJointSnapshot retreat_fingers;
+    if (!awaitFreshOpenFingerSnapshot(opened_after_steady_sec, retreat_finger_baseline_seq,
+                                      retreat_fingers, detail)) {
+        detail = "E_S1_RETREAT_FINGER_FEEDBACK: " + detail;
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_RETREAT_FINGERS] seq=(%llu,%llu) stamp_ns=(%lld,%lld) q=(%.6f,%.6f,%.6f,%.6f) m",
+        static_cast<unsigned long long>(retreat_fingers.source_seq[0]),
+        static_cast<unsigned long long>(retreat_fingers.source_seq[1]),
+        static_cast<long long>(retreat_fingers.source_stamp_ns[0]),
+        static_cast<long long>(retreat_fingers.source_stamp_ns[1]),
+        retreat_fingers.positions[0], retreat_fingers.positions[1],
+        retreat_fingers.positions[2], retreat_fingers.positions[3]);
+
+    // Keep MoveIt's world obstacle pose synchronized to the just-measured rod
+    // after opening. This only updates the planning scene; MuJoCo remains the
+    // source of physical truth and is never moved by this path.
+    moveit_msgs::msg::CollisionObject released_world_rod;
+    released_world_rod.header.frame_id = ctx_->dual_arm_->getPlanningFrame();
+    released_world_rod.id = "aluminum_rod";
+    shape_msgs::msg::SolidPrimitive released_box;
+    released_box.type = shape_msgs::msg::SolidPrimitive::BOX;
+    released_box.dimensions = {truth.size.x, truth.size.y, truth.size.z};
+    geometry_msgs::msg::Pose released_pose;
+    released_pose.position.x = released_immediate.position.x;
+    released_pose.position.y = released_immediate.position.y;
+    released_pose.position.z = released_immediate.position.z;
+    released_pose.orientation.x = released_immediate.orientation.x;
+    released_pose.orientation.y = released_immediate.orientation.y;
+    released_pose.orientation.z = released_immediate.orientation.z;
+    released_pose.orientation.w = released_immediate.orientation.w;
+    released_world_rod.primitives.push_back(released_box);
+    released_world_rod.primitive_poses.push_back(released_pose);
+    released_world_rod.operation = released_world_rod.ADD;
+    if (!psi.applyCollisionObject(released_world_rod)) {
+        detail = "E_S1_RETREAT_WORLD_ROD_SYNC_FAILED";
+        return false;
+    }
+
+    bool retreat_ok = a1_verify_.valid && a1_verify_.model && a1_verify_.scene;
+    auto retreat_start_live = ctx_->dual_arm_->getCurrentState(2.0);
+    retreat_ok = retreat_ok && static_cast<bool>(retreat_start_live);
+    const auto live_model = ctx_->dual_arm_->getRobotModel();
+    const auto criterion_model = a1_verify_.model;
+    const auto* live_dual = live_model ? live_model->getJointModelGroup(ctx_->dual_arm_group_) : nullptr;
+    const auto* live_left = live_model ? live_model->getJointModelGroup(ctx_->left_arm_group_) : nullptr;
+    const auto* live_right = live_model ? live_model->getJointModelGroup(ctx_->right_arm_group_) : nullptr;
+    const auto* criterion_dual = criterion_model ?
+        criterion_model->getJointModelGroup(ctx_->dual_arm_group_) : nullptr;
+    retreat_ok = retreat_ok && live_dual && live_left && live_right && criterion_dual;
+    if (!retreat_ok) {
+        detail = "E_S1_RETREAT_MODEL_OR_START_UNAVAILABLE";
+        return false;
+    }
+    if (!live_left->getSolverInstance()) {
+        detail = "E_S1_RETREAT_IK_SOLVER_UNAVAILABLE side=left model=live";
+        return false;
+    }
+    if (!live_right->getSolverInstance()) {
+        detail = "E_S1_RETREAT_IK_SOLVER_UNAVAILABLE side=right model=live";
+        return false;
+    }
+
+    auto get_scene_client = ctx_->create_client<moveit_msgs::srv::GetPlanningScene>("/get_planning_scene");
+    if (!get_scene_client->wait_for_service(5s)) {
+        detail = "E_S1_RETREAT_SCENE_SERVICE_UNAVAILABLE";
+        return false;
+    }
+    auto scene_request = std::make_shared<moveit_msgs::srv::GetPlanningScene::Request>();
+    scene_request->components.components =
+        moveit_msgs::msg::PlanningSceneComponents::SCENE_SETTINGS |
+        moveit_msgs::msg::PlanningSceneComponents::ROBOT_STATE |
+        moveit_msgs::msg::PlanningSceneComponents::ROBOT_STATE_ATTACHED_OBJECTS |
+        moveit_msgs::msg::PlanningSceneComponents::WORLD_OBJECT_NAMES |
+        moveit_msgs::msg::PlanningSceneComponents::WORLD_OBJECT_GEOMETRY |
+        moveit_msgs::msg::PlanningSceneComponents::ALLOWED_COLLISION_MATRIX;
+    auto scene_future = get_scene_client->async_send_request(scene_request);
+    if (scene_future.wait_for(5s) != std::future_status::ready) {
+        detail = "E_S1_RETREAT_SCENE_TIMEOUT";
+        return false;
+    }
+    const auto scene_response = scene_future.get();
+    bool scene_has_world_rod = false;
+    for (const auto& world_object : scene_response->scene.world.collision_objects) {
+        if (world_object.id == "aluminum_rod" && !world_object.primitive_poses.empty()) {
+            scene_has_world_rod = true;
+            break;
+        }
+    }
+    for (const auto& attached : scene_response->scene.robot_state.attached_collision_objects) {
+        if (attached.object.id == "aluminum_rod") scene_has_world_rod = false;
+    }
+    if (!scene_has_world_rod) {
+        detail = "E_S1_RETREAT_WORLD_ROD_NOT_DETACHED";
+        return false;
+    }
+
+    planning_scene::PlanningScene live_scene(live_model);
+    live_scene.setPlanningSceneMsg(scene_response->scene);
+    auto criterion_scene = std::make_shared<planning_scene::PlanningScene>(criterion_model);
+    criterion_scene->setPlanningSceneMsg(scene_response->scene);
+
+    moveit::core::RobotState retreat_start_criterion(criterion_model);
+    moveit::core::RobotState retreat_start_live_measured(*retreat_start_live);
+    const std::set<std::string> criterion_variables(
+        criterion_model->getVariableNames().begin(), criterion_model->getVariableNames().end());
+    const std::set<std::string> live_variables(
+        live_model->getVariableNames().begin(), live_model->getVariableNames().end());
+    for (const auto& name : retreat_start_live->getVariableNames()) {
+        if (criterion_variables.count(name) != 0) {
+            retreat_start_criterion.setVariablePosition(name, retreat_start_live->getVariablePosition(name));
+        }
+    }
+    const auto& finger_names = a1v::fingerJointNames();
+    for (std::size_t i = 0; i < finger_names.size(); ++i) {
+        retreat_start_criterion.setVariablePosition(finger_names[i], retreat_fingers.positions[i]);
+        retreat_start_live_measured.setVariablePosition(finger_names[i], retreat_fingers.positions[i]);
+    }
+    retreat_start_criterion.update();
+    retreat_start_live_measured.update();
+    if (!retreat_start_criterion.satisfiesBounds(criterion_dual, 1e-4)) {
+        detail = "E_S1_RETREAT_START_BOUNDS";
+        return false;
+    }
+
+    collision_detection::AllowedCollisionMatrix retreat_acm = a1_verify_.base_acm;
+    retreat_acm.setEntry("mj_left_hand", "aluminum_rod", false);
+    retreat_acm.setEntry("mj_right_hand", "aluminum_rod", false);
+    retreat_acm.setEntry("mj_left_leftfinger", "aluminum_rod", false);
+    retreat_acm.setEntry("mj_left_rightfinger", "aluminum_rod", false);
+    retreat_acm.setEntry("mj_right_leftfinger", "aluminum_rod", false);
+    retreat_acm.setEntry("mj_right_rightfinger", "aluminum_rod", false);
+    double retreat_support_clearance =
+        released_immediate.position.z - ctx_->rod_half_height_ - ctx_->p2a_support_z_;
+    if (ctx_->p2a_support_plane_ && retreat_support_clearance >= -1e-4 &&
+        s1::supportHeightEligible(released_immediate.position.z, ctx_->rod_half_height_,
+            ctx_->p2a_support_z_, ctx_->p2a_resting_z_tol_)) {
+        retreat_acm.setEntry("aluminum_rod", a1_verify_.support_id, true);
+    }
+    collision_detection::CollisionRequest retreat_collision_request;
+    retreat_collision_request.group_name = ctx_->dual_arm_group_;
+    retreat_collision_request.contacts = true;
+    retreat_collision_request.max_contacts = 12;
+    auto firstContact = [](const collision_detection::CollisionResult& result) {
+        return result.contacts.empty() ? std::string("none") :
+            result.contacts.begin()->first.first + "<->" + result.contacts.begin()->first.second;
+    };
+    collision_detection::CollisionResult live_start_collision;
+    live_scene.checkCollision(retreat_collision_request, live_start_collision,
+                              retreat_start_live_measured, retreat_acm);
+    collision_detection::CollisionResult criterion_start_collision;
+    criterion_scene->checkCollision(retreat_collision_request, criterion_start_collision,
+                                    retreat_start_criterion, retreat_acm);
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_RETREAT_START_COMPARE] source=live_current_state_with_measured_fingers rod_source=post_release_MuJoCo "
+        "criterion=mujoco_hand_aabb fingers_seq=(%llu,%llu) q=(%.6f,%.6f,%.6f,%.6f) "
+        "rod_xyz=(%.6f,%.6f,%.6f) support_clearance=%.3fmm "
+        "live_collision=%s live_pair=%s criterion_collision=%s criterion_pair=%s",
+        static_cast<unsigned long long>(retreat_fingers.source_seq[0]),
+        static_cast<unsigned long long>(retreat_fingers.source_seq[1]),
+        retreat_fingers.positions[0], retreat_fingers.positions[1],
+        retreat_fingers.positions[2], retreat_fingers.positions[3],
+        released_immediate.position.x, released_immediate.position.y, released_immediate.position.z,
+        retreat_support_clearance * 1000.0,
+        live_start_collision.collision ? "true" : "false", firstContact(live_start_collision).c_str(),
+        criterion_start_collision.collision ? "true" : "false",
+        firstContact(criterion_start_collision).c_str());
+    if (criterion_start_collision.collision) {
+        detail = "E_S1_RETREAT_CRITERION_START_COLLISION: " + firstContact(criterion_start_collision);
+        return false;
+    }
+
+    auto poseFromEigen = [](const Eigen::Isometry3d& tf) {
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = tf.translation().x(); pose.position.y = tf.translation().y();
+        pose.position.z = tf.translation().z();
+        const Eigen::Quaterniond q(tf.linear());
+        pose.orientation.x = q.x(); pose.orientation.y = q.y();
+        pose.orientation.z = q.z(); pose.orientation.w = q.w();
+        return pose;
+    };
+    auto criterionArmValues = [&](const moveit::core::RobotState& state) {
+        std::vector<double> values;
+        state.copyJointGroupPositions(criterion_dual, values);
+        return values;
+    };
+    auto toCriterionState = [&](const moveit::core::RobotState& live_state) {
+        moveit::core::RobotState mapped(criterion_model);
+        for (const auto& name : live_state.getVariableNames()) {
+            if (criterion_variables.count(name) != 0) {
+                mapped.setVariablePosition(name, live_state.getVariablePosition(name));
+            }
+        }
+        mapped.update();
+        return mapped;
+    };
+    const Eigen::Isometry3d left_start_pose =
+        retreat_start_criterion.getGlobalLinkTransform(a1_verify_.left_eef);
+    const Eigen::Isometry3d right_start_pose =
+        retreat_start_criterion.getGlobalLinkTransform(a1_verify_.right_eef);
+    Eigen::Isometry3d left_goal_pose = left_start_pose;
+    Eigen::Isometry3d right_goal_pose = right_start_pose;
+    left_goal_pose.translation().z() += 0.10;
+    right_goal_pose.translation().z() += 0.10;
+    std::vector<moveit::core::RobotState> retreat_states;
+    std::vector<moveit::core::RobotState> retreat_live_states;
+    std::vector<std::pair<Eigen::Isometry3d, Eigen::Isometry3d>> retreat_targets;
+    retreat_states.reserve(21);
+    retreat_live_states.reserve(21);
+    retreat_targets.reserve(21);
+    retreat_states.push_back(retreat_start_criterion);
+    retreat_live_states.push_back(retreat_start_live_measured);
+    retreat_targets.emplace_back(left_start_pose, right_start_pose);
+    auto checkRetreatCriterionState = [&](const moveit::core::RobotState& state,
+                                          const Eigen::Isometry3d& expected_left,
+                                          const Eigen::Isometry3d& expected_right,
+                                          const std::size_t index) {
+        const Eigen::Isometry3d actual_left = state.getGlobalLinkTransform(a1_verify_.left_eef);
+        const Eigen::Isometry3d actual_right = state.getGlobalLinkTransform(a1_verify_.right_eef);
+        const double left_pos = (actual_left.translation() - expected_left.translation()).norm();
+        const double right_pos = (actual_right.translation() - expected_right.translation()).norm();
+        const double left_ang = Eigen::AngleAxisd(
+            expected_left.linear().transpose() * actual_left.linear()).angle();
+        const double right_ang = Eigen::AngleAxisd(
+            expected_right.linear().transpose() * actual_right.linear()).angle();
+        if (!std::isfinite(left_pos) || !std::isfinite(right_pos) ||
+            left_pos > 0.005 || right_pos > 0.005 ||
+            left_ang > 2.0 * M_PI / 180.0 || right_ang > 2.0 * M_PI / 180.0) {
+            detail = "E_S1_RETREAT_HAND_POSE_RESIDUAL at sample " + std::to_string(index);
+            return false;
+        }
+        if (!state.satisfiesBounds(criterion_dual, 1e-4)) {
+            detail = "E_S1_RETREAT_JOINT_BOUNDS at sample " + std::to_string(index);
+            return false;
+        }
+        collision_detection::AllowedCollisionMatrix sample_acm = retreat_acm;
+        collision_detection::CollisionResult collision;
+        criterion_scene->checkCollision(retreat_collision_request, collision, state, sample_acm);
+        if (collision.collision) {
+            detail = "E_S1_RETREAT_COLLISION at sample " + std::to_string(index) + ": " +
+                firstContact(collision);
+            return false;
+        }
+        return true;
+    };
+    if (!checkRetreatCriterionState(retreat_states.front(), left_start_pose, right_start_pose, 0)) {
+        return false;
+    }
+    constexpr std::size_t kRetreatSteps = 20;
+    for (std::size_t i = 1; i <= kRetreatSteps; ++i) {
+        const double alpha = static_cast<double>(i) / static_cast<double>(kRetreatSteps);
+        Eigen::Isometry3d desired_left = left_start_pose;
+        Eigen::Isometry3d desired_right = right_start_pose;
+        desired_left.translation().z() += 0.10 * alpha;
+        desired_right.translation().z() += 0.10 * alpha;
+        moveit::core::RobotState candidate_live(retreat_live_states.back());
+        const bool left_ik = candidate_live.setFromIK(
+            live_left, poseFromEigen(desired_left), 0.5);
+        if (!left_ik) {
+            detail = "E_S1_RETREAT_IK_NO_SOLUTION side=left waypoint=" + std::to_string(i);
+            return false;
+        }
+        const bool right_ik = candidate_live.setFromIK(
+            live_right, poseFromEigen(desired_right), 0.5);
+        if (!right_ik) {
+            detail = "E_S1_RETREAT_IK_NO_SOLUTION side=right waypoint=" + std::to_string(i);
+            return false;
+        }
+        candidate_live.update();
+        moveit::core::RobotState candidate = toCriterionState(candidate_live);
+        if (!checkRetreatCriterionState(candidate, desired_left, desired_right, i)) return false;
+        const auto& previous = retreat_states.back();
+        const std::size_t subdivisions = a1v::subdivisionsFor(
+            a1v::maxAbsJointDelta(criterionArmValues(previous), criterionArmValues(candidate)), 0.01);
+        for (std::size_t si = 1; si < subdivisions; ++si) {
+            const double segment_alpha = static_cast<double>(si) / static_cast<double>(subdivisions);
+            const auto q = a1v::interpolateJoints(
+                criterionArmValues(previous), criterionArmValues(candidate), segment_alpha);
+            moveit::core::RobotState interpolated(previous);
+            interpolated.setJointGroupPositions(criterion_dual, q);
+            interpolated.update();
+            const Eigen::Isometry3d expected_left = interpolateObject(
+                retreat_targets.back().first, desired_left, segment_alpha);
+            const Eigen::Isometry3d expected_right = interpolateObject(
+                retreat_targets.back().second, desired_right, segment_alpha);
+            if (!checkRetreatCriterionState(interpolated, expected_left, expected_right,
+                                            i * subdivisions + si)) return false;
+        }
+        retreat_states.push_back(candidate);
+        retreat_live_states.push_back(candidate_live);
+        retreat_targets.emplace_back(desired_left, desired_right);
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_RETREAT_GEOMETRY_VALIDATED] model=mujoco_hand_aabb waypoints=%zu max_step=5.0mm "
+        "height=0.100m fixed_hand_orientation=true fixed_co_grasp_constraint=false",
+        retreat_states.size());
+
+    auto toLiveState = [&](const moveit::core::RobotState& criterion_state) {
+        moveit::core::RobotState mapped(*retreat_start_live);
+        for (const auto& name : criterion_state.getVariableNames()) {
+            if (live_variables.count(name) != 0) {
+                mapped.setVariablePosition(name, criterion_state.getVariablePosition(name));
+            }
+        }
+        mapped.update();
+        return mapped;
+    };
+    robot_trajectory::RobotTrajectory retreat_trajectory(live_model, ctx_->dual_arm_group_);
+    for (const auto& state : retreat_states) retreat_trajectory.addSuffixWayPoint(toLiveState(state), 0.0);
+    trajectory_processing::IterativeParabolicTimeParameterization retreat_iptp;
+    if (!retreat_iptp.computeTimeStamps(retreat_trajectory, 0.10, 0.08)) {
+        detail = "E_S1_RETREAT_IPTP_FAILED";
+        return false;
+    }
+    moveit::planning_interface::MoveGroupInterface::Plan retreat_plan;
+    retreat_trajectory.getRobotTrajectoryMsg(retreat_plan.trajectory_);
+    moveit::core::robotStateToRobotStateMsg(*retreat_start_live, retreat_plan.start_state_);
+    auto& retreat_points = retreat_plan.trajectory_.joint_trajectory.points;
+    const auto& retreat_joint_names = retreat_plan.trajectory_.joint_trajectory.joint_names;
+    std::vector<s1::DirectionalJointLimits> retreat_limits;
+    retreat_limits.reserve(retreat_joint_names.size());
+    for (const auto& name : retreat_joint_names) {
+        const auto& bounds = live_model->getVariableBounds(name);
+        retreat_limits.push_back({bounds.min_velocity_, bounds.max_velocity_,
+            bounds.min_acceleration_, bounds.max_acceleration_,
+            bounds.velocity_bounded_, bounds.acceleration_bounded_});
+    }
+    std::vector<s1::TimedJointPoint> retreat_timed_points;
+    for (const auto& point : retreat_points) {
+        retreat_timed_points.push_back({rclcpp::Duration(point.time_from_start).seconds(),
+            point.positions, point.velocities, point.accelerations});
+    }
+    s1::TimeScalingReport retreat_timing_report;
+    std::string retreat_timing_error;
+    if (!s1::scaleTimedTrajectory(retreat_timed_points, retreat_limits, 0.10, 0.08, 0.01,
+                                  retreat_timing_report, retreat_timing_error)) {
+        detail = "E_S1_RETREAT_TIMING_INVALID: " + retreat_timing_error;
+        return false;
+    }
+    for (std::size_t i = 0; i < retreat_points.size(); ++i) {
+        retreat_points[i].time_from_start = static_cast<builtin_interfaces::msg::Duration>(
+            rclcpp::Duration::from_seconds(retreat_timed_points[i].time));
+        retreat_points[i].velocities = retreat_timed_points[i].velocities;
+        retreat_points[i].accelerations = retreat_timed_points[i].accelerations;
+    }
+    auto execution_start = ctx_->dual_arm_->getCurrentState(2.0);
+    if (!execution_start) {
+        detail = "E_S1_RETREAT_EXECUTION_START_UNAVAILABLE";
+        return false;
+    }
+    double max_retreat_start_delta = 0.0;
+    for (std::size_t j = 0; j < retreat_joint_names.size(); ++j) {
+        max_retreat_start_delta = std::max(max_retreat_start_delta, std::abs(
+            retreat_points.front().positions[j] - execution_start->getVariablePosition(retreat_joint_names[j])));
+    }
+    if (max_retreat_start_delta > 0.02) {
+        detail = "E_S1_RETREAT_START_MISMATCH delta=" + std::to_string(max_retreat_start_delta);
+        return false;
+    }
+
+    moveit::core::RobotState retreat_validation_base(retreat_start_criterion);
+    auto retreatStateAt = [&](const std::vector<double>& positions) {
+        moveit::core::RobotState state(retreat_validation_base);
+        state.setVariablePositions(retreat_joint_names, positions);
+        state.update();
+        return state;
+    };
+    std::size_t retreat_checked = 0;
+    auto validateRetreatMessageState = [&](const std::vector<double>& positions,
+                                           const std::size_t point_index,
+                                           const double alpha) {
+        auto state = retreatStateAt(positions);
+        const Eigen::Isometry3d expected_left = interpolateObject(
+            retreat_targets[point_index].first,
+            point_index + 1 < retreat_targets.size() ? retreat_targets[point_index + 1].first :
+                                                       retreat_targets[point_index].first,
+            alpha);
+        const Eigen::Isometry3d expected_right = interpolateObject(
+            retreat_targets[point_index].second,
+            point_index + 1 < retreat_targets.size() ? retreat_targets[point_index + 1].second :
+                                                       retreat_targets[point_index].second,
+            alpha);
+        if (!checkRetreatCriterionState(state, expected_left, expected_right, retreat_checked)) return false;
+        ++retreat_checked;
+        return true;
+    };
+    if (retreat_points.size() != retreat_targets.size()) {
+        detail = "E_S1_RETREAT_FINAL_POINT_COUNT_MISMATCH";
+        return false;
+    }
+    for (std::size_t i = 0; i < retreat_points.size(); ++i) {
+        if (!validateRetreatMessageState(retreat_points[i].positions, i, 0.0)) return false;
+        if (i + 1 < retreat_points.size()) {
+            const std::size_t subdivisions = a1v::subdivisionsFor(
+                a1v::maxAbsJointDelta(retreat_points[i].positions, retreat_points[i + 1].positions), 0.01);
+            for (std::size_t si = 1; si < subdivisions; ++si) {
+                const double alpha = static_cast<double>(si) / static_cast<double>(subdivisions);
+                const auto q = a1v::interpolateJoints(
+                    retreat_points[i].positions, retreat_points[i + 1].positions, alpha);
+                if (!validateRetreatMessageState(q, i, alpha)) return false;
+            }
+        }
+    }
+    const double retreat_duration = rclcpp::Duration(
+        retreat_points.back().time_from_start).seconds();
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_RETREAT_PREPLAN_VALIDATED] model=mujoco_hand_aabb points=%zu checked=%zu "
+        "start_delta=%.6frad duration=%.6fs scale=%.9f Rv=%.6f Ra=%.6f",
+        retreat_points.size(), retreat_checked, max_retreat_start_delta, retreat_duration,
+        retreat_timing_report.scale, retreat_timing_report.velocity_ratio_after,
+        retreat_timing_report.acceleration_ratio_after);
+    auto dispatched_retreat = std::make_shared<moveit::planning_interface::MoveGroupInterface::Plan>(retreat_plan);
+    const auto retreat_result = a1v::runBoundedExec(
+        [iface, dispatched_retreat]() { return iface->execute(*dispatched_retreat).val; },
+        [iface]() { iface->stop(); }, std::max(15.0, 3.0 * retreat_duration + 5.0), 0.2, 0.05);
+    retreat_ok = retreat_result.status == a1v::BoundedExecOutcome::Status::COMPLETED &&
+                 retreat_result.value == moveit::core::MoveItErrorCode::SUCCESS;
+    if (retreat_ok) {
+        auto arrived = ctx_->dual_arm_->getCurrentState(2.0);
+        if (!arrived) retreat_ok = false;
+        else {
+            const auto left_arrived = arrived->getGlobalLinkTransform(a1_verify_.left_eef);
+            const auto right_arrived = arrived->getGlobalLinkTransform(a1_verify_.right_eef);
+            const double left_error = (left_arrived.translation() - left_goal_pose.translation()).norm();
+            const double right_error = (right_arrived.translation() - right_goal_pose.translation()).norm();
+            const double left_angle = Eigen::AngleAxisd(
+                left_goal_pose.linear().transpose() * left_arrived.linear()).angle();
+            const double right_angle = Eigen::AngleAxisd(
+                right_goal_pose.linear().transpose() * right_arrived.linear()).angle();
+            retreat_ok = left_error <= 0.005 && right_error <= 0.005 &&
+                left_angle <= 2.0 * M_PI / 180.0 && right_angle <= 2.0 * M_PI / 180.0;
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[S1_RETREAT_ARRIVED] left_pos=%.3fmm left_angle=%.3fdeg "
+                "right_pos=%.3fmm right_angle=%.3fdeg",
+                left_error * 1000.0, left_angle * 180.0 / M_PI,
+                right_error * 1000.0, right_angle * 180.0 / M_PI);
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "[S1_RETREAT] planned=%.3fs execute=%.3fs result=%s",
+        retreat_duration, retreat_result.elapsed_sec, retreat_ok ? "SUCCESS" : "FAILED");
+    if (!retreat_ok) {
+        detail = "E_S1_RETREAT_FAILED";
+        return false;
+    }
+    MujocoRodTruth released;
+    std::string release_wait_detail;
+    if (!awaitStableRodTruth("released_open_retreat", released, release_wait_detail)) {
+        detail = "E_S1_RELEASE_STABILITY_FAILED: " + release_wait_detail;
+        return false;
+    }
+    const bool weld_off_confirmed = ctx_->weld_state_received_.load(std::memory_order_acquire) &&
+        !ctx_->weld_state_active_.load(std::memory_order_acquire);
+    const bool attach_removed = psi.getAttachedObjects({"aluminum_rod"}).count("aluminum_rod") == 0;
+    double released_support_clearance = 0.0;
+    const bool released_support_ok = s1::supportHeightEligible(
+        released.position.z, ctx_->rod_half_height_, ctx_->p2a_support_z_,
+        ctx_->p2a_resting_z_tol_, &released_support_clearance);
+    const double final_pos_err = std::sqrt(std::pow(released.position.x - target_pos.x, 2) +
+        std::pow(released.position.y - target_pos.y, 2) + std::pow(released.position.z - target_pos.z, 2));
+    const double final_ang_err = a1t::rotationDistanceRad(released.orientation, target_quat);
+    const double final_q_norm = std::sqrt(released.orientation.x * released.orientation.x +
+        released.orientation.y * released.orientation.y + released.orientation.z * released.orientation.z +
+        released.orientation.w * released.orientation.w);
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[S1_RELEASED_TRUTH] final_xyz=(%.6f,%.6f,%.6f) final_quat_xyzw=(%.7f,%.7f,%.7f,%.7f) "
+        "target_xyz=(%.6f,%.6f,%.6f) target_quat_xyzw=(%.7f,%.7f,%.7f,%.7f) "
+        "position_error=%.3fmm angle_error=%.3fdeg q_norm=%.7f support_clearance=%.3fmm "
+        "support_ok=%s weld_off=%s attach_removed=%s open=%s retreat=SUCCESS",
+        released.position.x, released.position.y, released.position.z,
+        released.orientation.x, released.orientation.y, released.orientation.z, released.orientation.w,
+        target_pos.x, target_pos.y, target_pos.z,
+        target_q.x(), target_q.y(), target_q.z(), target_q.w(),
+        final_pos_err * 1000.0, final_ang_err * 180.0 / M_PI, final_q_norm,
+        released_support_clearance * 1000.0, released_support_ok ? "true" : "false",
+        weld_off_confirmed ? "true" : "false", attach_removed ? "true" : "false",
+        open_ok ? "SUCCESS" : "FAILED");
+    if (!weld_off_confirmed || !attach_removed || !released_support_ok) {
+        detail = "E_S1_RELEASE_STATE_INCOMPLETE: weld/attach/support confirmation failed after retreat";
+        return false;
+    }
+    if (final_pos_err > 0.01 || final_ang_err > 5.0 * M_PI / 180.0) {
+        detail = "E_S1_RELEASE_DRIFT: rod moved outside 10 mm / 5 deg after opening and retreat";
+        return false;
+    }
+    detail = "ideal_weld baseline complete; rigid ideal grasp only, friction grip/slip unverified";
+    return true;
+}
+
+bool DualArmController::runGraspDescent(const a1t::TruthPayload& truth, std::string& detail)
+{
+    using namespace std::chrono_literals;
+    RCLCPP_INFO(ctx_->get_logger(),
+                "\n----- [P3A-2B] 从预抓取位姿下降到抓取位姿（到位即停，不闭合/不 weld/不 attach）-----");
+
+    // ---- 0. Gates. The descent is only allowed on top of a pre-grasp this
+    //         process actually reached, using this round's verified context.
+    //         `descent_start` is deliberately NOT checked here: it is an OUTPUT
+    //         of buildAndVerifyGraspDescent, not a precondition of it.
+    if (!a1_verify_.valid || !a1_verify_.model || !a1_verify_.scene) {
+        detail = "E_2B_NO_VERIFY_CONTEXT: the P2a criterion model/scene is unavailable";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    if (!a1_verify_.pregrasp_reached_this_round) {
+        detail = "E_2B_NO_PREGRASP: the pre-grasp pose was not reached in this process, so "
+                 "there is nothing to descend from";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    if (!checkControllerStatesEnabled(detail)) {
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+
+    // ---- 1. Open both grippers first, on real feedback, BEFORE descending.
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-2B] 下降前先打开双爪（单指位移 %.4f ⇒ 目标开口 %.4f m），"
+                "并要求真实反馈到位",
+                ctx_->gripper_open_position_, 2.0 * ctx_->gripper_open_position_);
+    std::array<std::uint64_t, 2> finger_seq_before_open {{0, 0}};
+    DualArmCarryTask::GripperContactFeedback finger_before_open;
+    if (ctx_->latestGripperContact("mj_left", finger_before_open)) {
+        finger_seq_before_open[0] = finger_before_open.seq;
+    }
+    if (ctx_->latestGripperContact("mj_right", finger_before_open)) {
+        finger_seq_before_open[1] = finger_before_open.seq;
+    }
+    if (!ctx_->grippers_->controlDualGrippers(ctx_->gripper_open_position_)) {
+        detail = "E_2B_GRIPPER_OPEN_FAILED: the grippers did not open on real feedback (or an "
+                 "earlier goal's outcome is still unknown); refusing to descend";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "  ✓ [P3A-2B] 双爪打开并实测到位，允许下降");
+    const double opened_after_steady_sec = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    a1v::FingerJointSnapshot fingers;
+    if (!awaitFreshOpenFingerSnapshot(opened_after_steady_sec, finger_seq_before_open,
+                                      fingers, detail)) {
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s; refusing to plan/descend", detail.c_str());
+        return false;
+    }
+
+    // ---- 2. Physical rod truth BEFORE the descent, from MuJoCo.
+    //
+    // The descent is aimed at a grasp pose derived from this round's FROZEN
+    // reference. If the physical rod has moved since, that pose no longer
+    // applies -- so the reference is checked, not merely printed. A measurement
+    // that cannot be taken is a failure, not a warning: "unavailable" must never
+    // mean "assume it is fine".
+    const std::string truth_service =
+        ctx_->descent_negative_truth_ == "unavailable" ? "/a1_nonexistent_get_body_state"
+                                                       : ctx_->mujoco_get_body_state_service_;
+    const MujocoRodTruth before_phys = readMujocoRodTruth(truth_service);
+    a1v::Vec3 scene_before_pos;
+    a1v::Quat scene_before_quat;
+    const bool scene_before_ok =
+        readSceneRodPose(a1_verify_.rod_id, scene_before_pos, scene_before_quat);
+    {
+        a1v::Vec3 frozen{truth.position.x, truth.position.y, truth.position.z};
+        a1v::Quat frozen_q{truth.orientation.x, truth.orientation.y, truth.orientation.z,
+                           truth.orientation.w};
+        if (ctx_->descent_negative_truth_ == "offset") {
+            // Test-only: perturb the reference the comparison uses, so the
+            // "the frozen reference no longer applies" path can be shown to fire.
+            frozen.z += 0.05;
+            RCLCPP_WARN(ctx_->get_logger(),
+                        "  [P3A-2B][负例-注入] 已把比较用的冻结参考抬高 50 mm（仅验证用）");
+        }
+        if (!before_phys.ok) {
+            detail = "E_2B_TRUTH_UNAVAILABLE: the physical rod could not be measured before the "
+                     "descent (" + before_phys.detail + "); refusing to descend";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        const double dpos = std::sqrt(std::pow(before_phys.position.x - frozen.x, 2) +
+                                      std::pow(before_phys.position.y - frozen.y, 2) +
+                                      std::pow(before_phys.position.z - frozen.z, 2));
+        const double dang = a1t::rotationDistanceRad(frozen_q, before_phys.orientation);
+        const double ang_tol = ctx_->descent_truth_angle_tol_deg_ * M_PI / 180.0;
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 下降前 **MuJoCo 物理真值** 杆位姿: (%.6f, %.6f, %.6f) q=(%.5f, "
+                    "%.5f, %.5f, %.5f)",
+                    before_phys.position.x, before_phys.position.y, before_phys.position.z,
+                    before_phys.orientation.x, before_phys.orientation.y,
+                    before_phys.orientation.z, before_phys.orientation.w);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 冻结参考仍适用性核对（物理真值 vs 本轮冻结真值）: 位置差 "
+                    "%.4f mm（容差 %.1f mm），角度差 %.4f°（容差 %.1f°）",
+                    dpos * 1000.0, ctx_->descent_truth_pos_tol_m_ * 1000.0,
+                    dang * 180.0 / M_PI, ctx_->descent_truth_angle_tol_deg_);
+        if (dpos > ctx_->descent_truth_pos_tol_m_ || dang > ang_tol) {
+            detail = "E_2B_TRUTH_REFERENCE_STALE: the physical rod is no longer where this round "
+                     "froze it (position " + std::to_string(dpos * 1000.0) + " mm, angle " +
+                     std::to_string(dang * 180.0 / M_PI) + " deg); the descent target does not "
+                     "apply, refusing to descend";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // ---- 1b. Build and verify the descent, from where the robot ACTUALLY is
+    //          right now. Nothing is dispatched by this call.
+    if (!buildAndVerifyGraspDescent(truth, fingers, detail)) {
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] 下降路径未通过校验，不下发运动：%s",
+                     detail.c_str());
+        return false;
+    }
+    if (!a1_verify_.descent_plan_valid) {
+        detail = "E_2B_NO_VERIFIED_DESCENT: the descent was not verified";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+
+    // ---- 3. Dispatch the verified descent.
+    const auto& traj = a1_verify_.descent_plan.trajectory_.joint_trajectory;
+    const double planned_sec =
+        traj.points.empty() ? 0.0 : rclcpp::Duration(traj.points.back().time_from_start).seconds();
+
+    // The robot must still be where the path starts, and that start must be the
+    // path's own first point.
+    {
+        const moveit::core::RobotStatePtr cur = ctx_->dual_arm_->getCurrentState();
+        double worst = 0.0;
+        for (std::size_t i = 0; i < traj.joint_names.size(); ++i) {
+            worst = std::max(worst, std::fabs(cur->getVariablePosition(traj.joint_names[i]) -
+                                              traj.points.front().positions[i]));
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 当前关节状态与下降轨迹首点最大差 %.6f rad（阈值 0.020）", worst);
+        if (worst > 0.02) {
+            detail = "E_2B_START_MISMATCH: the robot is no longer at the descent path's first "
+                     "point (max delta " + std::to_string(worst) + " rad)";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+            return false;
+        }
+    }
+
+    std::shared_ptr<moveit::planning_interface::MoveGroupInterface> iface = ctx_->dual_arm_;
+    moveit::planning_interface::MoveGroupInterface::Plan dispatched = a1_verify_.descent_plan;
+
+    RCLCPP_INFO(ctx_->get_logger(),
+                "  [P3A-2B] 下发下降轨迹: %zu 点，计划时长 %.3f s，速度缩放 %.3f / 加速度缩放 %.3f",
+                traj.points.size(), planned_sec, ctx_->pregrasp_vel_scale_,
+                ctx_->pregrasp_acc_scale_);
+
+    const a1v::BoundedExecOutcome exec = a1v::runBoundedExec(
+        [iface, dispatched]() mutable { return iface->execute(dispatched).val; },
+        [iface]() { iface->stop(); }, ctx_->pregrasp_exec_timeout_sec_, 4.0, 0.05);
+
+    if (exec.status == a1v::BoundedExecOutcome::Status::TIMEOUT) {
+        RCLCPP_ERROR(ctx_->get_logger(),
+                     "  ✗ [P3A-2B] E_2B_EXEC_TIMEOUT: 执行在 %.1f s 内未结束（计划时长 %.3f s）；"
+                     "迟到结果不参与判定，本轮以失败终止，不重试",
+                     exec.elapsed_sec, planned_sec);
+        detail = "E_2B_EXEC_TIMEOUT: execution did not finish within " +
+                 std::to_string(ctx_->pregrasp_exec_timeout_sec_) + " s";
+        return false;
+    }
+    if (exec.status == a1v::BoundedExecOutcome::Status::EXCEPTION) {
+        detail = "E_2B_EXEC_EXCEPTION: the execution call raised an exception";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    RCLCPP_INFO(ctx_->get_logger(), "  [P3A-2B] 执行返回码 %d，用时 %.3f s（计划时长 %.3f s）",
+                exec.value, exec.elapsed_sec, planned_sec);
+    if (exec.value != moveit::core::MoveItErrorCode::SUCCESS) {
+        detail = "E_2B_EXEC_FAILED: the controller reported error code " +
+                 std::to_string(exec.value);
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+    if (exec.elapsed_sec > std::max(3.0 * planned_sec, 5.0)) {
+        detail = "E_2B_EXEC_OVERRUN: execution took " + std::to_string(exec.elapsed_sec) +
+                 " s for a " + std::to_string(planned_sec) + " s plan";
+        RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+        return false;
+    }
+
+    // ---- 4. Arrival: a short window of PROVABLY FRESH feedback. ------------
+    //
+    // Every sample must carry a joint_states sequence number not seen before, so
+    // repeatedly reading one cached state cannot fill the window. The settle
+    // test is the whole window's per-joint spread, and the end-effector error is
+    // read from the newest fresh sample -- not from a separate, later read.
+    {
+        const FreshArrival arrival = awaitFreshArrival(
+            traj.joint_names, ctx_->pregrasp_stable_window_sec_, ctx_->pregrasp_stable_tol_rad_);
+        if (!arrival.ok) {
+            detail = "E_2B_" + arrival.reason_code + ": " + arrival.detail;
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] 到位窗口（**新鲜反馈**）: %zu 个样本 / %.3f s（序号 %llu），"
+                    "窗口内最大单关节变化 %.6f rad（%s，阈值 %.6f）",
+                    arrival.samples, arrival.window_sec, arrival.last_seq,
+                    arrival.worst_joint_change_rad,
+                    arrival.worst_joint.empty() ? "-" : arrival.worst_joint.c_str(),
+                    ctx_->pregrasp_stable_tol_rad_);
+
+        moveit::core::RobotState arrived(ctx_->dual_arm_->getRobotModel());
+        if (!freshStateFor(arrival.last_positions, arrived)) {
+            detail = "E_2B_ARRIVAL_STATE_INVALID: the fresh sample could not build a robot state";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [P3A-2B] %s", detail.c_str());
+            return false;
+        }
+        const a1v::ArmTarget got_left =
+            fromEigenPose(arrived.getGlobalLinkTransform(a1_verify_.left_eef));
+        const a1v::ArmTarget got_right =
+            fromEigenPose(arrived.getGlobalLinkTransform(a1_verify_.right_eef));
+        const a1v::PoseError el = a1v::poseError(a1_verify_.grasp_target.left, got_left);
+        const a1v::PoseError er = a1v::poseError(a1_verify_.grasp_target.right, got_right);
+
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "     左臂 位置误差 %.4f mm，姿态误差 %.4f°  |  右臂 位置误差 %.4f mm，"
+                    "姿态误差 %.4f°",
+                    el.pos_m * 1000.0, el.angle_rad * 180.0 / M_PI, er.pos_m * 1000.0,
+                    er.angle_rad * 180.0 / M_PI);
+
+        // Straightness of the PLANNED waypoints, measured on the verified plan.
+        // This is NOT a measurement of the executed trajectory: no control-rate
+        // trace of the motion is collected, and the record must say so.
+        std::vector<a1v::ArmTarget> planned_left;
+        std::vector<a1v::ArmTarget> planned_right;
+        for (const auto& wp : a1_verify_.descent_waypoints) {
+            planned_left.push_back(fromEigenPose(wp->getGlobalLinkTransform(a1_verify_.left_eef)));
+            planned_right.push_back(fromEigenPose(wp->getGlobalLinkTransform(a1_verify_.right_eef)));
+        }
+        const a1v::StraightDescentDeviation dl = a1v::straightDescentDeviation(planned_left);
+        const a1v::StraightDescentDeviation dr = a1v::straightDescentDeviation(planned_right);
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "  [P3A-2B] **规划航点**竖直性（对每臂首点的 XY 与姿态）: 左 max XY %.4f mm / "
+                    "max 姿态 %.4f°；右 max XY %.4f mm / max 姿态 %.4f° —— 这是**规划航点的 FK "
+                    "偏差**，不是执行轨迹的实测偏差",
+                    dl.max_xy_m * 1000.0, dl.max_angle_rad * 180.0 / M_PI,
+                    dr.max_xy_m * 1000.0, dr.max_angle_rad * 180.0 / M_PI);
+
+        const double ang_tol = ctx_->pregrasp_arrival_angle_tol_deg_ * M_PI / 180.0;
+        if (el.pos_m > ctx_->pregrasp_arrival_pos_tol_m_ ||
+            er.pos_m > ctx_->pregrasp_arrival_pos_tol_m_ || el.angle_rad > ang_tol ||
+            er.angle_rad > ang_tol) {
+            detail = "E_2B_NOT_AT_GRASP_POSE: left " + std::to_string(el.pos_m * 1000.0) +
+                     " mm/" + std::to_string(el.angle_rad * 180.0 / M_PI) + " deg, right " +
+                     std::to_string(er.pos_m * 1000.0) + " mm/" +
+                     std::to_string(er.angle_rad * 180.0 / M_PI) + " deg";
+            RCLCPP_ERROR(ctx_->get_logger(), "  ✗ %s", detail.c_str());
+            return false;
+        }
+    }
+
+    // ---- 5. Physical rod truth AFTER, reported separately from the scene.
+    {
+        const MujocoRodTruth after_phys = readMujocoRodTruth();
+        if (before_phys.ok && after_phys.ok) {
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P3A-2B] 物理杆变化（MuJoCo /get_body_state，前→后）: %s",
+                        rodDeltaText(before_phys.position, before_phys.orientation,
+                                     after_phys.position, after_phys.orientation)
+                            .c_str());
+        } else {
+            // The "before" reading is now mandatory, so only the "after" reading
+            // can be missing here. Say so plainly instead of implying the rod was
+            // undisturbed.
+            RCLCPP_WARN(ctx_->get_logger(),
+                        "  [P3A-2B] 下降后的物理杆测量**失败**（%s）；本轮**未测得**杆是否被扰动，"
+                        "不对此作任何声称。下降前已测得 = %s",
+                        after_phys.detail.c_str(), before_phys.ok ? "是" : "否");
+        }
+        a1v::Vec3 scene_after_pos;
+        a1v::Quat scene_after_quat;
+        if (scene_before_ok &&
+            readSceneRodPose(a1_verify_.rod_id, scene_after_pos, scene_after_quat)) {
+            RCLCPP_INFO(ctx_->get_logger(),
+                        "  [P3A-2B] 规划场景对象变化（/get_planning_scene，前→后）: %s "
+                        "—— 这是**场景对象**，不是物理测量",
+                        rodDeltaText(scene_before_pos, scene_before_quat, scene_after_pos,
+                                     scene_after_quat)
+                            .c_str());
+        }
+    }
+
+    detail = "GRASP_POSE_REACHED";
+    return true;
 }

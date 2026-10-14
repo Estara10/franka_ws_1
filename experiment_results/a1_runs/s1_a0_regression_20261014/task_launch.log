@@ -1,0 +1,103 @@
+[rtk] WARNING: untrusted project filters (.rtk/filters.toml)
+[rtk] Filters NOT applied. Run `rtk trust` to review and enable.
+[INFO] [launch]: All log files can be found below /tmp/codex_s1_ros_home/log/2026-10-14-13-42-08-860828-Estara-197645
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [197872]
+[dual_arm_carry_task_node-1] [INFO] [1791956534.219057079] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791956534.221133157] [dual_arm_carry_task]: [P3A2C_CONFIG] grasp_contact_close=false (parameter default=false), grasp_descent=false
+[dual_arm_carry_task_node-1] [INFO] [1791956534.221151961] [dual_arm_carry_task]: [S1_CONFIG] grasp_model=none (default=none)
+[dual_arm_carry_task_node-1] [INFO] [1791956534.222977372] [dual_arm_carry_task]: A1 到位新鲜度: 订阅 /joint_states（序号 + 到达时刻；重复旧样本不计数）
+[dual_arm_carry_task_node-1] [INFO] [1791956534.223729355] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791956534.223759385] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791956534.223765218] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791956534.223769652] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791956534.223774431] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791956534.223778653] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1791956534.223785276] [dual_arm_carry_task]:   杆位姿来源: static
+[dual_arm_carry_task_node-1] [INFO] [1791956536.223973574] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791956536.234435174] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.01 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791956536.234528834] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1791956536.266731798] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1791956536.266799012] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1791956536.277644366] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287305862] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287377781] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287410835] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287424048] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287436730] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287447518] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287461673] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287496221] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287507940] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287518833] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287530459] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287541284] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287551471] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287574271] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287586087] [dual_arm_carry_task]:   使用当前机械臂位置作为起始点
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287603911] [dual_arm_carry_task]:   ✓ RETREAT目标已设为Franka标准ready姿态
+[dual_arm_carry_task_node-1] [INFO] [1791956536.287613976] [dual_arm_carry_task]:   ✓ 使用 SRDF 默认碰撞矩阵（无需手动初始化）
+[dual_arm_carry_task_node-1] [INFO] [1791956536.300964499] [dual_arm_carry_task]:   ✓ 铝棒碰撞物体已添加到 Planning Scene
+[dual_arm_carry_task_node-1] [INFO] [1791956536.806912762] [dual_arm_carry_task]:   ✓ 物体 aluminum_rod 已添加到 ACM（默认禁止所有碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1791956536.827774749] [dual_arm_carry_task]: ✓ 初始化完成，进入接近阶段
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791956537.028022846] [dual_arm_carry_task]: [状态: APPROACH] 接近物体...
+[dual_arm_carry_task_node-1] [INFO] [1791956537.028122018] [dual_arm_carry_task]:   ★ [同步动作] 提前满幅打开夹爪...
+[dual_arm_carry_task_node-1] [INFO] [1791956537.028145893] [dual_arm_carry_task]:   [夹爪] 双臂指令 0.0400（单指位移；服务器目标开口 = 2×该值 = 0.0800 m），总预算 20.0 s，打开
+[dual_arm_carry_task_node-1] [INFO] [1791956537.036804281] [dual_arm_carry_task]:   [夹爪] 创建并复用 左 action 客户端: /mj_left_gripper_sim_node/gripper_action
+[dual_arm_carry_task_node-1] [INFO] [1791956538.090556470] [dual_arm_carry_task]:   [夹爪] 创建并复用 右 action 客户端: /mj_right_gripper_sim_node/gripper_action
+[dual_arm_carry_task_node-1] [INFO] [1791956539.140420222] [dual_arm_carry_task]:   [夹爪] 打开 left  | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 result_position=0.0800 m effort=0.00 | E_OK succeeded; gap 0.080012 m vs commanded 0.080000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791956539.140469117] [dual_arm_carry_task]:   [夹爪] 打开 right | server=1 accepted=1 rejected=0 result=1 code=4 reached_goal=1 stalled=0 result_position=0.0800 m effort=0.00 | E_OK succeeded; gap 0.079955 m vs commanded 0.080000 m; reached_goal=true
+[dual_arm_carry_task_node-1] [INFO] [1791956539.140486078] [dual_arm_carry_task]:   [夹爪] 双臂总用时 2.112 s（总预算 20.0 s，阶段预算各自独立计入总预算）
+[dual_arm_carry_task_node-1] [INFO] [1791956539.140520601] [dual_arm_carry_task]:   左臂预定位目标: [0.50, 0.15, 0.28] 姿态:(R=180°,P=0°,Y=45°)
+[dual_arm_carry_task_node-1] [INFO] [1791956539.140534966] [dual_arm_carry_task]:   右臂预定位目标: [0.50, -0.15, 0.28] 姿态:(R=180°,P=0°,Y=45°)
+[dual_arm_carry_task_node-1] [INFO] [1791956539.141158233] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[dual_arm_carry_task_node-1] [INFO] [1791956539.142242041] [move_group_interface]: MoveGroup action client/server ready
+[dual_arm_carry_task_node-1] [INFO] [1791956539.143370091] [move_group_interface]: Planning request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791956539.207739674] [move_group_interface]: Planning request complete!
+[dual_arm_carry_task_node-1] [INFO] [1791956539.207894699] [move_group_interface]: time taken to generate plan: 0.000544549 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791956539.207964785] [dual_arm_carry_task]:   ✓ 双臂规划成功，开始执行...
+[dual_arm_carry_task_node-1] [INFO] [1791956539.209428734] [move_group_interface]: Execute request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791956541.535670767] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791956541.536473076] [dual_arm_carry_task]:   ✓ 双臂移动完成
+[dual_arm_carry_task_node-1] [INFO] [1791956541.536505977] [dual_arm_carry_task]: ✓ 接近完成，进入抓取阶段
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791956541.736639758] [dual_arm_carry_task]: [状态: GRASP] 夹紧物体...
+[dual_arm_carry_task_node-1] [INFO] [1791956541.736691643] [dual_arm_carry_task]:   新策略(一阶优化): 仅保留垂直下降介入 → 夹取
+[dual_arm_carry_task_node-1] [INFO] [1791956541.736701557] [dual_arm_carry_task]:   [GRASP] Step 1: 垂直下降 (Z: 0.28 → 0.13)
+[dual_arm_carry_task_node-1] [INFO] [1791956541.742347193] [move_group_interface]: MoveGroup action client/server ready
+[dual_arm_carry_task_node-1] [INFO] [1791956541.742944671] [move_group_interface]: Planning request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791956541.771293273] [move_group_interface]: Planning request complete!
+[dual_arm_carry_task_node-1] [INFO] [1791956541.772192386] [move_group_interface]: time taken to generate plan: 0.000258597 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791956541.772706940] [move_group_interface]: Execute request accepted
+[dual_arm_carry_task_node-1] [INFO] [1791956542.735945483] [move_group_interface]: Execute request success!
+[dual_arm_carry_task_node-1] [INFO] [1791956542.736362139] [dual_arm_carry_task]:   ✓ 垂直介入完成
+[dual_arm_carry_task_node-1] [INFO] [1791956543.038061226] [dual_arm_carry_task]:   [GRASP] 已记录放置接地参考高度: hand_z=0.129
+[dual_arm_carry_task_node-1] [INFO] [1791956543.038181174] [dual_arm_carry_task]:   [GRASP] Step 2: 更新世界ACM允许夹取碰撞
+[dual_arm_carry_task_node-1] [WARN] [1791956543.040753850] [dual_arm_carry_task]:   ! 物体 aluminum_rod 不在 ACM 中，正在自动补建条目
+[dual_arm_carry_task_node-1] [INFO] [1791956543.044542503] [dual_arm_carry_task]:   ✓ ACM已安全更新：允许夹爪与物体碰撞（保留所有SRDF规则）
+[dual_arm_carry_task_node-1] [INFO] [1791956543.044686257] [dual_arm_carry_task]:   ✓ ACM 更新完毕
+[dual_arm_carry_task_node-1] [INFO] [1791956543.044729986] [dual_arm_carry_task]:   [GRASP] Step 3: Closing grippers and attaching object
+[dual_arm_carry_task_node-1] [INFO] [1791956543.044767726] [dual_arm_carry_task]:   [夹爪] 双臂指令 0.0100（单指位移；服务器目标开口 = 2×该值 = 0.0200 m），总预算 20.0 s，闭合
+[dual_arm_carry_task_node-1] [WARN] [1791956551.050962679] [dual_arm_carry_task]:   [夹爪] left 未发出取消请求（目标已处于终态或客户端不再持有该句柄）: Goal handle is not known to this client.
+[dual_arm_carry_task_node-1] [INFO] [1791956551.051036634] [dual_arm_carry_task]:   [夹爪] 闭合 left  | server=1 accepted=1 rejected=0 result=1 code=6 reached_goal=0 stalled=0 result_position=0.0422 m effort=0.00 | E_GRIPPER_ABORTED_CLOSING aborted while closing; gap 0.042156 m vs commanded 0.020000 m (contact NOT confirmed; not treated as success)
+[dual_arm_carry_task_node-1] [WARN] [1791956551.051062101] [dual_arm_carry_task]:   [夹爪] left 目标在请求取消前已处于终态，未发出取消请求
+[dual_arm_carry_task_node-1] [INFO] [1791956551.051075100] [dual_arm_carry_task]:   [夹爪] 闭合 right | server=0 accepted=0 rejected=0 result=0 code=3 reached_goal=0 stalled=0 result_position=0.0000 m effort=0.00 | E_GRIPPER_SKIPPED_AFTER_FAILURE left arm failed; no further command was sent
+[dual_arm_carry_task_node-1] [INFO] [1791956551.051092316] [dual_arm_carry_task]:   [夹爪] 双臂总用时 8.006 s（总预算 20.0 s，阶段预算各自独立计入总预算）
+[dual_arm_carry_task_node-1] [ERROR] [1791956551.051109683] [dual_arm_carry_task]:   ✗ 夹爪闭合失败，禁止激活 weld 和附着物体
+[dual_arm_carry_task_node-1] [ERROR] [1791956551.251398759] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [ERROR] [1791956551.251454416] [dual_arm_carry_task]:     ✗ 任务失败！
+[dual_arm_carry_task_node-1] [INFO] [1791956551.251466103] [dual_arm_carry_task]: 已发布任务失败状态(ERROR)。
+[dual_arm_carry_task_node-1] [ERROR] [1791956551.251471989] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1791956551.251478038] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1791956551.251483276] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[INFO] [dual_arm_carry_task_node-1]: sending signal 'SIGINT' to process[dual_arm_carry_task_node-1]
+[dual_arm_carry_task_node-1] [INFO] [1791956575.652554498] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[dual_arm_carry_task_node-1] [INFO] [1791956575.654830834] [rclcpp]: signal_handler(SIGINT/SIGTERM)

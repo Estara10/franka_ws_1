@@ -1,0 +1,30 @@
+[INFO] [launch]: All log files can be found below /tmp/a1_p3a2c_parameter_smoke_home/log/2026-10-14-12-36-56-472558-Estara-156066
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [156118]
+[dual_arm_carry_task_node-1] [INFO] [1791952621.765870702] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1791952621.766723017] [dual_arm_carry_task]: [P3A2C_CONFIG] grasp_contact_close=false (parameter default=false), grasp_descent=false
+[dual_arm_carry_task_node-1] [INFO] [1791952621.767549971] [dual_arm_carry_task]: A1 truth mode enabled: subscribing to /a1_rod_pose_truth (expected_run_id=p3a2c-smoke-default)
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768182703] [dual_arm_carry_task]: A1 到位新鲜度: 订阅 /joint_states（序号 + 到达时刻；重复旧样本不计数）
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768400550] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768413397] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768418431] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768421558] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768424224] [dual_arm_carry_task]:   控制模式: compliant
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768428272] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768430873] [dual_arm_carry_task]:   杆位姿来源: a1_truth
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768433751] [dual_arm_carry_task]:   准备模式(prepare_only): 启用（本轮 A1 不运动）
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768437080] [dual_arm_carry_task]:   P2a 静态检查(p2a_check): 禁用
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768439996] [dual_arm_carry_task]:   P2b 路径检查(p2b_check): 禁用
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768442537] [dual_arm_carry_task]:   预抓取执行(pregrasp_execute): 禁用
+[dual_arm_carry_task_node-1] [INFO] [1791952621.768449788] [dual_arm_carry_task]:   下降到抓取位姿(grasp_descent): 禁用
+[dual_arm_carry_task_node-1] [INFO] [1791952623.768575616] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1791952623.771309181] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0 seconds
+[dual_arm_carry_task_node-1] [INFO] [1791952623.771328851] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[INFO] [dual_arm_carry_task_node-1]: sending signal 'SIGINT' to process[dual_arm_carry_task_node-1]
+[dual_arm_carry_task_node-1] [INFO] [1791952628.283839790] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[dual_arm_carry_task_node-1] [ERROR] [1791952628.284780732] [dual_arm_carry_task.rclcpp_action]: Error in destruction of rcl action client handle: action client implementation is invalid, at ./src/rcl_action/action_client.c:472
+[dual_arm_carry_task_node-1] [INFO] [1791952628.286166785] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[dual_arm_carry_task_node-1] terminate called without an active exception
+[ERROR] [dual_arm_carry_task_node-1]: process has died [pid 156118, exit code -6, cmd '/home/lidio/franka_ws_1/install/dual_arm_carry_task/lib/dual_arm_carry_task/dual_arm_carry_task_node --ros-args -r __node:=dual_arm_carry_task --params-file /tmp/launch_params_6kbstvsw --params-file /tmp/launch_params_8pfp130g --params-file /tmp/launch_params_e_vjz__1 --params-file /tmp/launch_params_g9dgclpe --params-file /tmp/launch_params_ko91wfp3'].

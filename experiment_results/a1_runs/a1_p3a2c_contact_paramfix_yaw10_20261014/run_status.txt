@@ -1,0 +1,7 @@
+runner_pid=157133
+truth=published
+task_started=1 task_pid=157201 grasp_contact_close_requested=true
+task_state=P3A2C_RESULT
+3530 experiment_results/a1_runs/a1_p3a2c_contact_paramfix_yaw10_20261014/contact_feedback.csv
+final_verdict=FAILED; GRASP_CONTACT_CONFIRMED not reached
+clarification=task_state=P3A2C_RESULT is a log-monitor match, not a pass; see final_verdict.txt

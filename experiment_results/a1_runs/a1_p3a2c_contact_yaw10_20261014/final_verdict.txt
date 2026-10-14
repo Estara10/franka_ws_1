@@ -1,0 +1,10 @@
+run_id=a1_p3a2c_contact_yaw10_20261014
+scenario=x=0.50 y=0 yaw=+10deg
+final_task_stage=GRASP_POSE_REACHED
+contact_close_launch_arg_requested=true
+contact_close_task_node_value=default_false_inference
+close_action_goal_sent=false
+contact_task_verdict=NOT_RUN
+reason=dual_arm_carry_task.launch.py declares grasp_contact_close but omits it from dual_arm_carry_task_node parameters
+GRASP_CONTACT_CONFIRMED=false
+no_weld_attach_lift_carry=true

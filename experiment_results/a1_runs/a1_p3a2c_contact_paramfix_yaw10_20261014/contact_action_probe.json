@@ -1,0 +1,3 @@
+[rtk] WARNING: untrusted project filters (.rtk/filters.toml)
+[rtk] Filters NOT applied. Run `rtk trust` to review and enable.
+{"left_grasp_action_ready": true, "right_grasp_action_ready": true, "ready": true}

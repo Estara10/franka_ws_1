@@ -120,6 +120,22 @@ def launch_setup(context, *args, **kwargs):
                 'p2b_max_joint_step_rad': LaunchConfiguration('p2b_max_joint_step_rad'),
                 'p2b_midpath_negative': LaunchConfiguration('p2b_midpath_negative'),
                 'pregrasp_execute': LaunchConfiguration('pregrasp_execute'),
+            'grasp_descent': LaunchConfiguration('grasp_descent'),
+            'grasp_contact_close': LaunchConfiguration('grasp_contact_close'),
+            'grasp_model': LaunchConfiguration('grasp_model'),
+            'descent_steps': LaunchConfiguration('descent_steps'),
+            'descent_max_xy_dev_m': LaunchConfiguration('descent_max_xy_dev_m'),
+            'descent_max_angle_dev_deg': LaunchConfiguration('descent_max_angle_dev_deg'),
+            'mujoco_get_body_state_service':
+                LaunchConfiguration('mujoco_get_body_state_service'),
+            'mujoco_rod_body_name': LaunchConfiguration('mujoco_rod_body_name'),
+            'mujoco_admin_hash': LaunchConfiguration('mujoco_admin_hash'),
+            'mujoco_truth_timeout_sec': LaunchConfiguration('mujoco_truth_timeout_sec'),
+            'descent_truth_pos_tol_m': LaunchConfiguration('descent_truth_pos_tol_m'),
+            'descent_truth_angle_tol_deg': LaunchConfiguration('descent_truth_angle_tol_deg'),
+            'descent_negative_final': LaunchConfiguration('descent_negative_final'),
+            'descent_negative_truth': LaunchConfiguration('descent_negative_truth'),
+            'joint_states_topic': LaunchConfiguration('joint_states_topic'),
                 'pregrasp_vel_scale': LaunchConfiguration('pregrasp_vel_scale'),
                 'pregrasp_acc_scale': LaunchConfiguration('pregrasp_acc_scale'),
                 'pregrasp_arrival_pos_tol_m': LaunchConfiguration('pregrasp_arrival_pos_tol_m'),
@@ -300,7 +316,7 @@ def generate_launch_description():
     rod_target_yaw_deg_arg = DeclareLaunchArgument(
         'rod_target_yaw_deg',
         default_value='90.0',
-        description='Mode B 目标放置偏航角 (度)'
+        description='目标物体的世界绝对偏航角 (度)'
     )
 
     # --- A1 P1b: rod pose source (defaults preserve the original A0 entry) ---
@@ -427,6 +443,59 @@ def generate_launch_description():
     pregrasp_exec_timeout_sec_arg = DeclareLaunchArgument(
         'pregrasp_exec_timeout_sec', default_value='90.0',
         description='执行的有界等待上限（秒）；超时即失败，不重试、不继续')
+
+    # --- A1 P3a-2b: descent from pre-grasp to grasp pose ---
+    grasp_descent_arg = DeclareLaunchArgument(
+        'grasp_descent', default_value='false',
+        description='A1 P3a-2b: 预抓取到位后打开双爪并沿世界 Z 下降到抓取位姿，到位即停。'
+                    '需要 pregrasp_execute=true（即同时具备 a1_truth/use_vision=false/'
+                    'prepare_only=true/p2a_check/p2b_check），与 gripper_selftest 互斥；'
+                    '不闭合、不 weld、不 attach、不抬升、不搬运')
+    grasp_contact_close_arg = DeclareLaunchArgument(
+        'grasp_contact_close', default_value='false',
+        description='A1 P3a-2c: 仅在本轮实际 GRASP_POSE_REACHED 后用 Grasp action 渐进闭合；'
+                    '两指对 obj_rod_01 的新鲜接触与稳定gap分别验收；不 weld/attach/lift/carry')
+    grasp_model_arg = DeclareLaunchArgument(
+        'grasp_model', default_value='none',
+        description='显式抓持模型：none（默认）| ideal_weld（A1完整搬运基线，理想刚性抓持；不代表摩擦夹持）')
+    descent_steps_arg = DeclareLaunchArgument(
+        'descent_steps', default_value='20',
+        description='下降轨迹的分段数（目标点 = 分段数 + 1，含两端）')
+    descent_max_xy_dev_m_arg = DeclareLaunchArgument(
+        'descent_max_xy_dev_m', default_value='0.002',
+        description='整段实测 XY 偏离竖直线的上限（米）')
+    descent_max_angle_dev_deg_arg = DeclareLaunchArgument(
+        'descent_max_angle_dev_deg', default_value='1.0',
+        description='整段实测姿态偏离首点的上限（度）')
+    mujoco_get_body_state_service_arg = DeclareLaunchArgument(
+        'mujoco_get_body_state_service', default_value='/get_body_state',
+        description='MuJoCo 物理真值服务；仅用于读取杆的物理位姿，绝不代替物理测量')
+    mujoco_rod_body_name_arg = DeclareLaunchArgument(
+        'mujoco_rod_body_name', default_value='obj_rod_01',
+        description='MuJoCo 中铝杆的 body 名')
+    mujoco_admin_hash_arg = DeclareLaunchArgument(
+        'mujoco_admin_hash', default_value='',
+        description='MuJoCo 管理哈希；默认为空，由仿真自身决定是否接受')
+    mujoco_truth_timeout_sec_arg = DeclareLaunchArgument(
+        'mujoco_truth_timeout_sec', default_value='2.0',
+        description='单次 MuJoCo 真值读取的有界等待（秒）')
+    descent_truth_pos_tol_m_arg = DeclareLaunchArgument(
+        'descent_truth_pos_tol_m', default_value='0.005',
+        description='下降前物理杆真值与冻结参考允许的位置差（米）')
+    descent_truth_angle_tol_deg_arg = DeclareLaunchArgument(
+        'descent_truth_angle_tol_deg', default_value='5.0',
+        description='下降前物理杆真值与冻结参考允许的角度差（度）')
+    descent_negative_final_arg = DeclareLaunchArgument(
+        'descent_negative_final', default_value='',
+        description='仅供验证的负例注入: position | collision | 空。破坏最终轨迹以证明拒绝路径生效，'
+                    '被拒时不下发任何运动')
+    descent_negative_truth_arg = DeclareLaunchArgument(
+        'descent_negative_truth', default_value='',
+        description='仅供验证的负例注入: unavailable | offset | 空。使真值不可用或偏移，'
+                    '证明此时不下发下降')
+    joint_states_topic_arg = DeclareLaunchArgument(
+        'joint_states_topic', default_value='/joint_states',
+        description='到位新鲜度所使用的关节状态话题（序号 + 到达时刻）')
 
     # --- A1 P3a-2a: gripper interface + empty-load cycle ---
     gripper_total_timeout_sec_arg = DeclareLaunchArgument(
@@ -687,6 +756,21 @@ def generate_launch_description():
         p2b_max_joint_step_rad_arg,
         p2b_midpath_negative_arg,
         pregrasp_execute_arg,
+        grasp_descent_arg,
+        grasp_contact_close_arg,
+        grasp_model_arg,
+        descent_steps_arg,
+        descent_max_xy_dev_m_arg,
+        descent_max_angle_dev_deg_arg,
+        mujoco_get_body_state_service_arg,
+        mujoco_rod_body_name_arg,
+        mujoco_admin_hash_arg,
+        mujoco_truth_timeout_sec_arg,
+        descent_truth_pos_tol_m_arg,
+        descent_truth_angle_tol_deg_arg,
+        descent_negative_final_arg,
+        descent_negative_truth_arg,
+        joint_states_topic_arg,
         pregrasp_vel_scale_arg,
         pregrasp_acc_scale_arg,
         pregrasp_arrival_pos_tol_m_arg,

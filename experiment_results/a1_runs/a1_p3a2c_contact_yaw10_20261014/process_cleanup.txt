@@ -1,0 +1,6 @@
+Only this run's owned process groups were signaled after identifying the launch parameter omission:
+task pgid 152582: SIGINT
+feedback recorder pgid 152564: SIGINT
+truth runner pgid 152494: SIGINT
+single simulator pgid 150898: SIGINT
+No broad process cleanup was used.

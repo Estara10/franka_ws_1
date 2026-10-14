@@ -14,7 +14,7 @@
 
 - `src/carry_task_state_machine.cpp`
 - `src/dual_arm_controller.cpp`
-- `src/gripper_controller.cpp`
+- `src/gripper_client.cpp`（夹爪 action 客户端；与 ROS 无关的协议语义在 `src/gripper_protocol.cpp`）
 - `src/adaptive_compliance_supervisor.cpp`
 
 状态机：

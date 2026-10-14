@@ -13,6 +13,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace a1g {
 
@@ -41,6 +42,12 @@ struct ResultClassification {
 // measured gap happens to sit near the target. An aborted close means the
 // gripper stopped early; whether that was object contact is unproven here and
 // belongs to the next phase, where it can be checked against the object.
+// `soft_limit_tol_m` is the tolerance allowed ABOVE the model maximum, because
+// MuJoCo joint limits are soft: a position actuator holding at the limit settles
+// a fraction of a millimetre past it. 1 mm covers that observed settling while
+// still rejecting the multi-millimetre excursion (4.3 mm) this check was added
+// for -- it is a stated physical tolerance, not a widening to force a pass.
+//
 // `max_gap_m` is the model's maximum opening. A SUCCEEDED result whose reported
 // gap is non-finite, negative or beyond that maximum is rejected rather than
 // accepted: an abnormal value must not be dressed up as success, and the value
@@ -50,7 +57,8 @@ ResultClassification classifyResult(ActionCode code,
                                     bool reached_goal,
                                     double achieved_gap_m,
                                     double commanded_gap_m,
-                                    double max_gap_m = 0.08);
+                                    double max_gap_m = 0.08,
+                                    double soft_limit_tol_m = 1e-3);
 
 // What to do when the goal-acceptance response arrives late.
 enum class LateAcceptance { PROCEED, REJECTED, CANCEL_LATE, UNKNOWN_STOP };
@@ -75,5 +83,24 @@ bool stageWithinBudget(double elapsed_total_sec, double budget_sec);
 // Total-time helper: how long a stage may still wait so that the overall call
 // stays inside `total_budget_sec`. Never negative.
 double remainingBudget(double elapsed_total_sec, double total_budget_sec);
+
+/// Task acceptance window for one simulated gripper. Requires fresh samples
+/// and both named fingers to contact the rod throughout the window.
+class BilateralContactWindow {
+public:
+  BilateralContactWindow(std::size_t required_samples, double max_gap_spread_m);
+  bool update(unsigned long long seq, double q1_m, double q2_m,
+              bool left_finger_rod_contact, bool right_finger_rod_contact);
+  bool confirmed() const;
+  std::size_t count() const { return gaps_.size(); }
+  unsigned long long lastSeq() const { return last_seq_; }
+  double gap() const { return gaps_.empty() ? 0.0 : gaps_.back(); }
+  double spread() const;
+private:
+  std::size_t required_;
+  double max_gap_spread_m_;
+  unsigned long long last_seq_ {0};
+  std::vector<double> gaps_;
+};
 
 }  // namespace a1g
