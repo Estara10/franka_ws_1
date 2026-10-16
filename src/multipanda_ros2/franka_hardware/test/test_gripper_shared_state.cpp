@@ -390,3 +390,32 @@ TEST(StabilityWindow, WindowKeepsSlidingAndStillCatchesLaterDrift) {
 }
 
 }  // namespace
+
+TEST(GripperForceHold, HalfTendonDeliversRequestedFingerForceAndClampsEmptyGap) {
+  const double target=franka_gripper::forceHoldPositionTarget(0.021,1200.0,2.0,0.0,0.08);
+  const double tendon_force=1200.0*(target-0.021);
+  EXPECT_NEAR(0.5*tendon_force,-2.0,1e-12);
+  const double empty=franka_gripper::forceHoldPositionTarget(0.001,1200.0,2.0,0.0,0.08);
+  EXPECT_DOUBLE_EQ(empty,0.0);
+  EXPECT_LE(std::abs(0.5*1200.0*(empty-0.001)),2.0);
+}
+TEST(GripperForceHold, OrdinaryPositionOrStopClearsHoldAndApproachCap) {
+  auto state=std::make_shared<GripperSharedState>();
+  EXPECT_FALSE(franka_gripper::writeForceHold(state,2.0));
+  state->force_hold_supported=true;
+  ASSERT_TRUE(writeCommand(state,0.02,2.0));
+  EXPECT_DOUBLE_EQ(readFeedback(state).closing_force_limit_per_finger_n,2.0);
+  ASSERT_TRUE(franka_gripper::writeForceHold(state,2.0));
+  EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,2.0);
+  ASSERT_TRUE(writeCommand(state,0.04));
+  EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,0.0);
+  EXPECT_DOUBLE_EQ(readFeedback(state).closing_force_limit_per_finger_n,0.0);
+}
+TEST(GripperForceHold, InvalidRequestsNeverChangeExistingMode) {
+  auto state=std::make_shared<GripperSharedState>(); state->force_hold_supported=true;
+  ASSERT_TRUE(franka_gripper::writeForceHold(state,2.0));
+  EXPECT_FALSE(franka_gripper::writeForceHold(state,6.0));
+  EXPECT_FALSE(franka_gripper::writeForceHold(state,std::numeric_limits<double>::quiet_NaN()));
+  EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,2.0);
+  EXPECT_TRUE(std::isnan(franka_gripper::forceHoldPositionTarget(0.02,0.0,2.0,0.0,0.08)));
+}

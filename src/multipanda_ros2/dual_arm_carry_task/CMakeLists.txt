@@ -40,7 +40,7 @@ include_directories(
 
 # Dual arm carry task node
 add_executable(dual_arm_carry_task_node
-  src/carry_task_state_machine.cpp src/dual_arm_controller.cpp
+  src/carry_task_state_machine.cpp src/dual_arm_controller.cpp src/contact_load_probe.cpp
 )
 
 add_executable(communication_latency_monitor_node

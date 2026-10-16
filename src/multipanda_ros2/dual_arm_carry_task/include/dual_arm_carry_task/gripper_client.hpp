@@ -112,7 +112,7 @@ public:
     bool controlDualGrippers(double position);
     /// Explicit object-contact path. Uses the simulator's Grasp action contract;
     /// each action succeeds only after bilateral finger-to-rod feedback.
-    bool controlDualGrippersContact();
+    bool controlDualGrippersContact(double force_per_finger_n = 0.0);
 
     /// Drives one gripper. Kept for the single-arm entry points.
     bool controlGripper(const std::string& arm_name, double position);

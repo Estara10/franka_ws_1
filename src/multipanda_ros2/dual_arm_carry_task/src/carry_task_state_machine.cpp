@@ -127,7 +127,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<double>("gripper_total_timeout_sec", 20.0);
         this->declare_parameter<double>("gripper_server_timeout_sec", 10.0);
         this->declare_parameter<double>("gripper_goal_timeout_sec", 5.0);
-        this->declare_parameter<double>("gripper_result_timeout_sec", 8.0);
+        this->declare_parameter<double>("gripper_result_timeout_sec", 14.0);
         this->declare_parameter<double>("gripper_max_effort", 100.0);
         this->declare_parameter<double>("gripper_close_threshold", 0.03);
         this->declare_parameter<bool>("gripper_selftest", false);
@@ -435,18 +435,18 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             publish_stage(task_stage_pub_, getCurrentState());
             return;
         }
-        if (grasp_model_ != "none" && grasp_model_ != "ideal_weld") {
-            RCLCPP_ERROR(this->get_logger(), "✗ grasp_model must be none or ideal_weld");
+        if (grasp_model_ != "none" && grasp_model_ != "ideal_weld" && grasp_model_ != "contact_probe") {
+            RCLCPP_ERROR(this->get_logger(), "✗ grasp_model must be none, ideal_weld or contact_probe");
             setCurrentState(TaskState::ERROR);
             publish_stage(task_stage_pub_, getCurrentState());
             return;
         }
-        if (grasp_model_ == "ideal_weld" &&
+        if ((grasp_model_ == "ideal_weld" || grasp_model_ == "contact_probe") &&
             (!prepare_only_ || rod_pose_source_ != kRodPoseSourceA1Truth || !p2a_check_ ||
              !p2b_check_ || !pregrasp_execute_ || !grasp_descent_ || grasp_contact_close_ ||
              gripper_selftest_)) {
             RCLCPP_ERROR(this->get_logger(),
-                         "✗ ideal_weld requires A1 truth, prepare_only, P2a/P2b, pregrasp_execute, "
+                         "✗ ideal_weld/contact_probe requires A1 truth, prepare_only, P2a/P2b, pregrasp_execute, "
                          "grasp_descent; it is exclusive with contact-close and gripper-selftest");
             setCurrentState(TaskState::ERROR);
             publish_stage(task_stage_pub_, getCurrentState());

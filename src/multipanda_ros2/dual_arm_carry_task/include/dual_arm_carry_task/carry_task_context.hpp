@@ -229,6 +229,21 @@ public:
         std::string arm;
         double q1 {0.0};
         double q2 {0.0};
+        double command_per_finger_m {0.0};
+        double closing_force_limit_per_finger_n {0.0};
+        std::uint32_t rod_pad_contact_count {0};
+        double normal_left_n {0.0};
+        double normal_right_n {0.0};
+        double tangent_left_n {0.0};
+        double tangent_right_n {0.0};
+        double rod_force_z_n {0.0};
+        double simulation_time {0.0};
+        double hold_force_per_finger_n {0.0};
+        bool force_hold_supported {false};
+        bool weld_left_active {false};
+        bool weld_right_active {false};
+        bool rod_constraint_active {false};
+
         bool left_contact {false};
         bool right_contact {false};
         unsigned long long seq {0};
@@ -245,6 +260,21 @@ public:
         sample.arm = msg.arm;
         sample.q1 = msg.finger_q1;
         sample.q2 = msg.finger_q2;
+        sample.command_per_finger_m = msg.command_per_finger_m;
+        sample.closing_force_limit_per_finger_n = msg.closing_force_limit_per_finger_n;
+        sample.normal_left_n = msg.normal_left_n;
+        sample.normal_right_n = msg.normal_right_n;
+        sample.tangent_left_n = msg.tangent_left_n;
+        sample.tangent_right_n = msg.tangent_right_n;
+        sample.rod_force_z_n = msg.rod_force_z_n;
+        sample.simulation_time = msg.simulation_time;
+        sample.rod_pad_contact_count = msg.rod_pad_contact_count;
+        sample.hold_force_per_finger_n = msg.hold_force_per_finger_n;
+        sample.force_hold_supported = msg.force_hold_supported;
+        sample.weld_left_active = msg.weld_left_active;
+        sample.weld_right_active = msg.weld_right_active;
+        sample.rod_constraint_active = msg.rod_constraint_active;
+
         sample.left_contact = msg.left_finger_rod_contact;
         sample.right_contact = msg.right_finger_rod_contact;
         sample.seq = msg.update_seq;
@@ -279,7 +309,7 @@ public:
     double gripper_total_timeout_sec_ {20.0};
     double gripper_server_timeout_sec_ {10.0};
     double gripper_goal_timeout_sec_ {5.0};
-    double gripper_result_timeout_sec_ {8.0};
+    double gripper_result_timeout_sec_ {14.0};
     double gripper_max_effort_ {100.0};
     // command.position is a per-finger displacement; below this the call counts
     // as a closing move for result interpretation.

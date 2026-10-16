@@ -1,4 +1,16 @@
-find_package(mujoco QUIET NO_MODULE)
+# Prefer an explicitly selected MuJoCo tarball.  The ROS Humble vendor package
+# also exports a `mujoco` CMake config, but its version may not match this
+# package's API (the bundled viewer currently targets MuJoCo 3.2.x).
+if(DEFINED MUJOCO_DIR OR DEFINED ENV{MUJOCO_DIR})
+	set(_mujoco_explicit_dir "${MUJOCO_DIR}")
+	if(NOT DEFINED MUJOCO_DIR)
+		set(_mujoco_explicit_dir "$ENV{MUJOCO_DIR}")
+	endif()
+	set(MUJOCO_DIR "${_mujoco_explicit_dir}" CACHE PATH "Path to MuJoCo installation directory" FORCE)
+	set(mujoco_FOUND FALSE)
+else()
+	find_package(mujoco QUIET NO_MODULE)
+endif()
 
 if (mujoco_FOUND AND mujoco_FIND_VERSION)
 	if (NOT mujoco_FIND_VERSION_MAJOR EQUAL mujoco_VERSION_MAJOR OR mujoco_FIND_VERSION_MINOR GREATER mujoco_VERSION_MINOR OR mujoco_FIND_VERSION_PATCH GREATER mujoco_VERSION_PATCH)

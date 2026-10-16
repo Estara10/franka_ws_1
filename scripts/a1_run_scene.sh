@@ -122,6 +122,8 @@ usage: a1_run_scene.sh [options]
                         carried. Exit code follows the P3A2B result.
   --grasp-contact-close A1 P3a-2c: after GRASP_POSE_REACHED, close progressively and
                         require fresh bilateral finger-to-rod contact; no weld/attach/lift/carry.
+  --grasp-model contact_probe
+                        Contact-only 5cm lift, 2s hold, lower and release; no weld, no full carry.
   --grasp-model ideal_weld
                         S1: explicit ideal rigid grasp, after A1 verified descent complete
                         lift/transport/rotate/place/release/retreat; friction grip is not validated.
@@ -185,13 +187,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "${GRASP_MODEL}" != "none" && "${GRASP_MODEL}" != "ideal_weld" ]]; then
-  echo "error: --grasp-model must be none or ideal_weld" >&2; exit 3
+if [[ "${GRASP_MODEL}" != "none" && "${GRASP_MODEL}" != "ideal_weld" && "${GRASP_MODEL}" != "contact_probe" ]]; then
+  echo "error: --grasp-model must be none, ideal_weld or contact_probe" >&2; exit 3
 fi
-if [[ "${GRASP_MODEL}" == "ideal_weld" ]]; then
+if [[ "${GRASP_MODEL}" == "ideal_weld" || "${GRASP_MODEL}" == "contact_probe" ]]; then
   GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1
   if [[ "${GRASP_CONTACT_CLOSE}" -eq 1 || "${GRIPPER_SELFTEST}" -eq 1 ]]; then
-    echo "error: ideal_weld is exclusive with contact-close and gripper selftest" >&2; exit 3
+    echo "error: ideal_weld/contact_probe is exclusive with contact-close and gripper selftest" >&2; exit 3
   fi
 fi
 
@@ -323,6 +325,8 @@ record_prepare_status() {
     printf '  "p2b_check_enabled": %s,\n' "$([[ "${P2B_CHECK}" -eq 1 ]] && echo true || echo false)"
     printf '  "p2b_result_line": "%s",\n' "$(grep -m1 '\[P2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P2B_RESULT\]/[P2B_RESULT]/' | tr -d '"\\')"
     printf '  "p2_acceptance": %s,\n' "$(p2_acceptance_true && echo true || echo false)"
+    printf '  "grasp_model": "%s",\n' "${GRASP_MODEL}"
+    printf '  "contact_probe_result_line": "%s",\n' "$(grep -m1 '\[CONTACT_PROBE_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[CONTACT_PROBE_RESULT\]/[CONTACT_PROBE_RESULT]/' | tr -d '"\\')"
     printf '  "grasp_descent_enabled": %s,\n' "$([[ "${GRASP_DESCENT}" -eq 1 ]] && echo true || echo false)"
     printf '  "grasp_contact_close_enabled": %s,\n' "$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)"
 printf '  "p3a2b_result_line": "%s",\n' "$(grep -m1 '\[P3A2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P3A2B_RESULT\]/[P3A2B_RESULT]/' | tr -d '"\\')"
@@ -505,11 +509,27 @@ fi
 
 # --- Start exactly one simulation instance ----------------------------------
 SIM_LOG="${RUN_DIR}/sim_dual_moveit.log"
+# Contact-probe policy: real-contact load validation must not simultaneously
+# soften the arm position loop with the internal adaptive-compliance baseline.
+# Keep ideal_weld and all other modes unchanged; allow an explicit opt-out for
+# controlled A/B experiments with CONTACT_PROBE_RIGID=false.
+CONTACT_PROBE_RIGID="${CONTACT_PROBE_RIGID:-true}"
+TASK_CONTROL_MODE="compliant"
+if [[ "${GRASP_MODEL}" == "contact_probe" && "${CONTACT_PROBE_RIGID}" == "true" ]]; then
+  export MJ_INTERNAL_COMPLIANCE_ENABLED=false
+  TASK_CONTROL_MODE="rigid"
+  echo "[contact_probe] rigid validation profile: internal MuJoCo compliance disabled"
+fi
+if [[ "${GRASP_MODEL}" == "contact_probe" ]]; then
+  export CONTACT_PROBE_SINGLE_PAD=true
+  echo "[contact_probe] single-primary-pad contact profile enabled"
+fi
+
 # A1 P3a-2a only: have each simulated gripper node append a plain CSV of its own
 # real finger feedback (q1, q2, total gap, sequence number, command, target).
 # Off for every other mode, and read by the gripper nodes at construction, so it
 # must be exported before the simulation launch below.
-if [[ "${GRIPPER_SELFTEST}" -eq 1 || "${GRASP_CONTACT_CLOSE}" -eq 1 ]]; then
+if [[ "${GRIPPER_SELFTEST}" -eq 1 || "${GRASP_CONTACT_CLOSE}" -eq 1 || "${GRASP_MODEL}" == "contact_probe" ]]; then
   export GRIPPER_TRACE_CSV="${RUN_DIR}/gripper_fingers"
   echo "[gripper] raw finger command/feedback trace enabled: ${GRIPPER_TRACE_CSV}_<robot>.csv"
 fi
@@ -688,7 +708,7 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
       rod_pose_source:=a1_truth prepare_only:=true expected_run_id:="${RUN_ID}" \
       a1_truth_topic:="${TRUTH_TOPIC}" use_vision:=false \
       "${P2A_ARGS[@]}" \
-      control_mode:=compliant \
+      control_mode:="${TASK_CONTROL_MODE}" \
       enable_latency_monitor:=false enable_task_metrics_monitor:=false \
       > "${RUN_DIR}/task_launch.log" 2>&1 &
     TASK_PID=$!
@@ -699,6 +719,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     TASK_DEADLINE=$((SECONDS + TASK_TIMEOUT))
     TASK_STATE=""
     while (( SECONDS < TASK_DEADLINE )); do
+      if [[ "${GRASP_MODEL}" == "contact_probe" ]] && grep -q '\[CONTACT_PROBE_RESULT\] state=DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+        TASK_STATE="DONE"; break
+      fi
       if grep -q '\[S1_IDEAL_WELD_RESULT\] state=DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="DONE"; break
       fi
@@ -733,6 +756,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     if [[ "${TASK_STATE}" == "DONE" && "${GRASP_MODEL}" == "ideal_weld" ]]; then
       RC=0
       echo "[prepare] S1 ideal_weld complete; rigid ideal grasp only (friction/slip unverified)"
+    elif [[ "${TASK_STATE}" == "DONE" && "${GRASP_MODEL}" == "contact_probe" ]]; then
+      RC=0
+      echo "[prepare] contact_probe complete: no-weld lift/hold/lower/release only; full transport unverified"
     elif [[ "${TASK_STATE}" == "GRASP_CONTACT_CONFIRMED" ]]; then
       if grasp_contact_confirmed; then
         RC=0

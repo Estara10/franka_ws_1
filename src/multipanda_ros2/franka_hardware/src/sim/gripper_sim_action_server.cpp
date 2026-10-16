@@ -139,7 +139,7 @@ GripperSimActionServer::GripperSimActionServer(const rclcpp::NodeOptions& option
       this->create_publisher<sensor_msgs::msg::JointState>("~/joint_states", 1);
   this->timer_ = this->create_wall_timer(rclcpp::WallRate(kStatePublishRate).period(),
                                          [this]() { return publishGripperState(); });
-  openTraceIfRequested(robot_name);
+  openTraceIfRequested(robot_name_);
   RCLCPP_INFO(get_logger(), "Started gripper sim");
 }
 
@@ -160,8 +160,8 @@ void GripperSimActionServer::openTraceIfRequested(const std::string& robot_name)
   // the actuator. The column was previously labelled `command_per_finger_m`,
   // which was wrong; the label is fixed for future traces and the existing CSVs
   // are left as they are.
-  trace_ << "t_sec,robot,commanded_gap_m,q1_m,q2_m,total_gap_m,feedback_seq,target_gap_m,"
-            "left_finger_obj_rod_01,right_finger_obj_rod_01,phase\n";
+  trace_ << "t_sec,robot,commanded_gap_m,command_per_finger_m,closing_force_limit_per_finger_n,q1_m,q2_m,total_gap_m,feedback_seq,target_gap_m,"
+            "left_finger_obj_rod_01,right_finger_obj_rod_01,rod_pad_contact_count,phase,normal_left_n,normal_right_n,tangent_left_n,tangent_right_n,force_per_finger_n,sim_time,weld_left,weld_right,rod_constraint\n";
   trace_.flush();
   RCLCPP_INFO(get_logger(), "[trace] writing raw finger feedback to %s", path.c_str());
 }
@@ -174,10 +174,13 @@ void GripperSimActionServer::traceRow(double commanded_m, double target_m,
   const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() -
                                                  trace_begin_).count();
   std::lock_guard<std::mutex> lock(trace_mutex_);
-  trace_ << t << ',' << this->get_name() << ',' << commanded_m << ',' << fb.finger_q1 << ','
-         << fb.finger_q2 << ',' << fb.totalGap() << ',' << fb.feedback_seq << ',' << target_m
+  trace_ << t << ',' << this->get_name() << ',' << commanded_m << ','
+         << fb.command_per_finger << ',' << fb.closing_force_limit_per_finger_n << ','
+         << fb.finger_q1 << ',' << fb.finger_q2 << ',' << fb.totalGap() << ',' << fb.feedback_seq << ',' << target_m
          << ',' << (fb.left_finger_rod_contact ? 1 : 0) << ','
-         << (fb.right_finger_rod_contact ? 1 : 0) << ',' << phase << '\n';
+         << (fb.right_finger_rod_contact ? 1 : 0) << ',' << fb.rod_pad_contact_count << ',' << phase << ','
+         << fb.normal_left_n << ',' << fb.normal_right_n << ',' << fb.tangent_left_n << ',' << fb.tangent_right_n << ','
+         << fb.hold_force_per_finger_n << ',' << fb.simulation_time << ',' << fb.weld_left_active << ',' << fb.weld_right_active << ',' << fb.rod_constraint_active << '\n';
   // Flushed every row: a crash must not lose the run that explains it.
   trace_.flush();
 }
@@ -237,8 +240,11 @@ void GripperSimActionServer::executeGrasp(const std::shared_ptr<GoalHandleGrasp>
   };
   executeCommand(goal_handle, Task::kGrasp, command);
 }
-bool GripperSimActionServer::simGripperGrasp(double width, double speed, double /*force*/,
+bool GripperSimActionServer::simGripperGrasp(double width, double speed, double force,
                                               double /*epsilon_inner*/, double /*epsilon_outer*/){
+  if (!std::isfinite(force) || force < 0.0 || force > 5.0) return false;
+  if (force > 0.0) return forceContactGrasp(width, speed, force);
+  // Zero-force legacy Grasp keeps its existing position-preload semantics.
   // force / epsilon remain unimplemented (the real gripper does not expose
   // them), so no effort estimate is claimed here. This explicit Grasp action
   // is the object-contact mode; plain Move/GripperCommand retain empty-target
@@ -254,6 +260,119 @@ bool GripperSimActionServer::simGripperGrasp(double width, double speed, double 
       arrival.has_snapshot ? arrival.snapshot.totalGap() : measuredGap(),
       arrival.has_snapshot ? arrival.snapshot.feedback_seq : 0ULL);
   return arrival.contact_confirmed;
+}
+
+// Positive-force Grasp: rate-limited approach, then persistent bounded tendon
+// force. A missing contact frame does not remove the holding drive. This is
+// contact establishment only; the task separately proves unsupported loading.
+bool GripperSimActionServer::forceContactGrasp(double width, double speed, double force) {
+  if (!std::isfinite(width) || width != 0.0 || !std::isfinite(speed) || speed <= 0.0 ||
+      speed > 0.02 || !readFeedback(gripper_states_ptr_).force_hold_supported) return false;
+  double commanded = measuredGap();
+  if (!std::isfinite(commanded)) return false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
+  bool holding = false;
+  double ramp_force = 0.0;
+  unsigned long long last_seq = 0;
+  double last_sim_time = -1.0;
+  struct Sample { double gap; bool left; bool right; double time; };
+  std::vector<Sample> samples;
+  std::string exit_reason = "deadline";
+  while (rclcpp::ok() && !is_canceled_ && std::chrono::steady_clock::now() < deadline) {
+    const auto fb = readFeedback(gripper_states_ptr_);
+    if (!fb.valid) {
+      exit_reason = "feedback_invalid";
+      RCLCPP_ERROR(get_logger(),
+          "[CONTACT_FORCE] abort feedback_invalid valid=%d seq=%llu sim_time=%.6f q=(%.6f,%.6f)",
+          fb.valid ? 1 : 0, fb.feedback_seq, fb.simulation_time, fb.finger_q1, fb.finger_q2);
+      break;
+    }
+    if (fb.weld_left_active || fb.weld_right_active || fb.rod_constraint_active) {
+      exit_reason = "constraint_active";
+      RCLCPP_ERROR(get_logger(),
+          "[CONTACT_FORCE] abort constraint_active weld=(%d,%d) rod_constraint=%d",
+          fb.weld_left_active ? 1 : 0, fb.weld_right_active ? 1 : 0,
+          fb.rod_constraint_active ? 1 : 0);
+      break;
+    }
+    if (fb.feedback_seq > last_seq && fb.simulation_time > last_sim_time) {
+      last_seq = fb.feedback_seq;
+      last_sim_time = fb.simulation_time;
+      if (!holding && fb.left_finger_rod_contact && fb.right_finger_rod_contact) {
+        holding = true;
+        RCLCPP_INFO(get_logger(),
+            "[CONTACT_FORCE] approach->hold geometric_bilateral_contact gap=%.6f "
+            "force_per_finger=%.2f N; load_unverified",
+            fb.totalGap(), force);
+      }
+      if (holding) {
+        ramp_force = std::min(force, ramp_force + 0.05); // <=5 N/s at the 100 Hz command loop
+        const bool bilateral_force = fb.left_finger_rod_contact && fb.right_finger_rod_contact &&
+            fb.normal_left_n >= 0.25 && fb.normal_right_n >= 0.25;
+        if (!writeForceHold(gripper_states_ptr_, ramp_force)) {
+          exit_reason = "write_force_hold_failed";
+          RCLCPP_ERROR(get_logger(),
+              "[CONTACT_FORCE] abort write_force_hold_failed ramp=%.3f supported=%d "
+              "q=(%.6f,%.6f) contacts=(%d,%d)",
+              ramp_force, fb.force_hold_supported ? 1 : 0, fb.finger_q1, fb.finger_q2,
+              fb.left_finger_rod_contact ? 1 : 0, fb.right_finger_rod_contact ? 1 : 0);
+          break;
+        }
+        if (ramp_force >= force) {
+          samples.push_back({fb.totalGap(), bilateral_force, bilateral_force,
+                             fb.simulation_time});
+          if (samples.size() > 20) samples.erase(samples.begin());
+          double lo=fb.totalGap(), hi=lo;
+          int left=0, right=0;
+          for (const auto& sample : samples) {
+            lo=std::min(lo,sample.gap); hi=std::max(hi,sample.gap);
+            left+=sample.left; right+=sample.right;
+          }
+          if (samples.size()==20 && samples.back().time-samples.front().time >= 0.18 &&
+              left>=16 && right>=16 && hi-lo<=0.0005) {
+            RCLCPP_INFO(get_logger(),
+                "[CONTACT_FORCE] bilateral_force_established samples=20 "
+                "pad_contact_occupancy=(%d,%d) gap_spread=%.6f "
+                "normal=(%.3f,%.3f) persistent_hold=true; load_unverified",
+                left,right,hi-lo,fb.normal_left_n,fb.normal_right_n);
+            return true;
+          }
+        }
+      } else {
+        commanded=std::max(width,commanded-speed*dt);
+        if (!writeCommand(gripper_states_ptr_, commanded/2.0, force)) {
+          exit_reason = "write_approach_command_failed";
+          RCLCPP_ERROR(get_logger(),
+              "[CONTACT_FORCE] abort write_approach_command_failed command=%.6f force=%.3f supported=%d",
+              commanded, force, fb.force_hold_supported ? 1 : 0);
+          break;
+        }
+        if (fb.totalGap() < 0.005) {
+          exit_reason = "empty_closure";
+          RCLCPP_ERROR(get_logger(), "[CONTACT_FORCE] abort empty_closure gap=%.6f", fb.totalGap());
+          break;
+        } // empty closure is never success
+      }
+      traceRow(commanded, width, fb, holding ? "force_hold" : "force_approach");
+    }
+    std::this_thread::sleep_for(std::chrono::duration<double>(dt));
+  }
+  // No load has been commanded here. Stop the approach; explicit Stop/Move
+  // also disables force mode. The caller will never lift on this failure.
+  const double gap=measuredGap();
+  const auto final_fb = readFeedback(gripper_states_ptr_);
+  if (is_canceled_) exit_reason = "canceled";
+  else if (!rclcpp::ok()) exit_reason = "rclcpp_shutdown";
+  else if (std::chrono::steady_clock::now() >= deadline && exit_reason == "deadline") exit_reason = "deadline";
+  if (std::isfinite(gap)) writeGapCommand(gap);
+  RCLCPP_ERROR(get_logger(),
+      "[CONTACT_FORCE] failed reason=%s holding=%d ramp_force=%.3f samples=%zu "
+      "final_gap=%.6f final_seq=%llu final_sim_time=%.6f final_hold_force=%.3f "
+      "final_contacts=(%d,%d) no_load_proven=true",
+      exit_reason.c_str(), holding ? 1 : 0, ramp_force, samples.size(), gap,
+      final_fb.feedback_seq, final_fb.simulation_time, final_fb.hold_force_per_finger_n,
+      final_fb.left_finger_rod_contact ? 1 : 0, final_fb.right_finger_rod_contact ? 1 : 0);
+  return false;
 }
 
 void GripperSimActionServer::onExecuteGripperCommand(
@@ -436,7 +555,7 @@ GripperSimActionServer::GripperArrival GripperSimActionServer::driveToGap(
   GripperArrival arrival;
   constexpr double kMaxWidth = 0.08;
   constexpr int kStableSamples = 10;     // genuinely NEW samples inside tolerance
-  constexpr double kStableDelta = 2e-4;  // whole-window spread allowed (m)
+  constexpr double kStableDelta = 5e-4;  // contact-establishment gap spread (m)
   constexpr double kMinSpeed = 1e-4;     // m/s: below this the command step is meaningless
 
   if(!std::isfinite(width_m)){
@@ -459,11 +578,11 @@ GripperSimActionServer::GripperArrival GripperSimActionServer::driveToGap(
   // The speed really bounds the command: no floor is added, so no step can
   // exceed speed*dt.
   const double max_step = speed_m_s * dt;
-  // Explicit Grasp contact gets a 6 s protocol budget. Its client waits up to
-  // 7.5 s for the result, leaving 1.5 s for action scheduling/serialization. The
+  // Explicit Grasp contact gets a 12 s protocol budget. Its client waits up to
+  // 13.5 s for the result, leaving 1.5 s for action scheduling/serialization. The
   // empty-target Move/GripperCommand paths keep their historical 8 s budget.
   const auto deadline = std::chrono::steady_clock::now() +
-      (hold_after_bilateral_contact ? std::chrono::seconds(6) : std::chrono::seconds(8));
+      (hold_after_bilateral_contact ? std::chrono::seconds(12) : std::chrono::seconds(8));
 
   double commanded = measuredGap();
   if(!std::isfinite(commanded)){
@@ -472,7 +591,7 @@ GripperSimActionServer::GripperArrival GripperSimActionServer::driveToGap(
     return arrival;
   }
   StabilityWindow window(kStableSamples, tol_m, kStableDelta);
-  BilateralContactHold contact_hold(16, kStableDelta);
+  BilateralContactHold contact_hold(12, kStableDelta);
   int bilateral_contact_samples = 0;
   unsigned long long last_contact_seq = 0;
   std::vector<double> contact_gaps;
@@ -663,9 +782,24 @@ void GripperSimActionServer::publishGripperState() {
   contact.arm = robot_name_;
   contact.finger_q1 = fb.finger_q1;
   contact.finger_q2 = fb.finger_q2;
+  contact.command_per_finger_m = fb.command_per_finger;
+  contact.closing_force_limit_per_finger_n = fb.closing_force_limit_per_finger_n;
   contact.left_finger_rod_contact = fb.left_finger_rod_contact;
   contact.right_finger_rod_contact = fb.right_finger_rod_contact;
   contact.update_seq = fb.feedback_seq;
+  contact.normal_left_n = fb.normal_left_n;
+  contact.normal_right_n = fb.normal_right_n;
+  contact.tangent_left_n = fb.tangent_left_n;
+  contact.tangent_right_n = fb.tangent_right_n;
+  contact.rod_force_z_n = fb.rod_force_z_n;
+  contact.simulation_time = fb.simulation_time;
+  contact.rod_pad_contact_count = fb.rod_pad_contact_count;
+  contact.hold_force_per_finger_n = fb.hold_force_per_finger_n;
+  contact.force_hold_supported = fb.force_hold_supported;
+  contact.weld_left_active = fb.weld_left_active;
+  contact.weld_right_active = fb.weld_right_active;
+  contact.rod_constraint_active = fb.rod_constraint_active;
+
   contact_feedback_publisher_->publish(contact);
 }
 

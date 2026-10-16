@@ -154,7 +154,9 @@ if (ROS_VERSION EQUAL "1")
   set(GENERATED_HEADERS_INSTALL_DIR "${CATKIN_PACKAGE_INCLUDE_DESTINATION}/${PROJECT_NAME}")
 else()
   set(GENERATED_HEADERS_DIR "${CMAKE_BINARY_DIR}/include")
-  set(GENERATED_HEADERS_INSTALL_DIR "${CMAKE_BINARY_DIR}/include/${PROJECT_NAME}")
+  # Install generated headers into the package prefix.  Using CMAKE_BINARY_DIR
+  # here makes ament's symlink installer try to link a file onto itself.
+  set(GENERATED_HEADERS_INSTALL_DIR "include/${PROJECT_NAME}")
 endif()
 
 include(ConfigureRenderBackend)
@@ -260,7 +262,6 @@ else()
     rosgraph_msgs
     sensor_msgs
     std_srvs
-    mujoco
   )
 
 

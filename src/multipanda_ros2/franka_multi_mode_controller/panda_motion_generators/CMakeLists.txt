@@ -31,6 +31,16 @@ foreach(Dependency IN ITEMS ${THIS_PACKAGE_INCLUDE_DEPENDS})
   find_package(${Dependency} REQUIRED)
 endforeach()
 
+# DQ Robotics' standalone C++ installation does not export a CMake config.
+# CMAKE_PREFIX_PATH can select a workspace-local installation.
+find_path(DQROBOTICS_INCLUDE_DIR NAMES dqrobotics/DQ.h REQUIRED)
+find_library(DQROBOTICS_LIBRARY NAMES dqrobotics REQUIRED)
+add_library(DQRobotics::DQRobotics UNKNOWN IMPORTED)
+set_target_properties(DQRobotics::DQRobotics PROPERTIES
+  IMPORTED_LOCATION "${DQROBOTICS_LIBRARY}"
+  INTERFACE_INCLUDE_DIRECTORIES "${DQROBOTICS_INCLUDE_DIR}"
+)
+
 # Base library
 add_library(${PROJECT_NAME} SHARED
   src/panda_poly_c2_joint_motion_generator.cpp
@@ -42,7 +52,7 @@ ${THIS_PACKAGE_INCLUDE_DEPENDS}
 )
 
 target_link_libraries(panda_motion_generators PUBLIC
-  dqrobotics
+  DQRobotics::DQRobotics
 )
 
 target_include_directories(

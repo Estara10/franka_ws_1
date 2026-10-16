@@ -1,4 +1,5 @@
 # Build Artifacts
+.deps/
 build/
 install/
 log/
@@ -30,3 +31,7 @@ experiment_results/reports/*_sync_samples.csv
 experiment_results/plots/experiment_*.png
 experiment_results/plots/comm_latency_*_samples.png
 MUJOCO_LOG.TXT
+
+# Local A1/MuJoCo run outputs (preserve tracked historical evidence)
+experiment_results/a1_runs/*
+experiment_results/local_reproduction_*/

@@ -17,7 +17,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -44,6 +46,18 @@ struct GripperSharedState {
   /// Target for the tendon position actuator, in metres of PER-FINGER
   /// displacement. Written only by the action server.
   double command_per_finger {0.0};
+  // Commands remain owned by the action server; measurements by physics.
+  double closing_force_limit_per_finger_n {0.0};
+  double hold_force_per_finger_n {0.0};  // 0 = ordinary position mode
+  bool force_hold_supported {false};
+  double normal_left_n {0.0}, normal_right_n {0.0};
+  double tangent_left_n {0.0}, tangent_right_n {0.0};
+  double rod_force_z_n {0.0};
+  double simulation_time {0.0};
+  std::uint32_t rod_pad_contact_count {0};
+  bool weld_left_active {false}, weld_right_active {false};
+  bool rod_constraint_active {false};
+
 
   /// Real MuJoCo finger joint positions in metres. Written only by the physics
   /// thread.
@@ -59,6 +73,18 @@ struct GripperSharedState {
 /// One consistent copy of the shared state, taken under the lock.
 struct GripperFeedback {
   double command_per_finger {0.0};
+  // Commands remain owned by the action server; measurements by physics.
+  double closing_force_limit_per_finger_n {0.0};
+  double hold_force_per_finger_n {0.0};  // 0 = ordinary position mode
+  bool force_hold_supported {false};
+  double normal_left_n {0.0}, normal_right_n {0.0};
+  double tangent_left_n {0.0}, tangent_right_n {0.0};
+  double rod_force_z_n {0.0};
+  double simulation_time {0.0};
+  std::uint32_t rod_pad_contact_count {0};
+  bool weld_left_active {false}, weld_right_active {false};
+  bool rod_constraint_active {false};
+
   double finger_q1 {0.0};
   double finger_q2 {0.0};
   unsigned long long feedback_seq {0};
@@ -81,8 +107,18 @@ inline GripperFeedback readFeedback(const std::shared_ptr<GripperSharedState>& s
   }
   std::lock_guard<std::mutex> lock(state->mutex);
   out.command_per_finger = state->command_per_finger;
+  out.closing_force_limit_per_finger_n = state->closing_force_limit_per_finger_n;
   out.finger_q1 = state->finger_q1;
   out.finger_q2 = state->finger_q2;
+  out.hold_force_per_finger_n = state->hold_force_per_finger_n;
+  out.force_hold_supported = state->force_hold_supported;
+  out.normal_left_n = state->normal_left_n; out.normal_right_n = state->normal_right_n;
+  out.tangent_left_n = state->tangent_left_n; out.tangent_right_n = state->tangent_right_n;
+  out.rod_force_z_n = state->rod_force_z_n;
+  out.simulation_time = state->simulation_time;
+  out.rod_pad_contact_count = state->rod_pad_contact_count;
+  out.weld_left_active = state->weld_left_active; out.weld_right_active = state->weld_right_active;
+  out.rod_constraint_active = state->rod_constraint_active;
   out.feedback_seq = state->feedback_seq;
   out.left_finger_rod_contact = state->left_finger_rod_contact;
   out.right_finger_rod_contact = state->right_finger_rod_contact;
@@ -94,13 +130,37 @@ inline GripperFeedback readFeedback(const std::shared_ptr<GripperSharedState>& s
 /// Writes the actuator target. Returns false (and writes nothing) for a
 /// non-finite request, so a NaN can never be turned into a full close.
 inline bool writeCommand(const std::shared_ptr<GripperSharedState>& state,
-                         double per_finger_m) {
-  if (!state || !std::isfinite(per_finger_m)) {
+                         double per_finger_m, double closing_force_limit_n = 0.0) {
+  if (!state || !std::isfinite(per_finger_m) || !std::isfinite(closing_force_limit_n) ||
+      closing_force_limit_n < 0.0 || closing_force_limit_n > 5.0) {
     return false;
   }
   std::lock_guard<std::mutex> lock(state->mutex);
+  if (closing_force_limit_n > 0.0 && !state->force_hold_supported) return false;
+  state->closing_force_limit_per_finger_n = closing_force_limit_n;
+  state->hold_force_per_finger_n = 0.0;
   state->command_per_finger = per_finger_m;
   return true;
+}
+
+// A positive request is supported only by the checked 0.5/0.5 position tendon.
+// Physics uses ctrl = actuator_length - 2*F/kp (clamped to ctrlrange). With
+// bias=-kp*length and no velocity bias this bounds closing tendon force at 2F.
+inline bool writeForceHold(const std::shared_ptr<GripperSharedState>& state, double force_n) {
+  if (!state || !std::isfinite(force_n) || force_n <= 0.0 || force_n > 5.0) return false;
+  std::lock_guard<std::mutex> lock(state->mutex);
+  if (!state->force_hold_supported) return false;
+  state->closing_force_limit_per_finger_n = force_n;
+  state->hold_force_per_finger_n = force_n;
+  return true;
+}
+inline double forceHoldPositionTarget(double length, double kp, double force_n,
+                                     double min_ctrl, double max_ctrl) {
+  if (!std::isfinite(length) || !std::isfinite(kp) || kp <= 0.0 ||
+      !std::isfinite(force_n) || force_n <= 0.0 || force_n > 5.0 ||
+      !std::isfinite(min_ctrl) || !std::isfinite(max_ctrl) || min_ctrl > max_ctrl)
+    return std::numeric_limits<double>::quiet_NaN();
+  return std::clamp(length - 2.0 * force_n / kp, min_ctrl, max_ctrl);
 }
 
 /// Publishes one physics sample. Called from the physics thread only.

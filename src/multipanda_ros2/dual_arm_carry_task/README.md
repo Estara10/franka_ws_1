@@ -124,3 +124,9 @@ MoveIt 仿真 launch 已包含 MuJoCo，不要重复启动。完整手动顺序�
 ## 许可证
 
 Apache-2.0
+
+## 无 weld 承载实验入口（待用户运行）
+
+新增 `--grasp-model contact_probe`，只做双手接触闭合、5 cm 抬升、2 s 保持、落回与开爪；
+不启用物理 weld，不执行完整运输。原 ideal_weld 与旧接触检查入口保留。
+参数依据、完成标准和运行命令见 [CONTACT_LOAD_PROBE.md](../../../docs/CONTACT_LOAD_PROBE.md)。

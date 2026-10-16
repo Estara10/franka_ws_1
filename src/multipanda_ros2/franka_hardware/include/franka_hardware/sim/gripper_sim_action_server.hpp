@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #pragma once
+#include <atomic>
 
 #include <chrono>
 #include <fstream>
@@ -108,7 +109,7 @@ class GripperSimActionServer : public rclcpp::Node {
   std::string robot_name_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::shared_ptr<rclcpp::Rate> cmd_rate_;
-  bool is_canceled_;
+  std::atomic<bool> is_canceled_{false};
 
   double default_speed_;          // default gripper speed parameter value in m/s
   double default_epsilon_inner_;  // default gripper inner epsilon parameter value in m
@@ -193,6 +194,7 @@ class GripperSimActionServer : public rclcpp::Node {
 
   /// performs grasp
   void executeGrasp(const std::shared_ptr<GoalHandleGrasp>& goal_handle);
+  bool forceContactGrasp(double width, double speed, double force);
   bool simGripperGrasp(double width, double speed, double force, double epsilon_inner,
                            double epsilon_outer);
 

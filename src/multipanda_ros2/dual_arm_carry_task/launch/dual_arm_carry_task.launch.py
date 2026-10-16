@@ -457,7 +457,8 @@ def generate_launch_description():
                     '两指对 obj_rod_01 的新鲜接触与稳定gap分别验收；不 weld/attach/lift/carry')
     grasp_model_arg = DeclareLaunchArgument(
         'grasp_model', default_value='none',
-        description='显式抓持模型：none（默认）| ideal_weld（A1完整搬运基线，理想刚性抓持；不代表摩擦夹持）')
+        description='显式抓持模型：none（默认）| ideal_weld（理想刚性搬运基线）| '
+                    'contact_probe（待验证：无weld夹持、5cm抬升、2s保持、落回释放）')
     descent_steps_arg = DeclareLaunchArgument(
         'descent_steps', default_value='20',
         description='下降轨迹的分段数（目标点 = 分段数 + 1，含两端）')

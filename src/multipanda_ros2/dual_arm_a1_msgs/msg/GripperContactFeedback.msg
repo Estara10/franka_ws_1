@@ -2,6 +2,21 @@ std_msgs/Header header
 string arm
 float64 finger_q1
 float64 finger_q2
+float64 command_per_finger_m
+float64 closing_force_limit_per_finger_n
 bool left_finger_rod_contact
 bool right_finger_rod_contact
 uint64 update_seq
+# Physics-thread measurements. Forces are sums over finger-pad / rod contacts.
+float64 normal_left_n
+float64 normal_right_n
+float64 tangent_left_n
+float64 tangent_right_n
+float64 rod_force_z_n
+float64 simulation_time
+uint32 rod_pad_contact_count
+float64 hold_force_per_finger_n
+bool force_hold_supported
+bool weld_left_active
+bool weld_right_active
+bool rod_constraint_active

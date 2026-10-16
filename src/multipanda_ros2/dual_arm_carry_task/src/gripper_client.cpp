@@ -553,7 +553,7 @@ bool GripperController::controlDualGrippers(double position)
     return ok;
 }
 
-bool GripperController::controlDualGrippersContact()
+bool GripperController::controlDualGrippersContact(double force_per_finger_n)
 {
     using ContactAction = franka_msgs::action::Grasp;
     using ContactHandle = rclcpp_action::ClientGoalHandle<ContactAction>;
@@ -571,22 +571,22 @@ bool GripperController::controlDualGrippersContact()
         return false;
     }
 
-    // The simulator's explicit contact protocol deadline is 6 s. Keep the
-    // client result wait bounded at 7.5 s, leaving 1.5 s for the action result
-    // to cross DDS after the server's normal deadline. This does not extend the
+    // The simulator's explicit contact protocol deadline is 12 s. Keep the
+    // client result wait bounded at 13.5 s, leaving 1.5 s for the action result
+    // to cross DDS after the server's 12 s contact deadline. This does not extend the
     // physical search interval; a server timeout remains a failure.
-    constexpr double kContactClientResultBudgetSec = 7.5;
+    constexpr double kContactClientResultBudgetSec = 13.5;
     const double contact_result_budget =
         std::min(cfg_.result_timeout_sec, kContactClientResultBudgetSec);
-    if (!(contact_result_budget > 6.0)) {
+    if (!(contact_result_budget > 12.0)) {
         RCLCPP_ERROR(node_->get_logger(),
-            "[P3A2C_BUDGET] configured client result wait %.2f s must exceed the 6.0 s server contact deadline; no goal sent",
+            "[P3A2C_BUDGET] configured client result wait %.2f s must exceed the 12.0 s server contact deadline; no goal sent",
             contact_result_budget);
         return false;
     }
     RCLCPP_INFO(node_->get_logger(),
-        "[P3A2C_BUDGET] server_contact_deadline=6.0 s client_result_wait=%.2f s result_margin>=%.2f s",
-        contact_result_budget, contact_result_budget - 6.0);
+        "[P3A2C_BUDGET] server_contact_deadline=12.0 s client_result_wait=%.2f s result_margin>=%.2f s",
+        contact_result_budget, contact_result_budget - 12.0);
 
     const auto begin = std::chrono::steady_clock::now();
     auto run_one = [&](bool left) {
@@ -613,8 +613,8 @@ bool GripperController::controlDualGrippersContact()
         }
         ContactAction::Goal goal;
         goal.width = 0.0;  // desired total opening; progressive server command is bounded
-        goal.speed = 0.01;  // explicit contact approach, total gap m/s
-        goal.force = 0.0;  // no force control or effort estimate is requested
+        goal.speed = 0.005;  // explicit contact approach, total gap m/s
+        goal.force = force_per_finger_n;  // positive: checked simulator tendon force hold, N per finger
         goal.epsilon.inner = 0.005;
         goal.epsilon.outer = 0.005;
         struct ContactGoalState {
@@ -680,10 +680,21 @@ bool GripperController::controlDualGrippersContact()
         return ok;
     };
 
-    // Close one hand at a time. A failed or unknown left result never starts the
-    // right action, so there is no hidden retry or continued motion.
-    if (!run_one(true)) return false;
-    if (!run_one(false)) return false;
+    // Start both contact approaches together.  A serial close lets the first
+    // hand preload and nudge the free object before the second hand reaches it;
+    // that creates exactly the intermittent edge contacts this protocol is
+    // intended to reject.  Each action still has its own bounded result wait,
+    // and both outcomes must be SUCCEEDED before the caller may lift.
+    auto left_future = std::async(std::launch::async, [&run_one]() { return run_one(true); });
+    auto right_future = std::async(std::launch::async, [&run_one]() { return run_one(false); });
+    const bool left_ok = left_future.get();
+    const bool right_ok = right_future.get();
+    if (!left_ok || !right_ok) {
+        RCLCPP_ERROR(node_->get_logger(),
+                     "[夹爪接触] bilateral result failed: left=%d right=%d",
+                     left_ok ? 1 : 0, right_ok ? 1 : 0);
+        return false;
+    }
     return true;
 }
 

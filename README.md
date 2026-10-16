@@ -36,6 +36,11 @@ source install/setup.bash
 
 全量构建可使用 `colcon build`。构建会写入 `build/`、`install/` 和 `log/`。
 
+本次 Ubuntu 22.04 迁移的 MuJoCo/DQ Robotics 版本选择和便捷构建命令见
+[`docs/LOCAL_BUILD.md`](docs/LOCAL_BUILD.md)。当前本机建议运行 `bash scripts/build_local.sh`。
+2026-10-15 同步后的路线核对和本机首次运行步骤见
+[`docs/LOCAL_FIRST_RUN.md`](docs/LOCAL_FIRST_RUN.md)，运行与实验由用户亲自执行。
+
 ## 启动
 
 推荐从仓库根目录执行：

@@ -47,8 +47,54 @@ bool FrankaMjHardwareSystem::initSim(
     
     info_ = hardware_info;
     this->nh_ = model_nh;
-    this->d_ = d;
     this->m_ = m;
+    this->d_ = d;
+
+    // Contact-probe-only geometry profile. Keep the original MuJoCo model for
+    // ideal_weld and other modes; when explicitly requested, disable the four
+    // small auxiliary fingertip boxes and retain the primary pad per finger.
+    // The auxiliary boxes are identified by box type, collision group 3, and
+    // their 3 mm x-size; the primary 8.5 mm pad is left untouched.
+    const char* single_pad_env = std::getenv("CONTACT_PROBE_SINGLE_PAD");
+    const bool single_primary_pad = single_pad_env != nullptr &&
+        std::string(single_pad_env) == "true";
+    if (single_primary_pad) {
+      auto* mutable_model = const_cast<mjModel*>(m_);
+      int disabled_auxiliary_pads = 0;
+      int tuned_primary_pads = 0;
+      for (int geom = 0; geom < mutable_model->ngeom; ++geom) {
+        if (mutable_model->geom_type[geom] != mjGEOM_BOX ||
+            mutable_model->geom_group[geom] != 3) {
+          continue;
+        }
+        const int body = mutable_model->geom_bodyid[geom];
+        const char* body_name = mj_id2name(mutable_model, mjOBJ_BODY, body);
+        if (body_name == nullptr ||
+            (std::string(body_name).find("_left_finger") == std::string::npos &&
+             std::string(body_name).find("_right_finger") == std::string::npos)) {
+          continue;
+        }
+        if (mutable_model->geom_size[3 * geom] < 0.004) {
+          mutable_model->geom_contype[geom] = 0;
+          mutable_model->geom_conaffinity[geom] = 0;
+          ++disabled_auxiliary_pads;
+        } else {
+          // One slightly broader, softer primary pad per finger. Friction is
+          // intentionally unchanged at the model value (3.0); only the
+          // contact footprint and normal settling are adjusted to avoid edge
+          // contact and solver impulse spikes in the probe.
+          mutable_model->geom_size[3 * geom] = 0.010;
+          mutable_model->geom_size[3 * geom + 1] = 0.006;
+          mutable_model->geom_size[3 * geom + 2] = 0.010;
+          mutable_model->geom_solref[2 * geom] = 0.02;
+          mutable_model->geom_solref[2 * geom + 1] = 1.0;
+          ++tuned_primary_pads;
+        }
+      }
+      RCLCPP_INFO(getLogger(),
+          "[contact_probe] single-primary-pad profile: disabled %d auxiliary pad geoms, tuned %d primary pads",
+          disabled_auxiliary_pads, tuned_primary_pads);
+    }
     this->update_rate_ = &update_rate;
     std::stringstream rc_stream(info_.hardware_parameters.at("robot_count"));
     rc_stream >> robot_count_;
@@ -138,6 +184,32 @@ bool FrankaMjHardwareSystem::initSim(
             gripper_states_ptrs_.insert(std::make_pair(arm.robot_name_, std::make_shared<franka_gripper::GripperSharedState>()));
             gripper_nodes_.insert(std::make_pair(arm.robot_name_, std::make_shared<franka_gripper::GripperSimActionServer>(rclcpp::NodeOptions(), arm.robot_name_)));
             gripper_nodes_[arm.robot_name_]->initGripperPtrs(gripper_states_ptrs_[arm.robot_name_]);
+            // Validate the model before enabling the optional force-hold command.
+            const int act = arm.robot_->gripper_act_idx_;
+            bool supported = m_->actuator_trntype[act] == mjTRN_TENDON &&
+                m_->actuator_dyntype[act] == mjDYN_NONE && m_->actuator_ctrllimited[act] &&
+                m_->actuator_ctrlrange[2*act] == 0.0 && m_->actuator_ctrlrange[2*act+1] >= 0.04 &&
+                m_->actuator_gaintype[act] == mjGAIN_FIXED &&
+                m_->actuator_biastype[act] == mjBIAS_AFFINE &&
+                m_->actuator_gainprm[mjNGAIN*act] > 0.0 &&
+                std::abs(m_->actuator_biasprm[mjNBIAS*act]) < 1e-12 &&
+                std::abs(m_->actuator_biasprm[mjNBIAS*act+1] +
+                         m_->actuator_gainprm[mjNGAIN*act]) < 1e-9 &&
+                std::abs(m_->actuator_biasprm[mjNBIAS*act+2]) < 1e-12 &&
+                std::abs(m_->actuator_gear[6*act]-1.0) < 1e-12;
+            if (supported) {
+              const int tendon = m_->actuator_trnid[2*act];
+              supported = tendon >= 0 && m_->tendon_num[tendon] == 2;
+              if (supported) for (int j=0; j<2; ++j) {
+                const int wrap = m_->tendon_adr[tendon]+j;
+                supported = supported && m_->wrap_type[wrap] == mjWRAP_JOINT &&
+                    std::abs(m_->wrap_prm[wrap]-0.5) < 1e-12 &&
+                    m_->wrap_objid[wrap] == arm.robot_->gripper_joint_indices_[j];
+              }
+            }
+            gripper_states_ptrs_[arm.robot_name_]->force_hold_supported = supported;
+            RCLCPP_INFO(getLogger(), "Force-hold model %s supported=%d kp=%.1f tendon ratio=0.5/0.5",
+                arm.robot_name_.c_str(), supported, m_->actuator_gainprm[mjNGAIN*act]);
             executor_->add_node(gripper_nodes_[arm.robot_name_]);
             GripperContactBodyIds contact_ids;
             contact_ids.left_finger = mj_name2id(m_, mjOBJ_BODY,
@@ -354,6 +426,15 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
           ? GripperContactBodyIds{} : ids_it->second;
       bool left_contact = false;
       bool right_contact = false;
+      double normals[2]{0.0, 0.0}, tangents[2]{0.0, 0.0};
+      double force_z = 0.0;
+      std::uint32_t rod_pad_contact_count = 0;
+      // The contact solver can report very large transient impulses while a
+      // pad is entering/leaving a stiff box contact.  They are useful for
+      // diagnosing the solver, but must not become a valid grasp force.  The
+      // configured tendon limit is 150 N, so values above this bound cannot be
+      // a credible sustained pad load for this model.
+      constexpr double kMaxSustainedPadForceN = 150.0;
       if (ids.rod >= 0 && ids.left_finger >= 0 && ids.right_finger >= 0) {
         for (int i = 0; i < d_->ncon; ++i) {
           const mjContact& contact = d_->contact[i];
@@ -361,16 +442,65 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
           const int body2 = m_->geom_bodyid[contact.geom2];
           if (body1 == ids.rod || body2 == ids.rod) {
             const int other = body1 == ids.rod ? body2 : body1;
-            left_contact = left_contact || other == ids.left_finger;
-            right_contact = right_contact || other == ids.right_finger;
+            const int finger_geom = body1 == ids.rod ? contact.geom2 : contact.geom1;
+            // Box collision geoms are the pads; visual meshes never count.
+            if ((other == ids.left_finger || other == ids.right_finger) &&
+                m_->geom_type[finger_geom] == mjGEOM_BOX && m_->geom_group[finger_geom] == 3) {
+              ++rod_pad_contact_count;
+              const int side = other == ids.left_finger ? 0 : 1;
+              // Geometric contact is separate from a credible sustained-force
+              // sample. Stiff-contact impulses can exceed the force filter for
+              // a step while the pad is still touching the rod; the later load
+              // probe remains responsible for anti-slip/force acceptance.
+              if (side == 0) left_contact = true;
+              else right_contact = true;
+              bool valid_force = true;
+              mjtNum wrench[6]{};
+              mj_contactForce(m_, d_, i, wrench);
+              for (int k = 0; k < 3; ++k) {
+                valid_force = valid_force && std::isfinite(static_cast<double>(wrench[k])) &&
+                    std::abs(static_cast<double>(wrench[k])) <= kMaxSustainedPadForceN;
+              }
+              if (valid_force) {
+                // mj_contactForce's normal sign depends on geom ordering; a
+                // contact magnitude is the absolute normal component.
+                normals[side] += std::abs(static_cast<double>(wrench[0]));
+                tangents[side] += std::hypot(static_cast<double>(wrench[1]),
+                                              static_cast<double>(wrench[2]));
+                // Contact frame axes are rows; wrench is force on geom2.
+                force_z += (body2 == ids.rod ? 1.0 : -1.0) *
+                    (contact.frame[2]*wrench[0] + contact.frame[5]*wrench[1] +
+                     contact.frame[8]*wrench[2]);
+              }
+              // Invalid solver impulses do not count toward the force
+              // measurements above, but geometric contact remains observable.
+            }
           }
         }
       }
-      franka_gripper::publishFeedback(
-          gripper_states_ptrs_[arm.robot_name_],
-          d_->qpos[arm.robot_->gripper_joint_qpos_indices_[0]],
-          d_->qpos[arm.robot_->gripper_joint_qpos_indices_[1]],
-          left_contact, right_contact);
+      // One locked physics snapshot, including force/constraint measurements.
+      {
+        auto& state = *gripper_states_ptrs_[arm.robot_name_];
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.finger_q1 = d_->qpos[arm.robot_->gripper_joint_qpos_indices_[0]];
+        state.finger_q2 = d_->qpos[arm.robot_->gripper_joint_qpos_indices_[1]];
+        state.left_finger_rod_contact = left_contact;
+        state.right_finger_rod_contact = right_contact;
+        state.normal_left_n = normals[0]; state.normal_right_n = normals[1];
+        state.tangent_left_n = tangents[0]; state.tangent_right_n = tangents[1];
+        state.rod_force_z_n = force_z;
+        state.rod_pad_contact_count = rod_pad_contact_count;
+        state.simulation_time = d_->time;
+        state.weld_left_active = weld_eq_id_ >= 0 && d_->eq_active[weld_eq_id_];
+        state.weld_right_active = weld_right_eq_id_ >= 0 && d_->eq_active[weld_right_eq_id_];
+        state.rod_constraint_active = false;
+        for (int e=0; e<m_->neq; ++e) {
+          if (d_->eq_active[e] && (m_->eq_type[e] == mjEQ_WELD || m_->eq_type[e] == mjEQ_CONNECT) &&
+              (m_->eq_obj1id[e] == ids.rod || m_->eq_obj2id[e] == ids.rod))
+            state.rod_constraint_active = true;
+        }
+        ++state.feedback_seq;
+      }
     }
   }
 //   for(auto& obj_pair: mj_objs_){
@@ -549,7 +679,20 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
       const franka_gripper::GripperFeedback fb =
           franka_gripper::readFeedback(gripper_states_ptrs_[arm.robot_name_]);
       if(std::isfinite(fb.command_per_finger)){
-        d_->ctrl[arm.robot_->gripper_act_idx_] = fb.command_per_finger;
+        const int act = arm.robot_->gripper_act_idx_;
+        double target = fb.command_per_finger;
+        if (fb.hold_force_per_finger_n > 0.0 && fb.force_hold_supported) {
+          target = franka_gripper::forceHoldPositionTarget(d_->actuator_length[act],
+              m_->actuator_gainprm[mjNGAIN*act], fb.hold_force_per_finger_n,
+              m_->actuator_ctrlrange[2*act], m_->actuator_ctrlrange[2*act+1]);
+        }
+        if (fb.closing_force_limit_per_finger_n > 0.0 && fb.force_hold_supported) {
+          const double bounded = franka_gripper::forceHoldPositionTarget(d_->actuator_length[act],
+              m_->actuator_gainprm[mjNGAIN*act], fb.closing_force_limit_per_finger_n,
+              m_->actuator_ctrlrange[2*act], m_->actuator_ctrlrange[2*act+1]);
+          target = std::max(target, bounded); // force limit also during unilateral approach
+        }
+        if (std::isfinite(target)) d_->ctrl[act] = target;
       }
     }
   }

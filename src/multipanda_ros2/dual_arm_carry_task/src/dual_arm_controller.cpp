@@ -1261,6 +1261,12 @@ bool DualArmController::prepareFromA1Truth()
                                         "weld=0 attach=0 lift=0 carry=0");
                                     ctx_->setCurrentState(contact ? TaskState::GRASP_CONTACT_CONFIRMED
                                                                   : TaskState::ERROR);
+                                } else if (ctx_->grasp_model_ == "contact_probe") {
+                                    std::string probe_detail;
+                                    const bool loaded = runContactLoadProbe(truth, probe_detail);
+                                    RCLCPP_INFO(ctx_->get_logger(), "[CONTACT_PROBE_RESULT] state=%s detail=%s",
+                                        loaded ? "DONE" : "FAILED", probe_detail.c_str());
+                                    ctx_->setCurrentState(loaded ? TaskState::DONE : TaskState::ERROR);
                                 } else if (ctx_->grasp_model_ == "ideal_weld") {
                                     std::string carry_detail;
                                     const bool carried = runIdealWeldCarry(truth, carry_detail);
@@ -1280,7 +1286,7 @@ bool DualArmController::prepareFromA1Truth()
                                 ctx_->setCurrentState(TaskState::ERROR);
                             }
                             return (descended && !ctx_->grasp_contact_close_ &&
-                                    ctx_->grasp_model_ != "ideal_weld") ||
+                                    ctx_->grasp_model_ != "ideal_weld" && ctx_->grasp_model_ != "contact_probe") ||
                                    (ctx_->getCurrentState() == TaskState::GRASP_CONTACT_CONFIRMED) ||
                                    (ctx_->getCurrentState() == TaskState::DONE);
                         }
