@@ -52,13 +52,13 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             RCLCPP_ERROR(ctx_->get_logger(),
                 "[CONTACT_DIAGNOSTIC] reason=%s arm=%s q=(%.6f,%.6f) command_per_finger=%.6f "
                 "force_limit=%.3f hold_force=%.3f pads=%u contacts=(%d,%d) "
-                "normal=(%.3f,%.3f) tangent=(%.3f,%.3f) rod_force_z=%.3f "
+                "normal=(%.3f,%.3f) tangent=(%.3f,%.3f) rod_force_xyz=(%.3f,%.3f,%.3f) "
                 "seq=%llu sim_time=%.6f weld=(%d,%d) rod_constraint=%d",
                 reason, arms[i].c_str(), sample.q1, sample.q2, sample.command_per_finger_m,
                 sample.closing_force_limit_per_finger_n, sample.hold_force_per_finger_n,
                 sample.rod_pad_contact_count, sample.left_contact ? 1 : 0,
                 sample.right_contact ? 1 : 0, sample.normal_left_n, sample.normal_right_n,
-                sample.tangent_left_n, sample.tangent_right_n, sample.rod_force_z_n,
+                sample.tangent_left_n, sample.tangent_right_n, sample.rod_force_x_n, sample.rod_force_y_n, sample.rod_force_z_n,
                 static_cast<unsigned long long>(sample.seq), sample.simulation_time,
                 sample.weld_left_active ? 1 : 0, sample.weld_right_active ? 1 : 0,
                 sample.rod_constraint_active ? 1 : 0);
@@ -78,7 +78,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         return fail("E_CONTACT_RUN_ID");
     std::ofstream csv("experiment_results/a1_runs/"+run_id+"/contact_probe.csv");
     if (!csv) return fail("E_CONTACT_CSV_OPEN");
-    csv << std::setprecision(10) << "phase,sim_time,rod_x,rod_y,rod_z,left_slip_m,left_angle_rad,right_slip_m,right_angle_rad,left_q1,left_q2,right_q1,right_q2,left_command_per_finger_m,right_command_per_finger_m,left_force_limit_n,right_force_limit_n,left_hold_force_n,right_hold_force_n,left_pad_contact_count,right_pad_contact_count,left_contact_1,left_contact_2,right_contact_1,right_contact_2,left_normal1_n,left_normal2_n,right_normal1_n,right_normal2_n,left_tangent1_n,left_tangent2_n,right_tangent1_n,right_tangent2_n,left_rod_force_z_n,right_rod_force_z_n,left_seq,right_seq,weld_left,weld_right,rod_constraint\n";
+    csv << std::setprecision(10) << "phase,sim_time,rod_x,rod_y,rod_z,left_slip_m,left_angle_rad,right_slip_m,right_angle_rad,left_q1,left_q2,right_q1,right_q2,left_command_per_finger_m,right_command_per_finger_m,left_force_limit_n,right_force_limit_n,left_hold_force_n,right_hold_force_n,left_pad_contact_count,right_pad_contact_count,left_contact_1,left_contact_2,right_contact_1,right_contact_2,left_normal1_n,left_normal2_n,right_normal1_n,right_normal2_n,left_tangent1_n,left_tangent2_n,right_tangent1_n,right_tangent2_n,left_rod_force_x_n,left_rod_force_y_n,left_rod_force_z_n,right_rod_force_x_n,right_rod_force_y_n,right_rod_force_z_n,left_seq,right_seq,weld_left,weld_right,rod_constraint\n";
     std::array<unsigned long long,2> seq{{0,0}};
     std::array<double,2> sim_time{{-1,-1}}, progress_wall{{steadySeconds(),steadySeconds()}};
     auto feedback=[&]() {
@@ -342,7 +342,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         for (const auto& f:fingers) csv<<','<<f.left_contact<<','<<f.right_contact;
         for (const auto& f:fingers) csv<<','<<f.normal_left_n<<','<<f.normal_right_n;
         for (const auto& f:fingers) csv<<','<<f.tangent_left_n<<','<<f.tangent_right_n;
-        csv<<','<<fingers[0].rod_force_z_n<<','<<fingers[1].rod_force_z_n<<','<<fingers[0].seq<<','<<fingers[1].seq<<','
+        csv<<','<<fingers[0].rod_force_x_n<<','<<fingers[0].rod_force_y_n<<','<<fingers[0].rod_force_z_n<<','<<fingers[1].rod_force_x_n<<','<<fingers[1].rod_force_y_n<<','<<fingers[1].rod_force_z_n<<','<<fingers[0].seq<<','<<fingers[1].seq<<','
            <<fingers[0].weld_left_active<<','<<fingers[0].weld_right_active<<','<<fingers[0].rod_constraint_active<<'\n'; csv.flush();
         if (max_slip>pos_tol || max_angle>angle_tol) { detail="E_CONTACT_SLIP_OR_DROP"; return false; }
         if (require_height && latest.position.z<initial_truth.position.z+height-pos_tol) { detail="E_CONTACT_ROD_NOT_LIFTED"; return false; }

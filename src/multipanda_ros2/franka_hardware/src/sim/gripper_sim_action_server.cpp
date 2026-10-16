@@ -161,7 +161,7 @@ void GripperSimActionServer::openTraceIfRequested(const std::string& robot_name)
   // which was wrong; the label is fixed for future traces and the existing CSVs
   // are left as they are.
   trace_ << "t_sec,robot,commanded_gap_m,command_per_finger_m,closing_force_limit_per_finger_n,q1_m,q2_m,total_gap_m,feedback_seq,target_gap_m,"
-            "left_finger_obj_rod_01,right_finger_obj_rod_01,rod_pad_contact_count,phase,normal_left_n,normal_right_n,tangent_left_n,tangent_right_n,force_per_finger_n,sim_time,weld_left,weld_right,rod_constraint\n";
+            "left_finger_obj_rod_01,right_finger_obj_rod_01,rod_pad_contact_count,phase,normal_left_n,normal_right_n,tangent_left_n,tangent_right_n,force_per_finger_n,rod_force_x_n,rod_force_y_n,rod_force_z_n,sim_time,weld_left,weld_right,rod_constraint\n";
   trace_.flush();
   RCLCPP_INFO(get_logger(), "[trace] writing raw finger feedback to %s", path.c_str());
 }
@@ -180,7 +180,7 @@ void GripperSimActionServer::traceRow(double commanded_m, double target_m,
          << ',' << (fb.left_finger_rod_contact ? 1 : 0) << ','
          << (fb.right_finger_rod_contact ? 1 : 0) << ',' << fb.rod_pad_contact_count << ',' << phase << ','
          << fb.normal_left_n << ',' << fb.normal_right_n << ',' << fb.tangent_left_n << ',' << fb.tangent_right_n << ','
-         << fb.hold_force_per_finger_n << ',' << fb.simulation_time << ',' << fb.weld_left_active << ',' << fb.weld_right_active << ',' << fb.rod_constraint_active << '\n';
+         << fb.hold_force_per_finger_n << ',' << fb.rod_force_x_n << ',' << fb.rod_force_y_n << ',' << fb.simulation_time << ',' << fb.weld_left_active << ',' << fb.weld_right_active << ',' << fb.rod_constraint_active << '\n';
   // Flushed every row: a crash must not lose the run that explains it.
   trace_.flush();
 }
@@ -791,6 +791,8 @@ void GripperSimActionServer::publishGripperState() {
   contact.normal_right_n = fb.normal_right_n;
   contact.tangent_left_n = fb.tangent_left_n;
   contact.tangent_right_n = fb.tangent_right_n;
+  contact.rod_force_x_n = fb.rod_force_x_n;
+  contact.rod_force_y_n = fb.rod_force_y_n;
   contact.rod_force_z_n = fb.rod_force_z_n;
   contact.simulation_time = fb.simulation_time;
   contact.rod_pad_contact_count = fb.rod_pad_contact_count;

@@ -52,7 +52,7 @@ struct GripperSharedState {
   bool force_hold_supported {false};
   double normal_left_n {0.0}, normal_right_n {0.0};
   double tangent_left_n {0.0}, tangent_right_n {0.0};
-  double rod_force_z_n {0.0};
+  double rod_force_x_n {0.0}, rod_force_y_n {0.0}, rod_force_z_n {0.0};
   double simulation_time {0.0};
   std::uint32_t rod_pad_contact_count {0};
   bool weld_left_active {false}, weld_right_active {false};
@@ -79,7 +79,7 @@ struct GripperFeedback {
   bool force_hold_supported {false};
   double normal_left_n {0.0}, normal_right_n {0.0};
   double tangent_left_n {0.0}, tangent_right_n {0.0};
-  double rod_force_z_n {0.0};
+  double rod_force_x_n {0.0}, rod_force_y_n {0.0}, rod_force_z_n {0.0};
   double simulation_time {0.0};
   std::uint32_t rod_pad_contact_count {0};
   bool weld_left_active {false}, weld_right_active {false};
@@ -114,6 +114,8 @@ inline GripperFeedback readFeedback(const std::shared_ptr<GripperSharedState>& s
   out.force_hold_supported = state->force_hold_supported;
   out.normal_left_n = state->normal_left_n; out.normal_right_n = state->normal_right_n;
   out.tangent_left_n = state->tangent_left_n; out.tangent_right_n = state->tangent_right_n;
+  out.rod_force_x_n = state->rod_force_x_n;
+  out.rod_force_y_n = state->rod_force_y_n;
   out.rod_force_z_n = state->rod_force_z_n;
   out.simulation_time = state->simulation_time;
   out.rod_pad_contact_count = state->rod_pad_contact_count;

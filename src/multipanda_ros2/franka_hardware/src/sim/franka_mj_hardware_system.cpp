@@ -427,6 +427,7 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
       bool left_contact = false;
       bool right_contact = false;
       double normals[2]{0.0, 0.0}, tangents[2]{0.0, 0.0};
+      double force_xyz[3]{0.0, 0.0, 0.0};
       double force_z = 0.0;
       std::uint32_t rod_pad_contact_count = 0;
       // The contact solver can report very large transient impulses while a
@@ -467,10 +468,14 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
                 normals[side] += std::abs(static_cast<double>(wrench[0]));
                 tangents[side] += std::hypot(static_cast<double>(wrench[1]),
                                               static_cast<double>(wrench[2]));
-                // Contact frame axes are rows; wrench is force on geom2.
-                force_z += (body2 == ids.rod ? 1.0 : -1.0) *
-                    (contact.frame[2]*wrench[0] + contact.frame[5]*wrench[1] +
-                     contact.frame[8]*wrench[2]);
+                const double sign = body2 == ids.rod ? 1.0 : -1.0;
+                mjtNum world_force[3]{};
+                mju_mulMatVec3(world_force, contact.frame, wrench);
+                force_xyz[0] += sign * world_force[0];
+                force_xyz[1] += sign * world_force[1];
+                force_xyz[2] += sign * world_force[2];
+                force_z += sign * (contact.frame[2]*wrench[0] + contact.frame[5]*wrench[1] +
+                                   contact.frame[8]*wrench[2]);
               }
               // Invalid solver impulses do not count toward the force
               // measurements above, but geometric contact remains observable.
@@ -488,6 +493,8 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
         state.right_finger_rod_contact = right_contact;
         state.normal_left_n = normals[0]; state.normal_right_n = normals[1];
         state.tangent_left_n = tangents[0]; state.tangent_right_n = tangents[1];
+        state.rod_force_x_n = force_xyz[0];
+        state.rod_force_y_n = force_xyz[1];
         state.rod_force_z_n = force_z;
         state.rod_pad_contact_count = rod_pad_contact_count;
         state.simulation_time = d_->time;

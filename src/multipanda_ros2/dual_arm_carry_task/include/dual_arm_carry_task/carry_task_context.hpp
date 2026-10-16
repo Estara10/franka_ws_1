@@ -236,6 +236,8 @@ public:
         double normal_right_n {0.0};
         double tangent_left_n {0.0};
         double tangent_right_n {0.0};
+        double rod_force_x_n {0.0};
+        double rod_force_y_n {0.0};
         double rod_force_z_n {0.0};
         double simulation_time {0.0};
         double hold_force_per_finger_n {0.0};
@@ -266,6 +268,8 @@ public:
         sample.normal_right_n = msg.normal_right_n;
         sample.tangent_left_n = msg.tangent_left_n;
         sample.tangent_right_n = msg.tangent_right_n;
+        sample.rod_force_x_n = msg.rod_force_x_n;
+        sample.rod_force_y_n = msg.rod_force_y_n;
         sample.rod_force_z_n = msg.rod_force_z_n;
         sample.simulation_time = msg.simulation_time;
         sample.rod_pad_contact_count = msg.rod_pad_contact_count;

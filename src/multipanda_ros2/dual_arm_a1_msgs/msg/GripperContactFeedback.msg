@@ -12,6 +12,8 @@ float64 normal_left_n
 float64 normal_right_n
 float64 tangent_left_n
 float64 tangent_right_n
+float64 rod_force_x_n
+float64 rod_force_y_n
 float64 rod_force_z_n
 float64 simulation_time
 uint32 rod_pad_contact_count
