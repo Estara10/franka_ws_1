@@ -14,9 +14,9 @@
 
 ```text
 预抓取 → 下降 → 闭合（10 N/指，NoSlip=20）→ 抬升 50 cm → 保持 3 s
-→ 前进 10 cm → 落回支撑面 → 开爪释放
+→ 前进 10 cm + 旋转 +10°（目标 0.40, 0.00, +20°）→ 落回支撑面 → 开爪释放
 [CONTACT_LOAD_VALIDATED] samples=50 sim_hold=3.06s lift=0.491m max_slip=10.8mm
-[CONTACT_PROBE_RESULT] state=DONE
+[CONTACT_PROBE_RESULT] state=DONE（run 161453；最终杆 (0.3983,-0.0044,0.0205), yaw 18.71°）
 ```
 
 - 运行：无窗口 `..._155319`、可视化 `..._155952`；全程 weld/杆固定约束为 0；

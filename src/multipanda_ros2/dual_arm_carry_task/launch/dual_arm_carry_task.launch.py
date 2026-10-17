@@ -310,13 +310,13 @@ def generate_launch_description():
 
     rod_target_y_arg = DeclareLaunchArgument(
         'rod_target_y',
-        default_value='-0.20',
+        default_value='0.0',
         description='Mode B 目标放置 Y 坐标 (m)'
     )
 
     rod_target_yaw_deg_arg = DeclareLaunchArgument(
         'rod_target_yaw_deg',
-        default_value='90.0',
+        default_value='20.0',
         description='目标物体的世界绝对偏航角 (度)'
     )
 

@@ -99,8 +99,8 @@ public:
     bool rod_pose_received_ {false};
     bool use_vision_ {false};
     double rod_target_x_ {0.40};
-    double rod_target_y_ {-0.20};
-    double rod_target_yaw_rad_ {M_PI / 2.0};
+    double rod_target_y_ {0.0};
+    double rod_target_yaw_rad_ {20.0 * M_PI / 180.0};
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr rod_pose_sub_;
 
     // A1 P1b: rod pose source selection and the frozen truth reference.

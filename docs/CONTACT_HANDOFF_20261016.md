@@ -357,3 +357,12 @@ profile 的结论数据。
 完整逐次运行索引（今天的全部 60 次 contact_probe 运行，含配置与实际结果）见 [CONTACT_RUN_INDEX_20261017.md](CONTACT_RUN_INDEX_20261017.md)。
 
 **无 weld 核查（155952）**：任务 CSV 238 个采样的 `weld_left/weld_right/rod_constraint` 全为 0；逐接触 CSV 12,252 个采样同样全为 0；日志无 weld 激活记录，`CONTACT_PROBE_RELEASED` 为 `weld=OFF`。物理上杆相对手滑移 10.82 mm，若启用了手–杆 weld 不可能出现该相对运动。手指间同步 joint equality 按模型保留，不属于杆约束。
+
+
+## 2026-10-17 E11：完整搬运 + 旋转（前进 10 cm、偏航 +10°）
+
+- 目标 `(0.40, 0.00, +20°)`；`makePlan` 扩展为物体空间平移 + 偏航插值，运输段 1.0/0.3、最短 2 s。
+- run `..._161453`：`CONTACT_LOAD_VALIDATED samples=49 sim_hold=3.040s lift=0.491m max_slip=10.889mm max_angle=1.303deg`；`CONTACT_PROBE_TRANSPORT dx=-0.100 dy=0.000 dyaw=10.5 deg`；`CONTACT_PROBE_RELEASED xyz=(0.3983,-0.0044,0.0205)`；`state=DONE`。
+- 最终杆 yaw 18.71°（目标 20°）；放置误差 x 1.7 mm / y 4.4 mm / yaw 1.29°。阶段滑移：抬升 9.45、保持 9.85、运输 5.50、落回 8.31 mm。
+- `noslip_iterations=30` 对照 run `..._161330`：保持期杆下滑降到约 1.8 mm，但右指受力占比不过 80%（`E_CONTACT_HOLD_PAD_FORCE_NOT_SUSTAINED`），最大滑移未明显下降；保留 noslip=20。
+- 未实现松爪后的手臂撤退/返回；任务在释放确认处结束。

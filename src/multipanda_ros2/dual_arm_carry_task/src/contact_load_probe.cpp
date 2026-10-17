@@ -245,7 +245,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                       moveit::planning_interface::MoveGroupInterface::Plan& plan,
                       double vscale,
                       double ascale,
-                      double min_total) {
+                      double min_total,
+                      double dyaw=0.0) {
         robot_trajectory::RobotTrajectory trajectory(live_model,ctx_->dual_arm_group_);
         moveit::core::RobotState seed(origin); trajectory.addSuffixWayPoint(seed,0.0);
         if (!valid(seed)) return false;
@@ -254,10 +255,14 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         // contact lift. The previous 5 mm / 0.5 s segments produced intermittent
         // pad-contact loss and impulsive re-contact before the rod could leave
         // the support surface.
-        const int kPathSteps = std::max(20, static_cast<int>(std::ceil(delta.norm()/0.005)));
+        const int kPathSteps = std::max({20,
+            static_cast<int>(std::ceil(delta.norm()/0.005)),
+            static_cast<int>(std::ceil(std::abs(dyaw)/0.01))});
         for (int k=1;k<=kPathSteps;++k) {
             Transform target=first_object;
             target.translation()+=delta*k/static_cast<double>(kPathSteps);
+            target.linear()=Eigen::AngleAxisd(dyaw*k/static_cast<double>(kPathSteps),
+                Eigen::Vector3d::UnitZ()).toRotationMatrix()*first_object.linear();
             moveit::core::RobotState next(seed);
             if (!next.setFromIK(left,target*object_to_hand[0],eefs[0],0.05) ||
                 !next.setFromIK(right,target*object_to_hand[1],eefs[1],0.05)) { detail="E_CONTACT_IK"; return false; }
@@ -278,6 +283,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 if (!valid(sample)) return false;
                 const Transform actual=sample.getGlobalLinkTransform(eefs[0])*object_to_hand[0].inverse();
                 Transform expected=first_object; expected.translation()+=delta*(k-1+alpha)/static_cast<double>(kPathSteps);
+                expected.linear()=Eigen::AngleAxisd(dyaw*(k-1+alpha)/static_cast<double>(kPathSteps),
+                    Eigen::Vector3d::UnitZ()).toRotationMatrix()*first_object.linear();
                 if ((actual.translation()-expected.translation()).norm()>pos_tol || rotationError(actual,expected)>angle_tol) {
                     detail="E_CONTACT_INTERPOLATED_PATH"; return false;
                 }
@@ -536,17 +543,24 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     // Forward transport in the fixed scene with the held yaw: move the rod to
     // the task target x while the real contact grip carries it. y and z are
     // kept; the slip monitor and the 45 mm height check run during this phase.
+    const double held_yaw = std::atan2(held_object.linear()(1,0), held_object.linear()(0,0));
+    double transport_dyaw = ctx_->rod_target_yaw_rad_ - held_yaw;
+    while (transport_dyaw > M_PI) transport_dyaw -= 2.0*M_PI;
+    while (transport_dyaw < -M_PI) transport_dyaw += 2.0*M_PI;
     const Eigen::Vector3d transport_delta(
-        ctx_->rod_target_x_ - held_object.translation().x(), 0.0, 0.0);
-    if (!std::isfinite(transport_delta.x()) || transport_delta.norm() < 0.001 ||
-        transport_delta.norm() > 0.20) {
+        ctx_->rod_target_x_ - held_object.translation().x(),
+        ctx_->rod_target_y_ - held_object.translation().y(), 0.0);
+    if (!std::isfinite(transport_delta.x()) || !std::isfinite(transport_delta.y()) ||
+        !std::isfinite(transport_dyaw) || transport_delta.norm() < 0.001 ||
+        transport_delta.norm() > 0.20 || std::abs(transport_dyaw) > 0.6) {
         detail="E_CONTACT_TRANSPORT_DELTA"; return fail(detail);
     }
     RCLCPP_INFO(ctx_->get_logger(),
-        "[CONTACT_PROBE_TRANSPORT] forward dx=%.3f m to target x=%.3f m (held yaw)",
-        transport_delta.x(), ctx_->rod_target_x_);
+        "[CONTACT_PROBE_TRANSPORT] dx=%.3f dy=%.3f dyaw=%.1f deg to target (%.3f, %.3f, %.1f deg)",
+        transport_delta.x(), transport_delta.y(), transport_dyaw*180.0/M_PI,
+        ctx_->rod_target_x_, ctx_->rod_target_y_, ctx_->rod_target_yaw_rad_*180.0/M_PI);
     moveit::planning_interface::MoveGroupInterface::Plan transport;
-    if (!makePlan(lifted, transport_delta, transport, 1.0, 0.3, 2.0)) return fail(detail);
+    if (!makePlan(lifted, transport_delta, transport, 1.0, 0.3, 2.0, transport_dyaw)) return fail(detail);
     if (!execute(transport,"TRANSPORT")) return fail(detail);
     if (!observe("TRANSPORT", true)) return fail(detail);
     moveit::core::RobotState after_transport(live_model);
@@ -601,6 +615,6 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     if (!syncAluminumRodFromTruth(poseMsg(rodTransform(released)),size,ctx_->dual_arm_->getPlanningFrame(),detail)) return fail(detail);
     RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_PROBE_RELEASED] xyz=(%.6f,%.6f,%.6f) open=true force_hold=OFF weld=OFF attach=none; retreat/carry not requested",
         released.position.x,released.position.y,released.position.z);
-    detail="contact-only lift "+std::to_string(static_cast<int>(height*100.0+0.5))+"cm, "+std::to_string(static_cast<int>(hold_seconds+0.5))+"s hold, forward transport, lower and release complete; rotation/return not requested";
+    detail="contact-only lift "+std::to_string(static_cast<int>(height*100.0+0.5))+"cm, "+std::to_string(static_cast<int>(hold_seconds+0.5))+"s hold, forward transport with yaw rotation, lower and release complete; arm return not requested";
     return true;
 }

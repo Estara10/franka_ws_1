@@ -66,3 +66,5 @@
 | 20261017_155151 | 0.500/3.0/20.0 | 1.00 | 4.464 | VALIDATED max_slip=10.981mm rod_rise=491.0mm hold=3.000s；后续 **FAILED** E_CONTACT_RELEASE_POSE_ERROR |
 | 20261017_155319 | 0.500/3.0/20.0 | 1.00 | 4.464 | VALIDATED max_slip=11.362mm rod_rise=491.0mm hold=3.012s；后续 **DONE** |
 | 20261017_155952 | 0.500/3.0/20.0 | 1.00 | 4.460 | VALIDATED max_slip=10.822mm rod_rise=491.0mm hold=3.060s；后续 **DONE** |
+| 20261017_161330 | 0.500/3.0/20.0 | 1.00 | 4.042 | **FAILED** E_CONTACT_HOLD_PAD_FORCE_NOT_SUSTAINED |
+| 20261017_161453 | 0.500/3.0/20.0 | 1.00 | 4.713 | VALIDATED max_slip=10.889mm rod_rise=491.0mm hold=3.040s；后续 **DONE** |

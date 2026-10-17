@@ -59,8 +59,8 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         // Mode B: vision-driven dynamic grasping parameters
         this->declare_parameter<bool>("use_vision", false);
         this->declare_parameter<double>("rod_target_x", 0.40);
-        this->declare_parameter<double>("rod_target_y", -0.20);
-        this->declare_parameter<double>("rod_target_yaw_deg", 90.0);
+        this->declare_parameter<double>("rod_target_y", 0.0);
+        this->declare_parameter<double>("rod_target_yaw_deg", 20.0);
 
         // A1 P1b: rod pose source selection
         this->declare_parameter<std::string>("rod_pose_source", kRodPoseSourceStatic);
