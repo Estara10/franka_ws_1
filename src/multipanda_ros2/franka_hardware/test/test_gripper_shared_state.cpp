@@ -9,6 +9,7 @@
 
 #include <franka_hardware/sim/gripper_shared_state.hpp>
 #include <franka_hardware/sim/gripper_command_policy.hpp>
+#include <franka_hardware/sim/contact_probe_contact_filter.hpp>
 
 namespace {
 
@@ -63,6 +64,68 @@ TEST(GripperCommandPolicy, ExplicitGraspAloneSelectsBilateralContactPolicy) {
   EXPECT_TRUE(second_contact.confirmed);
 }
 
+TEST(ContactProbeFilter, FiltersOnlyFingerMeshRodPairInEitherGeomOrder) {
+  constexpr int rod_geom = 19;
+  constexpr int left_mesh = 7;
+  constexpr int right_mesh = 11;
+  constexpr int mesh_geoms[] = {left_mesh, right_mesh};
+  EXPECT_TRUE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, left_mesh, 1, 1, rod_geom, 1, 1, rod_geom, mesh_geoms, 2));
+  EXPECT_TRUE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, rod_geom, 1, 1, right_mesh, 1, 1, rod_geom, mesh_geoms, 2));
+}
+
+TEST(ContactProbeFilter, KeepsPrimaryPadRodAndFingerMeshEnvironmentPairs) {
+  constexpr int rod_geom = 19;
+  constexpr int left_mesh = 7;
+  constexpr int main_pad = 8;
+  constexpr int floor = 2;
+  constexpr int mesh_geoms[] = {left_mesh};
+  EXPECT_FALSE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, main_pad, 1, 1, rod_geom, 1, 1, rod_geom, mesh_geoms, 1));
+  EXPECT_FALSE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, left_mesh, 1, 1, floor, 1, 1, rod_geom, mesh_geoms, 1));
+  EXPECT_FALSE(franka_gripper::shouldDiscardContactProbePair(
+      false, false, left_mesh, 1, 1, rod_geom, 1, 1, rod_geom, mesh_geoms, 1));
+}
+
+TEST(ContactProbeFilter, PreservesPreviouslyInstalledFilterDecision) {
+  constexpr int rod_geom = 19;
+  constexpr int mesh = 7;
+  constexpr int mesh_geoms[] = {mesh};
+  EXPECT_TRUE(franka_gripper::shouldDiscardContactProbePair(
+      true, true, 31, 1, 1, 32, 1, 1, rod_geom, mesh_geoms, 1));
+  EXPECT_FALSE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, 31, 1, 1, 32, 1, 1, rod_geom, mesh_geoms, 1));
+}
+
+TEST(ContactProbeFilter, ReproducesBuiltinBitmaskSemantics) {
+  constexpr int rod_geom = 19;
+  constexpr int aux_pad = 70;
+  constexpr int main_pad = 69;
+  constexpr int mesh = 7;
+  constexpr int floor = 2;
+  constexpr int mesh_geoms[] = {mesh};
+  // contype=0/conaffinity=0 pad vs rod: MuJoCo's built-in filter rejects it,
+  // so the user callback must reject it too.
+  EXPECT_TRUE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, aux_pad, 0, 0, rod_geom, 1, 1, rod_geom, mesh_geoms, 1));
+  // Primary pad vs rod: masks cross, keep.
+  EXPECT_FALSE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, main_pad, 1, 1, rod_geom, 1, 1, rod_geom, mesh_geoms, 1));
+  // Mesh vs rod: custom rule still discards.
+  EXPECT_TRUE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, mesh, 1, 1, rod_geom, 1, 1, rod_geom, mesh_geoms, 1));
+  // Mesh vs environment with crossing masks: keep.
+  EXPECT_FALSE(franka_gripper::shouldDiscardContactProbePair(
+      false, true, mesh, 1, 1, floor, 1, 1, rod_geom, mesh_geoms, 1));
+  // Different model: mesh rule off, built-in mask semantics still apply.
+  EXPECT_TRUE(franka_gripper::shouldDiscardContactProbePair(
+      false, false, aux_pad, 0, 0, rod_geom, 1, 1, rod_geom, mesh_geoms, 1));
+  EXPECT_FALSE(franka_gripper::shouldDiscardContactProbePair(
+      false, false, mesh, 1, 1, rod_geom, 1, 1, rod_geom, mesh_geoms, 1));
+}
+
 GripperFeedback makeFeedback(double q1, double q2, unsigned long long seq) {
   GripperFeedback fb;
   fb.command_per_finger = 0.0;
@@ -114,6 +177,16 @@ TEST(GripperSharedState, ContactIdentityAndSequenceShareOneSnapshot) {
   EXPECT_EQ(bilateral.feedback_seq, 2ULL);
   EXPECT_TRUE(bilateral.left_finger_rod_contact);
   EXPECT_TRUE(bilateral.right_finger_rod_contact);
+}
+
+TEST(GripperSharedState, DirectForceLifecycleAcknowledgesPhysicsThreadRestore) {
+  auto state = std::make_shared<GripperSharedState>();
+  franka_gripper::publishDirectForceModeActive(state, true);
+  EXPECT_TRUE(readFeedback(state).direct_force_mode_active);
+  franka_gripper::requestForceHoldStopAtCurrent(state);
+  EXPECT_TRUE(readFeedback(state).stop_at_current_position);
+  franka_gripper::publishDirectForceModeActive(state, false);
+  EXPECT_FALSE(readFeedback(state).direct_force_mode_active);
 }
 
 TEST(GripperSharedState, NonFiniteCommandIsRejectedNotZeroed) {
@@ -391,21 +464,126 @@ TEST(StabilityWindow, WindowKeepsSlidingAndStillCatchesLaterDrift) {
 
 }  // namespace
 
-TEST(GripperForceHold, HalfTendonDeliversRequestedFingerForceAndClampsEmptyGap) {
-  const double target=franka_gripper::forceHoldPositionTarget(0.021,1200.0,2.0,0.0,0.08);
-  const double tendon_force=1200.0*(target-0.021);
-  EXPECT_NEAR(0.5*tendon_force,-2.0,1e-12);
-  const double empty=franka_gripper::forceHoldPositionTarget(0.001,1200.0,2.0,0.0,0.08);
-  EXPECT_DOUBLE_EQ(empty,0.0);
-  EXPECT_LE(std::abs(0.5*1200.0*(empty-0.001)),2.0);
+TEST(GripperForceHold, DirectTendonForceMapsSignAndPerFingerGeneralizedForce) {
+  const double command=franka_gripper::directClosingTendonForceCommand(
+      10.0,0.5,1.0,franka_gripper::kContactHoldForceCommandFraction,-20.0,20.0);
+  EXPECT_NEAR(command,-18.0,1e-12);
+  // In the runtime direct mode gain=1 and bias=0, so actuator_force=ctrl;
+  // the split tendon applies one half of this to each positive-opening q.
+  const double actuator_force=command;
+  EXPECT_NEAR(actuator_force,-18.0,1e-12);
+  EXPECT_NEAR(0.5*1.0*actuator_force,-9.0,1e-12);
+  double lower=0.0, upper=0.0;
+  ASSERT_TRUE(franka_gripper::forceHoldActuatorForceRange(10.0,lower,upper));
+  EXPECT_DOUBLE_EQ(lower,-20.0);
+  EXPECT_DOUBLE_EQ(upper,20.0);
+  EXPECT_FALSE(franka_gripper::forceHoldActuatorForceRange(50.01,lower,upper));
+  const double high_command=franka_gripper::directClosingTendonForceCommand(
+      50.0,0.5,1.0,franka_gripper::kContactHoldForceCommandFraction,-100.0,100.0);
+  EXPECT_NEAR(high_command,-90.0,1e-12);
+  EXPECT_NEAR(0.5*high_command,-45.0,1e-12);
+  ASSERT_TRUE(franka_gripper::forceHoldActuatorForceRange(50.0,lower,upper));
+  EXPECT_DOUBLE_EQ(lower,-100.0);
+  EXPECT_DOUBLE_EQ(upper,100.0);
+  EXPECT_TRUE(std::isnan(franka_gripper::directClosingTendonForceCommand(
+      10.0,0.5,1.0,0.9,-17.0,17.0)));
+  EXPECT_TRUE(std::isnan(franka_gripper::directClosingTendonForceCommand(
+      std::numeric_limits<double>::quiet_NaN(),0.5,1.0,0.9,-20.0,20.0)));
+}
+
+TEST(GripperForceHold, FixedPositionTargetPreservesForceLevelWithRestoringReference) {
+  constexpr double reference = 0.0194;
+  constexpr double kp = 1200.0;
+  constexpr double ctrl_min = 0.0;
+  constexpr double ctrl_max = 0.08;
+  const double target = franka_gripper::forceHoldPositionTarget(
+      reference, 10.0, kp, franka_gripper::kContactHoldForceCommandFraction,
+      ctrl_min, ctrl_max);
+  ASSERT_TRUE(std::isfinite(target));
+  EXPECT_NEAR(target, reference - 18.0 / kp, 1e-12);
+  EXPECT_GE(target, ctrl_min);
+  EXPECT_LE(target, ctrl_max);
+  // At the latched tendon length, the native position servo produces the same
+  // bounded -18 N actuator output as the former direct-force hold. Its output
+  // then changes with tendon displacement, unlike a constant-force command.
+  EXPECT_NEAR(kp * (target - reference), -18.0, 1e-12);
+  EXPECT_GT(kp * (target - (reference - 0.001)), -18.0);
+  EXPECT_TRUE(std::isnan(franka_gripper::forceHoldPositionTarget(
+      reference, 50.1, kp, 0.9, ctrl_min, ctrl_max)));
+  // The 50 N request maps to -90 N nominal actuator output, but at this
+  // measured tendon reference the corresponding position target is below the
+  // compiled 0 m lower bound. Reject it instead of silently clipping to 0 m.
+  EXPECT_TRUE(std::isnan(franka_gripper::forceHoldPositionTarget(
+      reference, 50.0, kp, 0.9, ctrl_min, ctrl_max)));
+  EXPECT_TRUE(std::isnan(franka_gripper::forceHoldPositionTarget(
+      reference, 10.0, std::numeric_limits<double>::infinity(), 0.9,
+      ctrl_min, ctrl_max)));
+}
+
+TEST(GripperForceHold, ContactWindowAllowsMeasuredForceHoldJitterButRejectsLostContact) {
+  EXPECT_TRUE(franka_gripper::contactForceWindowAccepted(20, 0.194, 19, 18, 0.000768));
+  EXPECT_FALSE(franka_gripper::contactForceWindowAccepted(20, 0.194, 14, 18, 0.000768));
+  EXPECT_FALSE(franka_gripper::contactForceWindowAccepted(20, 0.194, 19, 18, 0.001001));
+  EXPECT_FALSE(franka_gripper::contactForceWindowAccepted(19, 0.194, 19, 18, 0.000768));
+  EXPECT_FALSE(franka_gripper::contactForceWindowAccepted(20, 0.179, 19, 18, 0.000768));
+}
+TEST(GripperForceHold, OrdinaryBoundedApproachKeepsExistingMeasuredLengthSemantics) {
+  const double at_reference=franka_gripper::boundedForceLimitPositionTarget(
+      0.021,0.021,1200.0,10.0,0.0,0.08);
+  const double after_opening=franka_gripper::boundedForceLimitPositionTarget(
+      0.022,0.021,1200.0,10.0,0.0,0.08);
+  EXPECT_NEAR(at_reference,0.021-20.0/1200.0,1e-12);
+  EXPECT_NEAR(after_opening,0.022-20.0/1200.0,1e-12);
+  EXPECT_NE(after_opening,at_reference);
+}
+TEST(GripperForceHold, DirectForceRequestIsScopedAndPositionCommandsClearIt) {
+  auto state=std::make_shared<GripperSharedState>();
+  state->force_hold_supported=true;
+  ASSERT_TRUE(franka_gripper::writeCommand(state,0.02,10.0));
+  ASSERT_TRUE(franka_gripper::writeForceHold(state,50.0,0.021));
+  EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,50.0);
+  EXPECT_DOUBLE_EQ(readFeedback(state).hold_reference_tendon_length,0.021);
+  EXPECT_FALSE(franka_gripper::writeForceHold(state,50.01,0.021));
+  EXPECT_FALSE(franka_gripper::writeCommand(state,0.02,50.01));
+  EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,50.0);
+  EXPECT_DOUBLE_EQ(readFeedback(state).hold_reference_tendon_length,0.021);
+  ASSERT_TRUE(writeCommand(state,0.04));
+  EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,0.0);
+  EXPECT_DOUBLE_EQ(readFeedback(state).closing_force_limit_per_finger_n,0.0);
+}
+
+TEST(GripperForceHold, StopWithoutFeedbackRequestsPhysicsThreadCurrentPosition) {
+  auto state=std::make_shared<GripperSharedState>(); state->force_hold_supported=true;
+  ASSERT_TRUE(writeCommand(state,0.019,10.0));
+  ASSERT_TRUE(franka_gripper::writeForceHold(state,10.0,0.0195));
+  franka_gripper::requestForceHoldStopAtCurrent(state);
+  const auto feedback=readFeedback(state);
+  EXPECT_DOUBLE_EQ(feedback.command_per_finger,0.019);
+  EXPECT_DOUBLE_EQ(feedback.hold_force_per_finger_n,0.0);
+  EXPECT_DOUBLE_EQ(feedback.closing_force_limit_per_finger_n,0.0);
+  EXPECT_DOUBLE_EQ(feedback.hold_reference_tendon_length,0.0);
+  EXPECT_TRUE(feedback.stop_at_current_position);
+  EXPECT_FALSE(feedback.force_hold_fault);
+}
+
+TEST(GripperForceHold, ActuatorFailureIsVisibleAndCannotBeAcceptedAsHold) {
+  auto state=std::make_shared<GripperSharedState>(); state->force_hold_supported=true;
+  ASSERT_TRUE(franka_gripper::writeForceHold(state,10.0,0.0195));
+  franka_gripper::failForceHoldAtCurrent(state,0.0201);
+  const auto feedback=readFeedback(state);
+  EXPECT_TRUE(feedback.force_hold_fault);
+  EXPECT_FALSE(feedback.stop_at_current_position);
+  EXPECT_DOUBLE_EQ(feedback.command_per_finger,0.0201);
+  EXPECT_DOUBLE_EQ(feedback.hold_force_per_finger_n,0.0);
+  EXPECT_FALSE(franka_gripper::writeForceHold(state,10.0,0.0195));
 }
 TEST(GripperForceHold, OrdinaryPositionOrStopClearsHoldAndApproachCap) {
   auto state=std::make_shared<GripperSharedState>();
-  EXPECT_FALSE(franka_gripper::writeForceHold(state,2.0));
+  EXPECT_FALSE(franka_gripper::writeForceHold(state,2.0,0.02));
   state->force_hold_supported=true;
   ASSERT_TRUE(writeCommand(state,0.02,2.0));
   EXPECT_DOUBLE_EQ(readFeedback(state).closing_force_limit_per_finger_n,2.0);
-  ASSERT_TRUE(franka_gripper::writeForceHold(state,2.0));
+  ASSERT_TRUE(franka_gripper::writeForceHold(state,2.0,0.02));
   EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,2.0);
   ASSERT_TRUE(writeCommand(state,0.04));
   EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,0.0);
@@ -413,9 +591,15 @@ TEST(GripperForceHold, OrdinaryPositionOrStopClearsHoldAndApproachCap) {
 }
 TEST(GripperForceHold, InvalidRequestsNeverChangeExistingMode) {
   auto state=std::make_shared<GripperSharedState>(); state->force_hold_supported=true;
-  ASSERT_TRUE(franka_gripper::writeForceHold(state,2.0));
-  EXPECT_FALSE(franka_gripper::writeForceHold(state,6.0));
-  EXPECT_FALSE(franka_gripper::writeForceHold(state,std::numeric_limits<double>::quiet_NaN()));
+  ASSERT_TRUE(franka_gripper::writeForceHold(state,2.0,0.02));
+  EXPECT_FALSE(franka_gripper::writeForceHold(state,50.01,0.02));
+  EXPECT_FALSE(franka_gripper::writeForceHold(state,std::numeric_limits<double>::quiet_NaN(),0.02));
   EXPECT_DOUBLE_EQ(readFeedback(state).hold_force_per_finger_n,2.0);
-  EXPECT_TRUE(std::isnan(franka_gripper::forceHoldPositionTarget(0.02,0.0,2.0,0.0,0.08)));
+}
+
+TEST(GripperForceHold, CriticalFingerDampingIsScopedToExplicitForceHold) {
+  constexpr double model_default = 1.0;
+  EXPECT_DOUBLE_EQ(franka_gripper::contactHoldFingerDamping(model_default, false), model_default);
+  EXPECT_NEAR(franka_gripper::contactHoldFingerDamping(model_default, true), 16.6, 1e-12);
+  EXPECT_TRUE(std::isnan(franka_gripper::contactHoldFingerDamping(-1.0, true)));
 }

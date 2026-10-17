@@ -9,9 +9,9 @@
         <!-- solref=0.02: 软接触时间常数, 避免高刚度弹飞 -->
         <!-- density=1000: 平衡质量, 配合 kp=1200 + friction=3.0 强力夹持 -->
         <!-- 修复：solref 0.02→0.005 + solimp 0.9/0.95→0.99/0.999，大幅提升接触刚度防止旋转时指尖滏滑 -->
-        <geom name="obj_rod_01" type="box" size="0.02 0.2 0.02" 
+        <geom name="obj_rod_01" type="box" size="0.02 0.2 0.02"
               density="1000"
-              friction="3.0 0.5 0.005" 
+              friction="3.0 0.5 0.005"
               condim="6"
               solref="0.005 1" 
               solimp="0.99 0.999 0.001" 

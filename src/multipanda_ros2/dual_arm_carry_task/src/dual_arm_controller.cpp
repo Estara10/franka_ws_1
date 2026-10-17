@@ -1263,10 +1263,22 @@ bool DualArmController::prepareFromA1Truth()
                                                                   : TaskState::ERROR);
                                 } else if (ctx_->grasp_model_ == "contact_probe") {
                                     std::string probe_detail;
-                                    const bool loaded = runContactLoadProbe(truth, probe_detail);
-                                    RCLCPP_INFO(ctx_->get_logger(), "[CONTACT_PROBE_RESULT] state=%s detail=%s",
-                                        loaded ? "DONE" : "FAILED", probe_detail.c_str());
-                                    ctx_->setCurrentState(loaded ? TaskState::DONE : TaskState::ERROR);
+                                    const bool probe_ok = runContactLoadProbe(
+                                        truth, probe_detail, ctx_->contact_hold_diagnostic_only_);
+                                    if (ctx_->contact_hold_diagnostic_only_) {
+                                        RCLCPP_INFO(ctx_->get_logger(),
+                                            "[CONTACT_HOLD_MECHANISM_RESULT] state=%s detail=%s",
+                                            probe_ok ? "PASS" : "FAILED", probe_detail.c_str());
+                                    } else {
+                                        RCLCPP_INFO(ctx_->get_logger(), "[CONTACT_PROBE_RESULT] state=%s detail=%s",
+                                            probe_ok ? "DONE" : "FAILED", probe_detail.c_str());
+                                    }
+                                    if (ctx_->contact_hold_diagnostic_only_) {
+                                        ctx_->setCurrentState(probe_ok ?
+                                            TaskState::CONTACT_HOLD_MECHANISM_VALIDATED : TaskState::ERROR);
+                                    } else {
+                                        ctx_->setCurrentState(probe_ok ? TaskState::DONE : TaskState::ERROR);
+                                    }
                                 } else if (ctx_->grasp_model_ == "ideal_weld") {
                                     std::string carry_detail;
                                     const bool carried = runIdealWeldCarry(truth, carry_detail);
@@ -1696,8 +1708,13 @@ bool DualArmController::runP2aChecks(const a1t::TruthPayload& truth, a1v::Sample
     a1v::GraspGeometry gg;
     gg.grasp_offset_m = ctx_->p2a_grasp_offset_m_;
     gg.eef_base_yaw_rad = ctx_->p2a_eef_base_yaw_deg_ * M_PI / 180.0;
-    gg.pre_grasp_height_m = ctx_->approach_height_;
-    gg.grasp_height_m = ctx_->grasp_height_;
+    // The first real-load trace showed the pad/rod contact centroid 7.3 mm
+    // above the rod mid-plane, then migrating to the top edge during lift.
+    // Lower only this explicit contact-probe grasp profile to center the pad
+    // band on the rod side; keep all legacy and ideal_weld targets unchanged.
+    const double contact_probe_grasp_z_offset = ctx_->grasp_model_ == "contact_probe" ? 0.0123 : 0.0;
+    gg.pre_grasp_height_m = ctx_->approach_height_ - contact_probe_grasp_z_offset;
+    gg.grasp_height_m = ctx_->grasp_height_ - contact_probe_grasp_z_offset;
 
     double rod_yaw = 0.0;
     const a1v::DualTarget pre = a1v::buildPreGraspTarget(truth, gg, &rod_yaw);
@@ -1714,6 +1731,11 @@ bool DualArmController::runP2aChecks(const a1t::TruthPayload& truth, a1v::Sample
     RCLCPP_INFO(ctx_->get_logger(),
                 "  [P2A][目标] 抓取偏移 %.3f m（沿杆长轴，杆半长 %.3f m），末端基准 yaw %.1f°",
                 gg.grasp_offset_m, truth.size.y * 0.5, ctx_->p2a_eef_base_yaw_deg_);
+    if (ctx_->grasp_model_ == "contact_probe") {
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[CONTACT_PROBE_GEOMETRY] vertical grasp/pregrasp offset=-%.1f mm; pad band lowered to the rod lower half (slip budget)",
+            contact_probe_grasp_z_offset * 1000.0);
+    }
     RCLCPP_INFO(ctx_->get_logger(), "    预抓取 z=%.3f 抓取 z=%.3f（均为腕部 link8 原点高度，非指尖/TCP）",
                 gg.pre_grasp_height_m, gg.grasp_height_m);
     RCLCPP_INFO(ctx_->get_logger(), "    左(杆 +长轴端) 预抓取=(%.4f, %.4f, %.4f) 抓取=(%.4f, %.4f, %.4f)",
@@ -5316,8 +5338,9 @@ bool DualArmController::buildAndVerifyGraspDescent(
     a1v::GraspGeometry gg;
     gg.grasp_offset_m = ctx_->p2a_grasp_offset_m_;
     gg.eef_base_yaw_rad = ctx_->p2a_eef_base_yaw_deg_ * M_PI / 180.0;
-    gg.pre_grasp_height_m = ctx_->approach_height_;
-    gg.grasp_height_m = ctx_->grasp_height_;
+    const double contact_probe_grasp_z_offset = ctx_->grasp_model_ == "contact_probe" ? 0.0123 : 0.0;
+    gg.pre_grasp_height_m = ctx_->approach_height_ - contact_probe_grasp_z_offset;
+    gg.grasp_height_m = ctx_->grasp_height_ - contact_probe_grasp_z_offset;
     double yaw = 0.0;
     const std::vector<a1v::DualTarget> schedule =
         a1v::buildDescentSchedule(truth, gg, ctx_->descent_steps_, &yaw);

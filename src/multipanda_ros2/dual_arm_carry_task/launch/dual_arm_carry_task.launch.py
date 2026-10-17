@@ -123,6 +123,7 @@ def launch_setup(context, *args, **kwargs):
             'grasp_descent': LaunchConfiguration('grasp_descent'),
             'grasp_contact_close': LaunchConfiguration('grasp_contact_close'),
             'grasp_model': LaunchConfiguration('grasp_model'),
+            'contact_hold_diagnostic_only': LaunchConfiguration('contact_hold_diagnostic_only'),
             'descent_steps': LaunchConfiguration('descent_steps'),
             'descent_max_xy_dev_m': LaunchConfiguration('descent_max_xy_dev_m'),
             'descent_max_angle_dev_deg': LaunchConfiguration('descent_max_angle_dev_deg'),
@@ -433,9 +434,9 @@ def generate_launch_description():
                     '需要 rod_pose_source=a1_truth、use_vision=false、prepare_only=true、'
                     'p2a_check=true、p2b_check=true；不进入旧 FSM，不下降/不抓取')
     pregrasp_vel_scale_arg = DeclareLaunchArgument(
-        'pregrasp_vel_scale', default_value='0.1', description='预抓取执行的速度缩放（保守）')
+        'pregrasp_vel_scale', default_value='0.5', description='预抓取执行的速度缩放（保守）')
     pregrasp_acc_scale_arg = DeclareLaunchArgument(
-        'pregrasp_acc_scale', default_value='0.1', description='预抓取执行的加速度缩放（保守）')
+        'pregrasp_acc_scale', default_value='0.5', description='预抓取执行的加速度缩放（保守）')
     pregrasp_arrival_pos_tol_m_arg = DeclareLaunchArgument(
         'pregrasp_arrival_pos_tol_m', default_value='0.005', description='到位位置容差（米）')
     pregrasp_arrival_angle_tol_deg_arg = DeclareLaunchArgument(
@@ -459,6 +460,9 @@ def generate_launch_description():
         'grasp_model', default_value='none',
         description='显式抓持模型：none（默认）| ideal_weld（理想刚性搬运基线）| '
                     'contact_probe（待验证：无weld夹持、5cm抬升、2s保持、落回释放）')
+    contact_hold_diagnostic_only_arg = DeclareLaunchArgument(
+        'contact_hold_diagnostic_only', default_value='false',
+        description='仅用于一次接触保持机制诊断：预抓取/下降/接触闭合后固定机械臂观测1s并释放，绝不抬升')
     descent_steps_arg = DeclareLaunchArgument(
         'descent_steps', default_value='20',
         description='下降轨迹的分段数（目标点 = 分段数 + 1，含两端）')
@@ -760,6 +764,7 @@ def generate_launch_description():
         grasp_descent_arg,
         grasp_contact_close_arg,
         grasp_model_arg,
+        contact_hold_diagnostic_only_arg,
         descent_steps_arg,
         descent_max_xy_dev_m_arg,
         descent_max_angle_dev_deg_arg,

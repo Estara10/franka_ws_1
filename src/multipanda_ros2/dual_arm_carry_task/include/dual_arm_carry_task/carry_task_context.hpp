@@ -53,6 +53,7 @@ enum class TaskState {
     PREGRASP_REACHED,  // A1 P3a-1: 已执行本轮校验过的预抓取轨迹并实测到位；不是搬运 DONE
     GRASP_POSE_REACHED, // A1 P3a-2b: 已下降到抓取位姿并实测到位；夹爪保持打开，不是抓取成功
     GRASP_CONTACT_CONFIRMED, // A1 P3a-2c: 双手双指对杆接触并通过新鲜稳定窗口
+    CONTACT_HOLD_MECHANISM_VALIDATED, // fixed-arm hold diagnostic only; no load/lift claim
     GRIPPER_TEST_DONE, // A1 P3a-2a: 空载开合测试结束；机械臂未动，不是搬运 DONE
     DONE,
     ERROR
@@ -175,6 +176,7 @@ public:
     bool grasp_descent_ {false};
     bool grasp_contact_close_ {false};
     std::string grasp_model_ {"none"};
+    bool contact_hold_diagnostic_only_ {false};
     std::atomic<bool> weld_state_received_ {false};
     std::atomic<bool> weld_state_active_ {false};
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr weld_state_sub_;

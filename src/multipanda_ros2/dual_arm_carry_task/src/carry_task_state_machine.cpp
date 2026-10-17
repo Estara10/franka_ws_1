@@ -21,6 +21,7 @@ const char* to_stage_name(TaskState state)
         case TaskState::PREGRASP_REACHED: return "PREGRASP_REACHED";
         case TaskState::GRASP_POSE_REACHED: return "GRASP_POSE_REACHED";
         case TaskState::GRASP_CONTACT_CONFIRMED: return "GRASP_CONTACT_CONFIRMED";
+        case TaskState::CONTACT_HOLD_MECHANISM_VALIDATED: return "CONTACT_HOLD_MECHANISM_VALIDATED";
         case TaskState::GRIPPER_TEST_DONE: return "GRIPPER_TEST_DONE";
         case TaskState::DONE: return "DONE";
         case TaskState::ERROR: return "ERROR";
@@ -97,8 +98,8 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
 
         // A1 P3a-1: explicit pre-grasp execution. Off by default.
         this->declare_parameter<bool>("pregrasp_execute", false);
-        this->declare_parameter<double>("pregrasp_vel_scale", 0.1);
-        this->declare_parameter<double>("pregrasp_acc_scale", 0.1);
+        this->declare_parameter<double>("pregrasp_vel_scale", 0.5);
+        this->declare_parameter<double>("pregrasp_acc_scale", 0.5);
         this->declare_parameter<double>("pregrasp_arrival_pos_tol_m", 0.005);
         this->declare_parameter<double>("pregrasp_arrival_angle_tol_deg", 2.0);
         this->declare_parameter<double>("pregrasp_stable_window_sec", 0.3);
@@ -111,6 +112,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<bool>("grasp_descent", false);
         this->declare_parameter<bool>("grasp_contact_close", false);
         this->declare_parameter<std::string>("grasp_model", "none");
+        this->declare_parameter<bool>("contact_hold_diagnostic_only", false);
         this->declare_parameter<int>("descent_steps", 20);
         this->declare_parameter<double>("descent_max_xy_dev_m", 0.002);
         this->declare_parameter<double>("descent_max_angle_dev_deg", 1.0);
@@ -198,10 +200,14 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         grasp_descent_ = this->get_parameter("grasp_descent").as_bool();
         grasp_contact_close_ = this->get_parameter("grasp_contact_close").as_bool();
         grasp_model_ = this->get_parameter("grasp_model").as_string();
+        contact_hold_diagnostic_only_ =
+            this->get_parameter("contact_hold_diagnostic_only").as_bool();
         RCLCPP_INFO(this->get_logger(),
-                    "[P3A2C_CONFIG] grasp_contact_close=%s (parameter default=false), grasp_descent=%s",
+                    "[P3A2C_CONFIG] grasp_contact_close=%s (parameter default=false), grasp_descent=%s, "
+                    "contact_hold_diagnostic_only=%s",
                     grasp_contact_close_ ? "true" : "false",
-                    grasp_descent_ ? "true" : "false");
+                    grasp_descent_ ? "true" : "false",
+                    contact_hold_diagnostic_only_ ? "true" : "false");
         RCLCPP_INFO(this->get_logger(), "[S1_CONFIG] grasp_model=%s (default=none)", grasp_model_.c_str());
         descent_steps_ = this->get_parameter("descent_steps").as_int();
         descent_max_xy_dev_m_ = this->get_parameter("descent_max_xy_dev_m").as_double();
@@ -437,6 +443,13 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         }
         if (grasp_model_ != "none" && grasp_model_ != "ideal_weld" && grasp_model_ != "contact_probe") {
             RCLCPP_ERROR(this->get_logger(), "✗ grasp_model must be none, ideal_weld or contact_probe");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (contact_hold_diagnostic_only_ && grasp_model_ != "contact_probe") {
+            RCLCPP_ERROR(this->get_logger(),
+                         "✗ contact_hold_diagnostic_only requires explicit grasp_model=contact_probe");
             setCurrentState(TaskState::ERROR);
             publish_stage(task_stage_pub_, getCurrentState());
             return;

@@ -180,7 +180,9 @@ void GripperSimActionServer::traceRow(double commanded_m, double target_m,
          << ',' << (fb.left_finger_rod_contact ? 1 : 0) << ','
          << (fb.right_finger_rod_contact ? 1 : 0) << ',' << fb.rod_pad_contact_count << ',' << phase << ','
          << fb.normal_left_n << ',' << fb.normal_right_n << ',' << fb.tangent_left_n << ',' << fb.tangent_right_n << ','
-         << fb.hold_force_per_finger_n << ',' << fb.rod_force_x_n << ',' << fb.rod_force_y_n << ',' << fb.simulation_time << ',' << fb.weld_left_active << ',' << fb.weld_right_active << ',' << fb.rod_constraint_active << '\n';
+         << fb.hold_force_per_finger_n << ',' << fb.rod_force_x_n << ',' << fb.rod_force_y_n << ','
+         << fb.rod_force_z_n << ',' << fb.simulation_time << ',' << fb.weld_left_active << ','
+         << fb.weld_right_active << ',' << fb.rod_constraint_active << '\n';
   // Flushed every row: a crash must not lose the run that explains it.
   trace_.flush();
 }
@@ -242,7 +244,8 @@ void GripperSimActionServer::executeGrasp(const std::shared_ptr<GoalHandleGrasp>
 }
 bool GripperSimActionServer::simGripperGrasp(double width, double speed, double force,
                                               double /*epsilon_inner*/, double /*epsilon_outer*/){
-  if (!std::isfinite(force) || force < 0.0 || force > 5.0) return false;
+  if (!std::isfinite(force) || force < 0.0 ||
+      force > kMaxContactForcePerFingerN) return false;
   if (force > 0.0) return forceContactGrasp(width, speed, force);
   // Zero-force legacy Grasp keeps its existing position-preload semantics.
   // force / epsilon remain unimplemented (the real gripper does not expose
@@ -273,6 +276,7 @@ bool GripperSimActionServer::forceContactGrasp(double width, double speed, doubl
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
   bool holding = false;
   double ramp_force = 0.0;
+  double hold_reference_tendon_length = 0.0;
   unsigned long long last_seq = 0;
   double last_sim_time = -1.0;
   struct Sample { double gap; bool left; bool right; double time; };
@@ -285,6 +289,13 @@ bool GripperSimActionServer::forceContactGrasp(double width, double speed, doubl
       RCLCPP_ERROR(get_logger(),
           "[CONTACT_FORCE] abort feedback_invalid valid=%d seq=%llu sim_time=%.6f q=(%.6f,%.6f)",
           fb.valid ? 1 : 0, fb.feedback_seq, fb.simulation_time, fb.finger_q1, fb.finger_q2);
+      break;
+    }
+    if (fb.force_hold_fault) {
+      exit_reason = "direct_force_mode_fault";
+      RCLCPP_ERROR(get_logger(),
+          "[CONTACT_FORCE] abort direct_force_mode_fault seq=%llu sim_time=%.6f",
+          fb.feedback_seq, fb.simulation_time);
       break;
     }
     if (fb.weld_left_active || fb.weld_right_active || fb.rod_constraint_active) {
@@ -300,16 +311,17 @@ bool GripperSimActionServer::forceContactGrasp(double width, double speed, doubl
       last_sim_time = fb.simulation_time;
       if (!holding && fb.left_finger_rod_contact && fb.right_finger_rod_contact) {
         holding = true;
+        hold_reference_tendon_length = 0.5 * (fb.finger_q1 + fb.finger_q2);
         RCLCPP_INFO(get_logger(),
-            "[CONTACT_FORCE] approach->hold geometric_bilateral_contact gap=%.6f "
-            "force_per_finger=%.2f N; load_unverified",
-            fb.totalGap(), force);
+            "[CONTACT_FORCE] approach->direct_tendon_force_hold geometric_bilateral_contact "
+            "gap=%.6f tendon_reference=%.6f force_request_per_finger=%.2f N; load_unverified",
+            fb.totalGap(), hold_reference_tendon_length, force);
       }
       if (holding) {
         ramp_force = std::min(force, ramp_force + 0.05); // <=5 N/s at the 100 Hz command loop
         const bool bilateral_force = fb.left_finger_rod_contact && fb.right_finger_rod_contact &&
             fb.normal_left_n >= 0.25 && fb.normal_right_n >= 0.25;
-        if (!writeForceHold(gripper_states_ptr_, ramp_force)) {
+        if (!writeForceHold(gripper_states_ptr_, ramp_force, hold_reference_tendon_length)) {
           exit_reason = "write_force_hold_failed";
           RCLCPP_ERROR(get_logger(),
               "[CONTACT_FORCE] abort write_force_hold_failed ramp=%.3f supported=%d "
@@ -328,13 +340,16 @@ bool GripperSimActionServer::forceContactGrasp(double width, double speed, doubl
             lo=std::min(lo,sample.gap); hi=std::max(hi,sample.gap);
             left+=sample.left; right+=sample.right;
           }
-          if (samples.size()==20 && samples.back().time-samples.front().time >= 0.18 &&
-              left>=16 && right>=16 && hi-lo<=0.0005) {
+          const double window_duration = samples.empty() ? 0.0 :
+              samples.back().time - samples.front().time;
+          if (contactForceWindowAccepted(samples.size(), window_duration, left, right, hi-lo)) {
             RCLCPP_INFO(get_logger(),
-                "[CONTACT_FORCE] bilateral_force_established samples=20 "
-                "pad_contact_occupancy=(%d,%d) gap_spread=%.6f "
-                "normal=(%.3f,%.3f) persistent_hold=true; load_unverified",
-                left,right,hi-lo,fb.normal_left_n,fb.normal_right_n);
+                "[CONTACT_FORCE] bilateral_force_established request_per_finger_n=%.3f "
+                "measured_pad_normal_per_finger_n=(%.3f,%.3f) samples=20 "
+                "pad_contact_occupancy=(%d,%d) gap_spread=%.6f gap_spread_limit=%.6f "
+                "persistent_hold=true; load_unverified",
+                force,fb.normal_left_n,fb.normal_right_n,
+                left,right,hi-lo,kContactForceStableGapSpreadM);
             return true;
           }
         }
@@ -361,17 +376,38 @@ bool GripperSimActionServer::forceContactGrasp(double width, double speed, doubl
   // also disables force mode. The caller will never lift on this failure.
   const double gap=measuredGap();
   const auto final_fb = readFeedback(gripper_states_ptr_);
+  double sample_gap_min = std::numeric_limits<double>::infinity();
+  double sample_gap_max = -std::numeric_limits<double>::infinity();
+  int sample_left_contact = 0, sample_right_contact = 0;
+  for (const auto& sample : samples) {
+    sample_gap_min = std::min(sample_gap_min, sample.gap);
+    sample_gap_max = std::max(sample_gap_max, sample.gap);
+    sample_left_contact += sample.left ? 1 : 0;
+    sample_right_contact += sample.right ? 1 : 0;
+  }
+  const double sample_gap_spread = samples.empty() ? std::numeric_limits<double>::quiet_NaN() :
+      sample_gap_max - sample_gap_min;
   if (is_canceled_) exit_reason = "canceled";
   else if (!rclcpp::ok()) exit_reason = "rclcpp_shutdown";
   else if (std::chrono::steady_clock::now() >= deadline && exit_reason == "deadline") exit_reason = "deadline";
+  // Every failed/canceled grasp leaves direct-force mode atomically with the
+  // position handoff. Invalid feedback asks the physics thread to hold its
+  // current tendon position rather than replaying a stale approach target.
   if (std::isfinite(gap)) writeGapCommand(gap);
+  else requestForceHoldStopAtCurrent(gripper_states_ptr_);
   RCLCPP_ERROR(get_logger(),
       "[CONTACT_FORCE] failed reason=%s holding=%d ramp_force=%.3f samples=%zu "
       "final_gap=%.6f final_seq=%llu final_sim_time=%.6f final_hold_force=%.3f "
-      "final_contacts=(%d,%d) no_load_proven=true",
+      "measured_pad_normal_per_finger_n=(%.3f,%.3f) final_contacts=(%d,%d) "
+      "last_window_gap_spread=%.6f last_window_occupancy=(%d,%d) "
+      "last_window_time=%.6f..%.6f no_load_proven=true",
       exit_reason.c_str(), holding ? 1 : 0, ramp_force, samples.size(), gap,
       final_fb.feedback_seq, final_fb.simulation_time, final_fb.hold_force_per_finger_n,
-      final_fb.left_finger_rod_contact ? 1 : 0, final_fb.right_finger_rod_contact ? 1 : 0);
+      final_fb.normal_left_n, final_fb.normal_right_n,
+      final_fb.left_finger_rod_contact ? 1 : 0, final_fb.right_finger_rod_contact ? 1 : 0,
+      sample_gap_spread, sample_left_contact, sample_right_contact,
+      samples.empty() ? -1.0 : samples.front().time,
+      samples.empty() ? -1.0 : samples.back().time);
   return false;
 }
 
@@ -505,13 +541,14 @@ void GripperSimActionServer::stopServiceCallback(const std::shared_ptr<Trigger::
 bool GripperSimActionServer::simGripperStop(){
   is_canceled_ = true;
   // Hold the last measured opening, in the same per-finger metre units as every
-  // other command (no 0-255 conversion). If no valid feedback exists the write
-  // is rejected and the previous command stays in place, which is the safest
-  // thing to do with an unknown opening.
+  // other command (no 0-255 conversion). If feedback is unavailable, ask the
+  // physics thread to capture its live tendon length; do not replay the old
+  // position target after leaving direct-force mode.
   const double gap = measuredGap();
   if(!std::isfinite(gap)){
     RCLCPP_WARN(this->get_logger(),
-                "[simGripperStop] no valid finger feedback; leaving the previous command in place");
+                "[simGripperStop] no valid finger feedback; stopping at live tendon position");
+    requestForceHoldStopAtCurrent(gripper_states_ptr_);
     return true;
   }
   writeGapCommand(gap);

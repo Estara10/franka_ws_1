@@ -12,6 +12,7 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <control_msgs/action/gripper_command.hpp>
 #include <franka_msgs/action/grasp.hpp>
+#include <std_srvs/srv/trigger.hpp>
 
 // A1 P3a-2a: gripper action client.
 //
@@ -110,6 +111,9 @@ public:
     /// Drives both grippers to `position` (PER-FINGER displacement, metres).
     /// Returns true only when both arms report E_OK.
     bool controlDualGrippers(double position);
+    /// Stops both grippers at their measured positions; used to leave the
+    /// contact-only actuator mode before a failed load probe shuts down.
+    bool stopDualGrippers();
     /// Explicit object-contact path. Uses the simulator's Grasp action contract;
     /// each action succeeds only after bilateral finger-to-rod feedback.
     bool controlDualGrippersContact(double force_per_finger_n = 0.0);
@@ -159,6 +163,8 @@ private:
     rclcpp_action::Client<GripperAction>::SharedPtr right_client_;
     rclcpp_action::Client<franka_msgs::action::Grasp>::SharedPtr left_contact_client_;
     rclcpp_action::Client<franka_msgs::action::Grasp>::SharedPtr right_contact_client_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr left_stop_client_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr right_stop_client_;
     std::mutex client_mutex_;   // guards lazy creation
     std::mutex call_mutex_;     // only one open/close may be in flight
     std::atomic<bool> in_flight_ {false};

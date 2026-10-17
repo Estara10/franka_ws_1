@@ -3,7 +3,7 @@
 
   <!-- implicitfast: MuJoCo推荐的隐式积分器，消除Euler积分器在刚性接触时的能量注入（铝棒蠕变脱落） -->
   <!-- 注意：仅改积分器，不改任何力学参数(kp/solref/solimp均保持原值) -->
-  <option timestep="0.002" integrator="implicitfast" iterations="50" tolerance="1e-9" solver="Newton" jacobian="dense" cone="pyramidal"/>
+  <option timestep="0.002" integrator="implicitfast" iterations="50" tolerance="1e-9" solver="Newton" jacobian="dense" cone="pyramidal" noslip_iterations="20"/>
 
   <!-- Defaults, mesh descriptions, colors, etc. -->
   <default>

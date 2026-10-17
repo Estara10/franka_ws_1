@@ -13,13 +13,18 @@
 // limitations under the License.
 
 #include "franka_hardware/sim/franka_mj_hardware_system.hpp"
+#include "franka_hardware/sim/contact_probe_contact_filter.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <iomanip>
+#include <limits>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <franka/exception.h>
 #include <hardware_interface/handle.hpp>
@@ -38,6 +43,64 @@ namespace franka_hardware {
 using StateInterface = hardware_interface::StateInterface;
 using CommandInterface = hardware_interface::CommandInterface;
 
+namespace {
+
+struct ContactProbeFilterState {
+  const mjModel* model {nullptr};
+  int rod_geom {-1};
+  std::vector<int> finger_mesh_geoms;
+  mjfConFilt previous_callback {nullptr};
+  std::atomic<std::uint64_t> filtered_pairs {0};
+  std::atomic<bool> enabled {false};
+};
+
+ContactProbeFilterState g_contact_probe_filter_state;
+
+int contactProbeContactFilter(const mjModel* model, mjData* data,
+                              int geom1, int geom2) {
+  const auto& state = g_contact_probe_filter_state;
+  const bool previous_discarded = state.previous_callback != nullptr &&
+      state.previous_callback != contactProbeContactFilter &&
+      state.previous_callback(model, data, geom1, geom2) != 0;
+  if (!model || geom1 < 0 || geom2 < 0 ||
+      geom1 >= model->ngeom || geom2 >= model->ngeom) {
+    return previous_discarded ? 1 : 0;
+  }
+  const bool same_model = state.enabled.load(std::memory_order_relaxed) &&
+      model == state.model;
+  const bool mesh_rule = same_model &&
+      franka_gripper::isContactProbeMeshRodPair(
+          geom1, geom2, state.rod_geom,
+          state.finger_mesh_geoms.data(), state.finger_mesh_geoms.size());
+  const bool discard = franka_gripper::shouldDiscardContactProbePair(
+      previous_discarded, same_model,
+      geom1, model->geom_contype[geom1], model->geom_conaffinity[geom1],
+      geom2, model->geom_contype[geom2], model->geom_conaffinity[geom2],
+      state.rod_geom,
+      state.finger_mesh_geoms.data(), state.finger_mesh_geoms.size());
+  if (!previous_discarded && mesh_rule) {
+    g_contact_probe_filter_state.filtered_pairs.fetch_add(1, std::memory_order_relaxed);
+  }
+  return discard ? 1 : 0;
+}
+
+const char* contactGeomRole(const mjModel* model, int geom, int rod_geom) {
+  if (geom == rod_geom) return "obj_rod_01";
+  if (geom < 0 || geom >= model->ngeom) return "invalid_geom";
+  const char* body_name = mj_id2name(model, mjOBJ_BODY, model->geom_bodyid[geom]);
+  if (body_name == nullptr || std::string(body_name).find("finger") == std::string::npos) {
+    return "environment_or_other";
+  }
+  if (model->geom_type[geom] == mjGEOM_MESH) return "finger_collision_mesh";
+  if (model->geom_type[geom] == mjGEOM_BOX && model->geom_group[geom] == 3) {
+    return model->geom_contype[geom] == 0 && model->geom_conaffinity[geom] == 0
+        ? "disabled_aux_pad_box" : "finger_pad_box";
+  }
+  return "finger_other_geom";
+}
+
+}  // namespace
+
 bool FrankaMjHardwareSystem::initSim(
     rclcpp_lifecycle::LifecycleNode::SharedPtr & model_nh,
     const hardware_interface::HardwareInfo & hardware_info,
@@ -49,15 +112,47 @@ bool FrankaMjHardwareSystem::initSim(
     this->nh_ = model_nh;
     this->m_ = m;
     this->d_ = d;
+    RCLCPP_INFO(getLogger(),
+        "[contact_probe] solver options: cone=%d noslip_iterations=%d "
+        "noslip_tolerance=%.3e impratio=%.3f iterations=%d timestep=%.4f",
+        static_cast<int>(m_->opt.cone), m_->opt.noslip_iterations,
+        m_->opt.noslip_tolerance, m_->opt.impratio, m_->opt.iterations,
+        m_->opt.timestep);
+
+    if (const char* trace_path = std::getenv("CONTACT_PROBE_CONTACT_TRACE_CSV")) {
+      if (*trace_path != '\0') {
+        contact_probe_trace_.open(trace_path, std::ios::out | std::ios::trunc);
+        if (!contact_probe_trace_) {
+          RCLCPP_ERROR(getLogger(), "[contact_probe] cannot open contact trace CSV: %s", trace_path);
+          return false;
+        }
+        contact_probe_trace_ << "sim_time,arm,contact_index,geom1_id,geom1,geom1_role,body1_id,body1,geom2_id,geom2,geom2_role,body2_id,body2,finger_side,"
+            "contact_x,contact_y,contact_z,normal_x,normal_y,normal_z,"
+            "contact_dim,contact_dist,contact_includemargin,friction0,friction1,friction2,friction3,friction4,"
+            "wrench_n,wrench_t1,wrench_t2,wrench_tau1,wrench_tau2,wrench_tau3,"
+            "rod_force_x,rod_force_y,rod_force_z,force_included,"
+            "q1_m,q2_m,dq1_m_s,dq2_m_s,actuator_id,actuator_ctrl_m,actuator_force_n,"
+            "actuator_force_limit_abs_n,tendon_length_m,hold_force_per_finger_n,"
+            "hold_reference_tendon_length_m,finger_damping_q1_n_s_per_m,"
+            "finger_damping_q2_n_s_per_m,hand_x,hand_y,hand_z,rod_x,rod_y,rod_z,"
+            "rod_qw,rod_qx,rod_qy,rod_qz,feedback_seq,weld_left,weld_right,rod_constraint,"
+            "actuator_drive_mode,actuator_gaintype,actuator_biastype,actuator_gain0,actuator_bias0,"
+            "actuator_bias1,actuator_bias2,contact_solref0,contact_solref1,contact_solimp0,"
+            "contact_solimp1,contact_solimp2,contact_solimp3,contact_solimp4\n";
+        RCLCPP_INFO(getLogger(), "[contact_probe] per-contact MuJoCo trace: %s", trace_path);
+      }
+    }
 
     // Contact-probe-only geometry profile. Keep the original MuJoCo model for
     // ideal_weld and other modes; when explicitly requested, disable the four
     // small auxiliary fingertip boxes and retain the primary pad per finger.
     // The auxiliary boxes are identified by box type, collision group 3, and
-    // their 3 mm x-size; the primary 8.5 mm pad is left untouched.
+    // their 3 mm x-size; the primary pad remains enabled.
     const char* single_pad_env = std::getenv("CONTACT_PROBE_SINGLE_PAD");
     const bool single_primary_pad = single_pad_env != nullptr &&
         std::string(single_pad_env) == "true";
+    contact_probe_single_pad_active_ = single_primary_pad;
+    contact_probe_first_contact_logged_ = {{false, false}};
     if (single_primary_pad) {
       auto* mutable_model = const_cast<mjModel*>(m_);
       int disabled_auxiliary_pads = 0;
@@ -83,11 +178,20 @@ bool FrankaMjHardwareSystem::initSim(
           // intentionally unchanged at the model value (3.0); only the
           // contact footprint and normal settling are adjusted to avoid edge
           // contact and solver impulse spikes in the probe.
+          //
+          // 2026-10-17: a 0.018 m z extent was tried to enlarge the slip budget
+          // (the contact trace showed the pad climbing to the rod's top edge),
+          // but it broke the closing window (right gripper deadline, left
+          // single-finger contact). Reverted to 0.010 m; the slip-budget
+          // hypothesis is tested by lift speed instead.
           mutable_model->geom_size[3 * geom] = 0.010;
           mutable_model->geom_size[3 * geom + 1] = 0.006;
           mutable_model->geom_size[3 * geom + 2] = 0.010;
           mutable_model->geom_solref[2 * geom] = 0.02;
           mutable_model->geom_solref[2 * geom + 1] = 1.0;
+          // A 0.002 m pad margin was tried to improve contact continuity after
+          // NoSlip=20; it made the hold worse (left finger lost contact, 12 mm
+          // slip), so the model margin (0.001) is kept.
           ++tuned_primary_pads;
         }
       }
@@ -180,6 +284,24 @@ bool FrankaMjHardwareSystem::initSim(
 
         // Start the gripper node if true
         if(arm.robot_->has_gripper_){
+            const int gripper_act = arm.robot_->gripper_act_idx_;
+            GripperActuatorConfig actuator_base;
+            actuator_base.dyntype = m_->actuator_dyntype[gripper_act];
+            actuator_base.gaintype = m_->actuator_gaintype[gripper_act];
+            actuator_base.biastype = m_->actuator_biastype[gripper_act];
+            actuator_base.ctrllimited = m_->actuator_ctrllimited[gripper_act];
+            actuator_base.forcelimited = m_->actuator_forcelimited[gripper_act];
+            std::copy_n(m_->actuator_dynprm + mjNDYN * gripper_act, mjNDYN, actuator_base.dynprm.begin());
+            std::copy_n(m_->actuator_gainprm + mjNGAIN * gripper_act, mjNGAIN, actuator_base.gainprm.begin());
+            std::copy_n(m_->actuator_biasprm + mjNBIAS * gripper_act, mjNBIAS, actuator_base.biasprm.begin());
+            std::copy_n(m_->actuator_gear + 6 * gripper_act, 6, actuator_base.gear.begin());
+            std::copy_n(m_->actuator_ctrlrange + 2 * gripper_act, 2, actuator_base.ctrlrange.begin());
+            std::copy_n(m_->actuator_forcerange + 2 * gripper_act, 2, actuator_base.forcerange.begin());
+            gripper_actuator_config_base_[arm.robot_name_] = actuator_base;
+            gripper_direct_force_active_[arm.robot_name_] = false;
+            gripper_finger_damping_base_[arm.robot_name_] = {
+                m_->dof_damping[arm.robot_->gripper_joint_qvel_indices_[0]],
+                m_->dof_damping[arm.robot_->gripper_joint_qvel_indices_[1]]};
             RCLCPP_INFO_STREAM(getLogger(), "Gripper found for " << arm.robot_name_ << ". Creating a gripper server.");
             gripper_states_ptrs_.insert(std::make_pair(arm.robot_name_, std::make_shared<franka_gripper::GripperSharedState>()));
             gripper_nodes_.insert(std::make_pair(arm.robot_name_, std::make_shared<franka_gripper::GripperSimActionServer>(rclcpp::NodeOptions(), arm.robot_name_)));
@@ -188,6 +310,7 @@ bool FrankaMjHardwareSystem::initSim(
             const int act = arm.robot_->gripper_act_idx_;
             bool supported = m_->actuator_trntype[act] == mjTRN_TENDON &&
                 m_->actuator_dyntype[act] == mjDYN_NONE && m_->actuator_ctrllimited[act] &&
+                m_->actuator_forcelimited[act] &&
                 m_->actuator_ctrlrange[2*act] == 0.0 && m_->actuator_ctrlrange[2*act+1] >= 0.04 &&
                 m_->actuator_gaintype[act] == mjGAIN_FIXED &&
                 m_->actuator_biastype[act] == mjBIAS_AFFINE &&
@@ -210,6 +333,17 @@ bool FrankaMjHardwareSystem::initSim(
             gripper_states_ptrs_[arm.robot_name_]->force_hold_supported = supported;
             RCLCPP_INFO(getLogger(), "Force-hold model %s supported=%d kp=%.1f tendon ratio=0.5/0.5",
                 arm.robot_name_.c_str(), supported, m_->actuator_gainprm[mjNGAIN*act]);
+            RCLCPP_INFO(getLogger(),
+                "[gripper_actuator_model] arm=%s dyntype=%d gaintype=%d biastype=%d "
+                "dynprm0=%.9g gainprm0=%.9g biasprm=(%.9g,%.9g,%.9g) gear0=%.9g "
+                "ctrlrange=(%.9g,%.9g) ctrllimited=%d forcerange=(%.9g,%.9g) forcelimited=%d",
+                arm.robot_name_.c_str(), static_cast<int>(actuator_base.dyntype),
+                static_cast<int>(actuator_base.gaintype), static_cast<int>(actuator_base.biastype),
+                actuator_base.dynprm[0], actuator_base.gainprm[0], actuator_base.biasprm[0],
+                actuator_base.biasprm[1], actuator_base.biasprm[2], actuator_base.gear[0],
+                actuator_base.ctrlrange[0], actuator_base.ctrlrange[1],
+                static_cast<int>(actuator_base.ctrllimited), actuator_base.forcerange[0],
+                actuator_base.forcerange[1], static_cast<int>(actuator_base.forcelimited));
             executor_->add_node(gripper_nodes_[arm.robot_name_]);
             GripperContactBodyIds contact_ids;
             contact_ids.left_finger = mj_name2id(m_, mjOBJ_BODY,
@@ -217,6 +351,9 @@ bool FrankaMjHardwareSystem::initSim(
             contact_ids.right_finger = mj_name2id(m_, mjOBJ_BODY,
                 (arm.robot_name_ + "_right_finger").c_str());
             contact_ids.rod = mj_name2id(m_, mjOBJ_BODY, "obj_rod_01");
+            contact_ids.rod_geom = mj_name2id(m_, mjOBJ_GEOM, "obj_rod_01");
+            contact_ids.hand_link8 = mj_name2id(
+                m_, mjOBJ_BODY, (arm.robot_name_ + "_link8").c_str());
             gripper_contact_body_ids_[arm.robot_name_] = contact_ids;
             RCLCPP_INFO(getLogger(),
                 "Gripper contact bodies %s: left=%d right=%d rod(obj_rod_01)=%d",
@@ -227,8 +364,22 @@ bool FrankaMjHardwareSystem::initSim(
               if (body == contact_ids.left_finger || body == contact_ids.right_finger ||
                   body == contact_ids.rod) {
                 const char* geom_name = mj_id2name(m_, mjOBJ_GEOM, geom);
-                RCLCPP_INFO(getLogger(), "  contact geom id=%d name=%s body_id=%d",
-                    geom, geom_name ? geom_name : "<unnamed>", body);
+                RCLCPP_INFO(getLogger(),
+                    "  contact geom id=%d name=%s role=%s body_id=%d contype=%d conaffinity=%d "
+                    "size=(%.5f,%.5f,%.5f) friction=(%.4f,%.4f,%.4f) condim=%d margin=%.5f "
+                    "solref=(%.5f,%.5f) solimp=(%.5f,%.5f,%.5f,%.5f,%.5f) priority=%d solmix=%.3f",
+                    geom, geom_name ? geom_name : "<unnamed>",
+                    contactGeomRole(m_, geom, mj_name2id(m_, mjOBJ_GEOM, "obj_rod_01")), body,
+                    static_cast<int>(m_->geom_contype[geom]),
+                    static_cast<int>(m_->geom_conaffinity[geom]),
+                    m_->geom_size[3 * geom], m_->geom_size[3 * geom + 1], m_->geom_size[3 * geom + 2],
+                    m_->geom_friction[3 * geom], m_->geom_friction[3 * geom + 1],
+                    m_->geom_friction[3 * geom + 2], static_cast<int>(m_->geom_condim[geom]),
+                    m_->geom_margin[geom], m_->geom_solref[2 * geom], m_->geom_solref[2 * geom + 1],
+                    m_->geom_solimp[mjNIMP * geom], m_->geom_solimp[mjNIMP * geom + 1],
+                    m_->geom_solimp[mjNIMP * geom + 2], m_->geom_solimp[mjNIMP * geom + 3],
+                    m_->geom_solimp[mjNIMP * geom + 4], static_cast<int>(m_->geom_priority[geom]),
+                    m_->geom_solmix[geom]);
               }
             }
         }
@@ -248,6 +399,57 @@ bool FrankaMjHardwareSystem::initSim(
           RCLCPP_DEBUG(getLogger(), "Joint %ld (name %s) initial position: %f", j, info_.joints[j].name.c_str(), std::stod(info_.joints[j].parameters.at("initial_position")));
         }
         
+    }
+
+    if (contact_probe_single_pad_active_) {
+      auto& filter = g_contact_probe_filter_state;
+      filter.model = m_;
+      filter.rod_geom = mj_name2id(m_, mjOBJ_GEOM, "obj_rod_01");
+      filter.finger_mesh_geoms.clear();
+      if (filter.rod_geom < 0) {
+        RCLCPP_FATAL(getLogger(),
+            "[contact_probe_filter] missing target geom obj_rod_01; refusing ambiguous filter setup");
+        return false;
+      }
+      for (const auto& entry : gripper_contact_body_ids_) {
+        const auto& ids = entry.second;
+        for (const int finger_body : {ids.left_finger, ids.right_finger}) {
+          int mesh_count = 0;
+          for (int geom = 0; geom < m_->ngeom; ++geom) {
+            if (m_->geom_bodyid[geom] == finger_body && m_->geom_type[geom] == mjGEOM_MESH &&
+                m_->geom_group[geom] == 3) {
+              filter.finger_mesh_geoms.push_back(geom);
+              ++mesh_count;
+            }
+          }
+          if (finger_body < 0 || mesh_count != 1) {
+            RCLCPP_FATAL(getLogger(),
+                "[contact_probe_filter] expected one collision mesh per finger body; body=%d count=%d",
+                finger_body, mesh_count);
+            filter.enabled.store(false, std::memory_order_relaxed);
+            return false;
+          }
+        }
+      }
+      if (filter.finger_mesh_geoms.empty()) {
+        RCLCPP_FATAL(getLogger(), "[contact_probe_filter] no finger collision meshes found");
+        return false;
+      }
+      if (mjcb_contactfilter != contactProbeContactFilter) {
+        filter.previous_callback = mjcb_contactfilter;
+      }
+      filter.filtered_pairs.store(0, std::memory_order_relaxed);
+      mjcb_contactfilter = contactProbeContactFilter;
+      filter.enabled.store(true, std::memory_order_relaxed);
+      std::string mesh_ids;
+      for (const int geom : filter.finger_mesh_geoms) {
+        mesh_ids += (mesh_ids.empty() ? "" : ",") + std::to_string(geom);
+      }
+      RCLCPP_INFO(getLogger(),
+          "[contact_probe_filter] active model=%p rod_geom=%d finger_mesh_geom_ids=[%s] "
+          "rule=mesh-rod only, previous_callback=%s; pad/rod and mesh/environment remain enabled",
+          static_cast<const void*>(m_), filter.rod_geom, mesh_ids.c_str(),
+          filter.previous_callback ? "chained" : "none");
     }
 
     // ===== Initialize grasp weld constraints (dual: left + right) =====
@@ -362,6 +564,9 @@ std::vector<CommandInterface> FrankaMjHardwareSystem::export_command_interfaces(
 
 CallbackReturn FrankaMjHardwareSystem::on_activate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
+  if (contact_probe_single_pad_active_) {
+    g_contact_probe_filter_state.enabled.store(true, std::memory_order_relaxed);
+  }
   for(auto& arm_container_pair : arms_){
     auto &arm = arm_container_pair.second;
     arm.hw_commands_joint_effort_.fill(0);
@@ -396,9 +601,55 @@ CallbackReturn FrankaMjHardwareSystem::on_activate(
 CallbackReturn FrankaMjHardwareSystem::on_deactivate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
   RCLCPP_INFO(getLogger(), "trying to Stop...");
+  bool waiting_for_force_restore = false;
+  for (const auto& arm_container_pair : arms_) {
+    const auto state_it = gripper_states_ptrs_.find(arm_container_pair.first);
+    if (state_it == gripper_states_ptrs_.end()) continue;
+    const auto fb = franka_gripper::readFeedback(state_it->second);
+    if (fb.direct_force_mode_active) {
+      franka_gripper::requestForceHoldStopAtCurrent(state_it->second);
+      waiting_for_force_restore = true;
+    }
+  }
+  // The actuator model may only be restored by write(), which runs in the
+  // MuJoCo physics callback. Do not report a successful deactivation while a
+  // direct-force actuator could still be live. If stepping is paused, fail
+  // closed; the owning simulator must resume its physics callback or destroy
+  // the model before this hardware component can deactivate.
+  if (waiting_for_force_restore) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < deadline) {
+      bool all_restored = true;
+      for (const auto& arm_container_pair : arms_) {
+        const auto state_it = gripper_states_ptrs_.find(arm_container_pair.first);
+        if (state_it != gripper_states_ptrs_.end() &&
+            franka_gripper::readFeedback(state_it->second).direct_force_mode_active) {
+          all_restored = false;
+          break;
+        }
+      }
+      if (all_restored) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    for (const auto& arm_container_pair : arms_) {
+      const auto state_it = gripper_states_ptrs_.find(arm_container_pair.first);
+      if (state_it != gripper_states_ptrs_.end() &&
+          franka_gripper::readFeedback(state_it->second).direct_force_mode_active) {
+        RCLCPP_ERROR(getLogger(),
+            "Refusing hardware deactivation: physics thread did not restore gripper actuator mode");
+        return CallbackReturn::ERROR;
+      }
+    }
+  }
   for(auto& arm_container_pair : arms_){
     auto &arm = arm_container_pair.second;
     arm.control_mode_ = ControlMode::None;
+  }
+  if (contact_probe_single_pad_active_) {
+    g_contact_probe_filter_state.enabled.store(false, std::memory_order_relaxed);
+    RCLCPP_INFO(getLogger(), "[contact_probe_filter] filtered mesh-rod candidate pairs=%llu",
+        static_cast<unsigned long long>(
+            g_contact_probe_filter_state.filtered_pairs.load(std::memory_order_relaxed)));
   }
   RCLCPP_INFO(getLogger(), "Stopped"); 
   return CallbackReturn::SUCCESS;
@@ -430,6 +681,34 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
       double force_xyz[3]{0.0, 0.0, 0.0};
       double force_z = 0.0;
       std::uint32_t rod_pad_contact_count = 0;
+      double trace_hold_force = 0.0;
+      double trace_hold_reference_length = 0.0;
+      std::uint64_t trace_feedback_seq = 0;
+      {
+        auto& state = *gripper_states_ptrs_[arm.robot_name_];
+        std::lock_guard<std::mutex> lock(state.mutex);
+        trace_hold_force = state.hold_force_per_finger_n;
+        trace_hold_reference_length = state.hold_reference_tendon_length;
+        // read() is the single publisher and increments the sequence later in
+        // this cycle, so contact and no-contact rows use the sequence that is
+        // published for this same MuJoCo snapshot.
+        trace_feedback_seq = state.feedback_seq + 1;
+      }
+      bool trace_rod_constraint = false;
+      for (int e=0; e<m_->neq; ++e) {
+        if (d_->eq_active[e] && (m_->eq_type[e] == mjEQ_WELD || m_->eq_type[e] == mjEQ_CONNECT) &&
+            (m_->eq_obj1id[e] == ids.rod || m_->eq_obj2id[e] == ids.rod)) {
+          trace_rod_constraint = true;
+        }
+      }
+      const int trace_weld_left = weld_eq_id_ >= 0 && d_->eq_active[weld_eq_id_] ? 1 : 0;
+      const int trace_weld_right = weld_right_eq_id_ >= 0 && d_->eq_active[weld_right_eq_id_] ? 1 : 0;
+      const auto body_position = [this](int body, int axis) {
+        return body >= 0 ? d_->xpos[3 * body + axis] : std::numeric_limits<double>::quiet_NaN();
+      };
+      const auto body_quaternion = [this](int body, int component) {
+        return body >= 0 ? d_->xquat[4 * body + component] : std::numeric_limits<double>::quiet_NaN();
+      };
       // The contact solver can report very large transient impulses while a
       // pad is entering/leaving a stiff box contact.  They are useful for
       // diagnosing the solver, but must not become a valid grasp force.  The
@@ -444,6 +723,27 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
           if (body1 == ids.rod || body2 == ids.rod) {
             const int other = body1 == ids.rod ? body2 : body1;
             const int finger_geom = body1 == ids.rod ? contact.geom2 : contact.geom1;
+            if ((other == ids.left_finger || other == ids.right_finger) &&
+                contact_probe_single_pad_active_) {
+              const std::size_t arm_index =
+                  arm.robot_name_ == "mj_left" ? 0u : 1u;
+              if (!contact_probe_first_contact_logged_[arm_index]) {
+                contact_probe_first_contact_logged_[arm_index] = true;
+                const char* role = contactGeomRole(m_, finger_geom, ids.rod_geom);
+                if (std::string(role) == "finger_pad_box") {
+                  RCLCPP_INFO(getLogger(),
+                      "[contact_probe] first finger-rod contact arm=%s geom=%d role=%s; "
+                      "expected single-primary-pad profile",
+                      arm.robot_name_.c_str(), finger_geom, role);
+                } else {
+                  RCLCPP_ERROR(getLogger(),
+                      "[contact_probe] INVALID contact profile arm=%s geom=%d role=%s; "
+                      "expected only finger_pad_box (check that the contact filter "
+                      "preserves contype/conaffinity)",
+                      arm.robot_name_.c_str(), finger_geom, role);
+                }
+              }
+            }
             // Box collision geoms are the pads; visual meshes never count.
             if ((other == ids.left_finger || other == ids.right_finger) &&
                 m_->geom_type[finger_geom] == mjGEOM_BOX && m_->geom_group[finger_geom] == 3) {
@@ -458,6 +758,9 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
               bool valid_force = true;
               mjtNum wrench[6]{};
               mj_contactForce(m_, d_, i, wrench);
+              mjtNum trace_world_force[3]{};
+              mju_mulMatTVec3(trace_world_force, contact.frame, wrench);
+              const double rod_sign = body2 == ids.rod ? 1.0 : -1.0;
               for (int k = 0; k < 3; ++k) {
                 valid_force = valid_force && std::isfinite(static_cast<double>(wrench[k])) &&
                     std::abs(static_cast<double>(wrench[k])) <= kMaxSustainedPadForceN;
@@ -468,14 +771,74 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
                 normals[side] += std::abs(static_cast<double>(wrench[0]));
                 tangents[side] += std::hypot(static_cast<double>(wrench[1]),
                                               static_cast<double>(wrench[2]));
-                const double sign = body2 == ids.rod ? 1.0 : -1.0;
                 mjtNum world_force[3]{};
-                mju_mulMatVec3(world_force, contact.frame, wrench);
-                force_xyz[0] += sign * world_force[0];
-                force_xyz[1] += sign * world_force[1];
-                force_xyz[2] += sign * world_force[2];
-                force_z += sign * (contact.frame[2]*wrench[0] + contact.frame[5]*wrench[1] +
-                                   contact.frame[8]*wrench[2]);
+                // MuJoCo stores contact-frame basis axes in ROWS (unlike most
+                // other mjData rotation matrices). Map the contact-frame force
+                // to world with the transpose; using mat*vec swaps this
+                // projection and makes rod_force_xyz disagree with force_z.
+                mju_mulMatTVec3(world_force, contact.frame, wrench);
+                force_xyz[0] += rod_sign * world_force[0];
+                force_xyz[1] += rod_sign * world_force[1];
+                force_xyz[2] += rod_sign * world_force[2];
+                force_z += rod_sign * world_force[2];
+              }
+              if (contact_probe_trace_.is_open() && trace_hold_force > 0.0 &&
+                  contact_probe_trace_tick_ % 10 == 0) {
+                const char* geom1 = mj_id2name(m_, mjOBJ_GEOM, contact.geom1);
+                const char* geom2 = mj_id2name(m_, mjOBJ_GEOM, contact.geom2);
+                const char* geom1_role = contactGeomRole(m_, contact.geom1, ids.rod_geom);
+                const char* geom2_role = contactGeomRole(m_, contact.geom2, ids.rod_geom);
+                const char* body1_name = mj_id2name(m_, mjOBJ_BODY, body1);
+                const char* body2_name = mj_id2name(m_, mjOBJ_BODY, body2);
+                const char* finger_side = side == 0 ? "left" : "right";
+                const int act = arm.robot_->gripper_act_idx_;
+                const int tendon = (act >= 0 && act < m_->nu) ? m_->actuator_trnid[2 * act] : -1;
+                const double tendon_length = tendon >= 0 && tendon < m_->ntendon
+                    ? d_->ten_length[tendon] : std::numeric_limits<double>::quiet_NaN();
+                const double q1 = d_->qpos[arm.robot_->gripper_joint_qpos_indices_[0]];
+                const double q2 = d_->qpos[arm.robot_->gripper_joint_qpos_indices_[1]];
+                const double dq1 = d_->qvel[arm.robot_->gripper_joint_qvel_indices_[0]];
+                const double dq2 = d_->qvel[arm.robot_->gripper_joint_qvel_indices_[1]];
+                contact_probe_trace_ << std::setprecision(10) << d_->time << ',' << arm.robot_name_ << ',' << i << ','
+                    << contact.geom1 << ',' << (geom1 ? geom1 : "<unnamed>") << ','
+                    << geom1_role << ',' << body1 << ',' << (body1_name ? body1_name : "<unnamed>") << ','
+                    << contact.geom2 << ',' << (geom2 ? geom2 : "<unnamed>") << ','
+                    << geom2_role << ',' << body2 << ',' << (body2_name ? body2_name : "<unnamed>") << ',' << finger_side << ','
+                    << contact.pos[0] << ',' << contact.pos[1] << ',' << contact.pos[2] << ','
+                    << contact.frame[0] << ',' << contact.frame[1] << ',' << contact.frame[2] << ','
+                    << contact.dim << ',' << contact.dist << ',' << contact.includemargin << ','
+                    << contact.friction[0] << ',' << contact.friction[1] << ',' << contact.friction[2] << ','
+                    << contact.friction[3] << ',' << contact.friction[4] << ','
+                    << wrench[0] << ',' << wrench[1] << ',' << wrench[2] << ','
+                    << wrench[3] << ',' << wrench[4] << ',' << wrench[5] << ','
+                    << rod_sign * trace_world_force[0] << ',' << rod_sign * trace_world_force[1] << ','
+                    << rod_sign * trace_world_force[2] << ',' << (valid_force ? 1 : 0) << ','
+                    << q1 << ',' << q2 << ',' << dq1 << ',' << dq2 << ',' << act << ','
+                    << (act >= 0 && act < m_->nu ? d_->ctrl[act] : 0.0) << ','
+                    << (act >= 0 && act < m_->nu ? d_->actuator_force[act] : 0.0) << ','
+                    << (act >= 0 && act < m_->nu ? m_->actuator_forcerange[2 * act + 1] : 0.0) << ','
+                    << tendon_length << ','
+                    << trace_hold_force << ',' << trace_hold_reference_length << ','
+                    << m_->dof_damping[arm.robot_->gripper_joint_qvel_indices_[0]] << ','
+                    << m_->dof_damping[arm.robot_->gripper_joint_qvel_indices_[1]] << ','
+                    << body_position(ids.hand_link8, 0) << ',' << body_position(ids.hand_link8, 1) << ','
+                    << body_position(ids.hand_link8, 2) << ',' << body_position(ids.rod, 0) << ','
+                    << body_position(ids.rod, 1) << ',' << body_position(ids.rod, 2) << ','
+                    << body_quaternion(ids.rod, 0) << ',' << body_quaternion(ids.rod, 1) << ','
+                    << body_quaternion(ids.rod, 2) << ',' << body_quaternion(ids.rod, 3) << ','
+                    << trace_feedback_seq << ',' << trace_weld_left << ','
+                    << trace_weld_right << ',' << (trace_rod_constraint ? 1 : 0) << ','
+                    << (gripper_direct_force_active_[arm.robot_name_] ? "EXPERIMENTAL_force_limited_position_hold" : "position") << ','
+                    << static_cast<int>(m_->actuator_gaintype[act]) << ','
+                    << static_cast<int>(m_->actuator_biastype[act]) << ','
+                    << m_->actuator_gainprm[mjNGAIN * act] << ','
+                    << m_->actuator_biasprm[mjNBIAS * act] << ','
+                    << m_->actuator_biasprm[mjNBIAS * act + 1] << ','
+                    << m_->actuator_biasprm[mjNBIAS * act + 2] << ','
+                    << contact.solref[0] << ',' << contact.solref[1] << ','
+                    << contact.solimp[0] << ',' << contact.solimp[1] << ','
+                    << contact.solimp[2] << ',' << contact.solimp[3] << ','
+                    << contact.solimp[4] << '\n';
               }
               // Invalid solver impulses do not count toward the force
               // measurements above, but geometric contact remains observable.
@@ -500,15 +863,50 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
         state.simulation_time = d_->time;
         state.weld_left_active = weld_eq_id_ >= 0 && d_->eq_active[weld_eq_id_];
         state.weld_right_active = weld_right_eq_id_ >= 0 && d_->eq_active[weld_right_eq_id_];
-        state.rod_constraint_active = false;
-        for (int e=0; e<m_->neq; ++e) {
-          if (d_->eq_active[e] && (m_->eq_type[e] == mjEQ_WELD || m_->eq_type[e] == mjEQ_CONNECT) &&
-              (m_->eq_obj1id[e] == ids.rod || m_->eq_obj2id[e] == ids.rod))
-            state.rod_constraint_active = true;
-        }
+        state.rod_constraint_active = trace_rod_constraint;
         ++state.feedback_seq;
+        trace_hold_force = state.hold_force_per_finger_n;
+        trace_hold_reference_length = state.hold_reference_tendon_length;
+        trace_feedback_seq = state.feedback_seq;
+      }
+      if (contact_probe_trace_.is_open() && trace_hold_force > 0.0 &&
+          contact_probe_trace_tick_ % 10 == 0 && rod_pad_contact_count == 0) {
+        const int act = arm.robot_->gripper_act_idx_;
+        const int tendon = (act >= 0 && act < m_->nu) ? m_->actuator_trnid[2 * act] : -1;
+        contact_probe_trace_ << std::setprecision(10) << d_->time << ',' << arm.robot_name_
+            << ",-1,-1,<none>,<none>,-1,<none>,-1,<none>,<none>,-1,<none>,none";
+        for (int empty_column = 0; empty_column < 25; ++empty_column) contact_probe_trace_ << ',';
+        contact_probe_trace_ << d_->qpos[arm.robot_->gripper_joint_qpos_indices_[0]] << ','
+            << d_->qpos[arm.robot_->gripper_joint_qpos_indices_[1]] << ','
+            << d_->qvel[arm.robot_->gripper_joint_qvel_indices_[0]] << ','
+            << d_->qvel[arm.robot_->gripper_joint_qvel_indices_[1]] << ',' << act << ','
+            << (act >= 0 && act < m_->nu ? d_->ctrl[act] : 0.0) << ','
+            << (act >= 0 && act < m_->nu ? d_->actuator_force[act] : 0.0) << ','
+            << (act >= 0 && act < m_->nu ? m_->actuator_forcerange[2 * act + 1] : 0.0) << ','
+            << (tendon >= 0 && tendon < m_->ntendon ? d_->ten_length[tendon] : 0.0) << ','
+            << trace_hold_force << ',' << trace_hold_reference_length << ','
+            << m_->dof_damping[arm.robot_->gripper_joint_qvel_indices_[0]] << ','
+            << m_->dof_damping[arm.robot_->gripper_joint_qvel_indices_[1]] << ','
+            << body_position(ids.hand_link8, 0) << ',' << body_position(ids.hand_link8, 1) << ','
+            << body_position(ids.hand_link8, 2) << ',' << body_position(ids.rod, 0) << ','
+            << body_position(ids.rod, 1) << ',' << body_position(ids.rod, 2) << ','
+            << body_quaternion(ids.rod, 0) << ',' << body_quaternion(ids.rod, 1) << ','
+            << body_quaternion(ids.rod, 2) << ',' << body_quaternion(ids.rod, 3) << ','
+            << trace_feedback_seq << ',' << trace_weld_left << ','
+            << trace_weld_right << ',' << (trace_rod_constraint ? 1 : 0) << ','
+            << (gripper_direct_force_active_[arm.robot_name_] ? "EXPERIMENTAL_force_limited_position_hold" : "position") << ','
+            << static_cast<int>(m_->actuator_gaintype[act]) << ','
+            << static_cast<int>(m_->actuator_biastype[act]) << ','
+            << m_->actuator_gainprm[mjNGAIN * act] << ','
+            << m_->actuator_biasprm[mjNBIAS * act] << ','
+            << m_->actuator_biasprm[mjNBIAS * act + 1] << ','
+            << m_->actuator_biasprm[mjNBIAS * act + 2] << ",,,,,,,\n";
       }
     }
+  }
+  if (contact_probe_trace_.is_open()) {
+    ++contact_probe_trace_tick_;
+    if (contact_probe_trace_tick_ % 100 == 0) contact_probe_trace_.flush();
   }
 //   for(auto& obj_pair: mj_objs_){
 //     updateObjectContainer(obj_pair.first);
@@ -685,16 +1083,153 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
       // is never written into the simulation.
       const franka_gripper::GripperFeedback fb =
           franka_gripper::readFeedback(gripper_states_ptrs_[arm.robot_name_]);
-      if(std::isfinite(fb.command_per_finger)){
-        const int act = arm.robot_->gripper_act_idx_;
-        double target = fb.command_per_finger;
-        if (fb.hold_force_per_finger_n > 0.0 && fb.force_hold_supported) {
-          target = franka_gripper::forceHoldPositionTarget(d_->actuator_length[act],
-              m_->actuator_gainprm[mjNGAIN*act], fb.hold_force_per_finger_n,
-              m_->actuator_ctrlrange[2*act], m_->actuator_ctrlrange[2*act+1]);
+      const int act = arm.robot_->gripper_act_idx_;
+      auto* mutable_model = const_cast<mjModel*>(m_);
+      const auto actuator_base_it = gripper_actuator_config_base_.find(arm.robot_name_);
+      const bool direct_force_requested = fb.hold_force_per_finger_n > 0.0 && fb.force_hold_supported;
+      const bool direct_force_active = gripper_direct_force_active_[arm.robot_name_];
+      bool suppress_position_command = direct_force_requested || fb.stop_at_current_position;
+      bool actuator_force_fault = false;
+      if (actuator_base_it != gripper_actuator_config_base_.end()) {
+        const auto& base = actuator_base_it->second;
+        const auto restore_actuator = [&]() {
+          mutable_model->actuator_dyntype[act] = base.dyntype;
+          mutable_model->actuator_gaintype[act] = base.gaintype;
+          mutable_model->actuator_biastype[act] = base.biastype;
+          mutable_model->actuator_ctrllimited[act] = base.ctrllimited;
+          mutable_model->actuator_forcelimited[act] = base.forcelimited;
+          std::copy(base.dynprm.begin(), base.dynprm.end(), mutable_model->actuator_dynprm + mjNDYN * act);
+          std::copy(base.gainprm.begin(), base.gainprm.end(), mutable_model->actuator_gainprm + mjNGAIN * act);
+          std::copy(base.biasprm.begin(), base.biasprm.end(), mutable_model->actuator_biasprm + mjNBIAS * act);
+          std::copy(base.gear.begin(), base.gear.end(), mutable_model->actuator_gear + 6 * act);
+          std::copy(base.ctrlrange.begin(), base.ctrlrange.end(), mutable_model->actuator_ctrlrange + 2 * act);
+          std::copy(base.forcerange.begin(), base.forcerange.end(), mutable_model->actuator_forcerange + 2 * act);
+          gripper_direct_force_active_[arm.robot_name_] = false;
+          franka_gripper::publishDirectForceModeActive(
+              gripper_states_ptrs_[arm.robot_name_], false);
+        };
+        bool direct_force_range_valid = true;
+        if (direct_force_requested) {
+          double lower = 0.0;
+          double upper = 0.0;
+          direct_force_range_valid = franka_gripper::forceHoldActuatorForceRange(
+              fb.closing_force_limit_per_finger_n, lower, upper);
+          if (direct_force_range_valid) {
+            if (!direct_force_active) {
+              // Keep the compiled position servo and only apply the existing
+              // explicit-contact force cap. A fixed target around the latched
+              // contact length provides restoring stiffness; the former
+              // constant-force mode had no position reference in common mode.
+              mutable_model->actuator_forcelimited[act] = 1;
+              mutable_model->actuator_forcerange[2 * act] = lower;
+              mutable_model->actuator_forcerange[2 * act + 1] = upper;
+              gripper_direct_force_active_[arm.robot_name_] = true;
+              franka_gripper::publishDirectForceModeActive(
+                  gripper_states_ptrs_[arm.robot_name_], true);
+              const int tendon = m_->actuator_trnid[2 * act];
+              const int tendon_first_wrap = (tendon >= 0 && tendon < m_->ntendon)
+                  ? m_->tendon_adr[tendon] : -1;
+              const double coefficient_left = tendon_first_wrap >= 0
+                  ? m_->wrap_prm[tendon_first_wrap] : std::numeric_limits<double>::quiet_NaN();
+              const double coefficient_right = tendon_first_wrap >= 0
+                  ? m_->wrap_prm[tendon_first_wrap + 1] : std::numeric_limits<double>::quiet_NaN();
+              RCLCPP_INFO(getLogger(),
+                  "[contact_probe_drive] arm=%s mode=EXPERIMENTAL_fixed_position_hold ctrl_units=m "
+                  "request_per_finger=%.3f limit=(%.3f,%.3f) kp=%.3f gear0=%.3f "
+                  "tendon_coefficients=(%.3f,%.3f); reference_length=%.6f",
+                  arm.robot_name_.c_str(), fb.closing_force_limit_per_finger_n, lower, upper,
+                  base.gainprm[0], base.gear[0], coefficient_left, coefficient_right,
+                  fb.hold_reference_tendon_length);
+            } else {
+              mutable_model->actuator_forcelimited[act] = 1;
+              mutable_model->actuator_forcerange[2 * act] = lower;
+              mutable_model->actuator_forcerange[2 * act + 1] = upper;
+            }
+          } else {
+            RCLCPP_ERROR(getLogger(),
+                "[contact_probe_drive] invalid direct-force request arm=%s",
+                arm.robot_name_.c_str());
+            actuator_force_fault = true;
+          }
         }
+        const bool hold_is_active = gripper_direct_force_active_[arm.robot_name_];
+        if (hold_is_active && direct_force_requested && direct_force_range_valid) {
+          const double position_target = franka_gripper::forceHoldPositionTarget(
+              fb.hold_reference_tendon_length, fb.hold_force_per_finger_n,
+              base.gainprm[0], franka_gripper::kContactHoldForceCommandFraction,
+              base.ctrlrange[0], base.ctrlrange[1]);
+          if (std::isfinite(position_target)) {
+            d_->ctrl[act] = position_target;
+          } else {
+            const double nominal_actuator_command_n =
+                -2.0 * fb.hold_force_per_finger_n *
+                franka_gripper::kContactHoldForceCommandFraction;
+            const double requested_ctrl_m = fb.hold_reference_tendon_length +
+                nominal_actuator_command_n / base.gainprm[0];
+            RCLCPP_ERROR(getLogger(),
+                "[contact_probe_drive] rejected unreachable fixed position target arm=%s "
+                "request_per_finger_n=%.3f nominal_actuator_command_n=%.3f "
+                "requested_ctrl_m=%.6f ctrlrange_m=(%.6f,%.6f) reference_length_m=%.6f "
+                "measured_pad_normal_n=(%.3f,%.3f)",
+                arm.robot_name_.c_str(), fb.hold_force_per_finger_n,
+                nominal_actuator_command_n, requested_ctrl_m,
+                base.ctrlrange[0], base.ctrlrange[1], fb.hold_reference_tendon_length,
+                fb.normal_left_n, fb.normal_right_n);
+            restore_actuator();
+            actuator_force_fault = true;
+          }
+        } else if (direct_force_active) {
+          // Restore every actuator field touched by the temporary mode before
+          // interpreting the next shared command as a position in metres.
+          restore_actuator();
+          RCLCPP_INFO(getLogger(),
+              "[contact_probe_drive] arm=%s mode=position restored gain=%g bias1=%g "
+              "ctrlrange=(%g,%g) ctrllimited=%d forcerange=(%g,%g) forcelimited=%d",
+              arm.robot_name_.c_str(), base.gainprm[0], base.biasprm[1],
+              base.ctrlrange[0], base.ctrlrange[1], static_cast<int>(base.ctrllimited),
+              base.forcerange[0], base.forcerange[1], static_cast<int>(base.forcelimited));
+        }
+        if (actuator_force_fault) {
+          const double current_tendon = d_->actuator_length[act];
+          if (std::isfinite(current_tendon)) {
+            failForceHoldAtCurrent(gripper_states_ptrs_[arm.robot_name_], current_tendon);
+            d_->ctrl[act] = std::clamp(current_tendon, base.ctrlrange[0], base.ctrlrange[1]);
+          } else {
+            requestForceHoldStopAtCurrent(gripper_states_ptrs_[arm.robot_name_], true);
+          }
+          suppress_position_command = true;
+        }
+        if (fb.stop_at_current_position && !actuator_force_fault) {
+          const double current_tendon = d_->actuator_length[act];
+          if (std::isfinite(current_tendon)) {
+            d_->ctrl[act] = std::clamp(current_tendon, base.ctrlrange[0], base.ctrlrange[1]);
+            publishStoppedTendonPosition(gripper_states_ptrs_[arm.robot_name_], current_tendon);
+          }
+          suppress_position_command = true;
+        }
+      }
+      // The action server requests contact hold; the MuJoCo control callback
+      // owns the physical parameter update. Add velocity-opposing finger
+      // damping while force hold is active; restore the exact model baseline
+      // when the explicit hold clears.
+      const auto damping_it = gripper_finger_damping_base_.find(arm.robot_name_);
+      if (damping_it != gripper_finger_damping_base_.end()) {
+        for (std::size_t finger = 0; finger < 2; ++finger) {
+          const int dof = arm.robot_->gripper_joint_qvel_indices_[finger];
+          mutable_model->dof_damping[dof] = franka_gripper::contactHoldFingerDamping(
+              damping_it->second[finger], fb.hold_force_per_finger_n > 0.0);
+        }
+      }
+      if (suppress_position_command) {
+        // The fixed contact-hold target or stop target was written above; do
+        // not run the ordinary command law in parallel. Invalid hold requests
+        // cannot fall back to an ordinary position target.
+      } else if(std::isfinite(fb.command_per_finger)){
+        double target = fb.command_per_finger;
         if (fb.closing_force_limit_per_finger_n > 0.0 && fb.force_hold_supported) {
-          const double bounded = franka_gripper::forceHoldPositionTarget(d_->actuator_length[act],
+          const double bounded = franka_gripper::boundedForceLimitPositionTarget(d_->actuator_length[act],
+              fb.hold_force_per_finger_n > 0.0 ? fb.hold_reference_tendon_length :
+                                                  d_->actuator_length[act],
               m_->actuator_gainprm[mjNGAIN*act], fb.closing_force_limit_per_finger_n,
               m_->actuator_ctrlrange[2*act], m_->actuator_ctrlrange[2*act+1]);
           target = std::max(target, bounded); // force limit also during unilateral approach

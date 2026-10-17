@@ -39,6 +39,7 @@ SEED=""
 DOMAIN_ID="${A1_ROS_DOMAIN_ID:-77}"
 USE_RVIZ="false"
 HEADLESS="false"
+OBSERVE_ON_ERROR=0
 READY_TIMEOUT=120
 NODE_TIMEOUT=180
 HELPER_TIMEOUT=20
@@ -65,6 +66,7 @@ PREGRASP_EXECUTE=0
 GRASP_DESCENT=0
 GRASP_CONTACT_CLOSE=0
 GRASP_MODEL="none"
+CONTACT_HOLD_DIAGNOSTIC_ONLY="${CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY:-0}"
 DESCENT_NEGATIVE_FINAL=""
 DESCENT_NEGATIVE_TRUTH=""
 # A1 P3a-2a: gripper interface check -- one empty-load open/close/open cycle.
@@ -139,6 +141,7 @@ usage: a1_run_scene.sh [options]
                         executed. The exit code then follows p2_acceptance.
   --domain-id N         ROS_DOMAIN_ID for this run (default 77)
   --use-rviz            start RViz with the simulator (default: no)
+  --observe-on-error    on a task ERROR, keep this visible simulator open until Enter/Ctrl+C
   --headless            run the simulator headless
   --ready-timeout SEC   wall-clock seconds to wait for the services
   --node-timeout SEC    hard wall-clock bound on the runner node (default 180)
@@ -167,6 +170,7 @@ while [[ $# -gt 0 ]]; do
     --grasp-descent)    GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1; shift ;;
     --grasp-contact-close) GRASP_CONTACT_CLOSE=1; GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1; shift ;;
     --grasp-model) GRASP_MODEL="$2"; shift 2 ;;
+  --contact-hold-diagnostic-only) CONTACT_HOLD_DIAGNOSTIC_ONLY=1; shift ;;
     --target-x) TASK_TARGET_X="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
     --target-y) TASK_TARGET_Y="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
     --target-yaw-deg) TASK_TARGET_YAW_DEG="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
@@ -177,6 +181,7 @@ while [[ $# -gt 0 ]]; do
     --p2a-workspace-source) P2A_WORKSPACE_SOURCE="$2"; shift 2 ;;
     --domain-id)       DOMAIN_ID="$2"; shift 2 ;;
     --use-rviz)        USE_RVIZ="true"; shift ;;
+    --observe-on-error) OBSERVE_ON_ERROR=1; shift ;;
     --headless)        HEADLESS="true"; shift ;;
     --ready-timeout)   READY_TIMEOUT="$2"; shift 2 ;;
     --node-timeout)    NODE_TIMEOUT="$2"; shift 2 ;;
@@ -189,6 +194,10 @@ done
 
 if [[ "${GRASP_MODEL}" != "none" && "${GRASP_MODEL}" != "ideal_weld" && "${GRASP_MODEL}" != "contact_probe" ]]; then
   echo "error: --grasp-model must be none, ideal_weld or contact_probe" >&2; exit 3
+fi
+if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 && "${GRASP_MODEL}" != "contact_probe" ]]; then
+  echo "error: --contact-hold-diagnostic-only requires --grasp-model contact_probe" >&2
+  exit 2
 fi
 if [[ "${GRASP_MODEL}" == "ideal_weld" || "${GRASP_MODEL}" == "contact_probe" ]]; then
   GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1
@@ -326,6 +335,7 @@ record_prepare_status() {
     printf '  "p2b_result_line": "%s",\n' "$(grep -m1 '\[P2B_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[P2B_RESULT\]/[P2B_RESULT]/' | tr -d '"\\')"
     printf '  "p2_acceptance": %s,\n' "$(p2_acceptance_true && echo true || echo false)"
     printf '  "grasp_model": "%s",\n' "${GRASP_MODEL}"
+    printf '  "contact_hold_diagnostic_only": %s,\n' "$([[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]] && echo true || echo false)"
     printf '  "contact_probe_result_line": "%s",\n' "$(grep -m1 '\[CONTACT_PROBE_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[CONTACT_PROBE_RESULT\]/[CONTACT_PROBE_RESULT]/' | tr -d '"\\')"
     printf '  "grasp_descent_enabled": %s,\n' "$([[ "${GRASP_DESCENT}" -eq 1 ]] && echo true || echo false)"
     printf '  "grasp_contact_close_enabled": %s,\n' "$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)"
@@ -438,6 +448,36 @@ cleanup() {
 trap cleanup EXIT
 trap 'echo "[run] signal received; stopping" >&2; exit 130' INT TERM
 
+observe_task_error_if_requested() {
+  [[ "${OBSERVE_ON_ERROR}" -eq 1 && "${TASK_STATE:-}" == "ERROR" && "${RC:-0}" -ne 0 ]] || return 0
+  [[ "${USE_RVIZ}" == "true" && "${HEADLESS}" != "true" ]] || return 0
+  if ! grep -qE '\[CONTACT_PROBE_CONFIG\]|\[CONTACT_HOLD_MECHANISM_RESULT\]|\[P3A2C_RESULT\]' \
+      "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+    echo "[observe] contact execution did not reach its task-stage marker; skip observation wait"
+    return 0
+  fi
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "[observe] non-interactive terminal; skip observation wait"
+    return 0
+  fi
+  [[ -n "${SIM_PID}" ]] && kill -0 "${SIM_PID}" 2>/dev/null || {
+    echo "[observe] simulator is no longer running; skip observation wait"
+    return 0
+  }
+  local services
+  services="$(timeout "${HELPER_TIMEOUT}" ros2 service list --no-daemon 2>/dev/null || true)"
+  if ! grep -qx "/get_sim_info" <<<"${services}"; then
+    echo "[observe] live MuJoCo truth service unavailable; skip observation wait"
+    return 0
+  fi
+
+  printf '%s\n' '任务已失败并停止运动，保留仿真供观察；按回车结束，Ctrl+C也可退出。'
+  local observe_interrupted=0
+  trap 'observe_interrupted=1' INT
+  IFS= read -r _observe_input || true
+  trap 'echo "[run] signal received; stopping" >&2; exit 130' INT TERM
+}
+
 echo "=============================================================="
 echo " A1 P1a scene runner"
 echo "   run_id            : ${RUN_ID}"
@@ -522,7 +562,13 @@ if [[ "${GRASP_MODEL}" == "contact_probe" && "${CONTACT_PROBE_RIGID}" == "true" 
 fi
 if [[ "${GRASP_MODEL}" == "contact_probe" ]]; then
   export CONTACT_PROBE_SINGLE_PAD=true
+  export CONTACT_PROBE_CONTACT_TRACE_CSV="${RUN_DIR}/contact_probe_contacts.csv"
   echo "[contact_probe] single-primary-pad contact profile enabled"
+  echo "[contact_probe] per-contact geom/force/actuator trace: ${CONTACT_PROBE_CONTACT_TRACE_CSV}"
+else
+  # These are process-wide opt-in hooks used by the hardware plugin. Do not
+  # let values inherited from the caller's shell affect ideal_weld/other runs.
+  unset CONTACT_PROBE_SINGLE_PAD CONTACT_PROBE_CONTACT_TRACE_CSV
 fi
 
 # A1 P3a-2a only: have each simulated gripper node append a plain CSV of its own
@@ -683,6 +729,7 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
               grasp_descent:="$([[ "${GRASP_DESCENT}" -eq 1 ]] && echo true || echo false)")
     P2A_ARGS+=(grasp_contact_close:="$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)")
     P2A_ARGS+=(grasp_model:="${GRASP_MODEL}")
+    P2A_ARGS+=(contact_hold_diagnostic_only:="$([[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]] && echo true || echo false)")
     if [[ "${TASK_TARGET_FIELDS}" -eq 3 ]]; then
       P2A_ARGS+=(rod_target_x:="${TASK_TARGET_X}" rod_target_y:="${TASK_TARGET_Y}"
                  rod_target_yaw_deg:="${TASK_TARGET_YAW_DEG}")
@@ -722,6 +769,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
       if [[ "${GRASP_MODEL}" == "contact_probe" ]] && grep -q '\[CONTACT_PROBE_RESULT\] state=DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="DONE"; break
       fi
+      if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]] && grep -q '\[CONTACT_HOLD_MECHANISM_RESULT\] state=PASS' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+        TASK_STATE="CONTACT_HOLD_MECHANISM_PASS"; break
+      fi
       if grep -q '\[S1_IDEAL_WELD_RESULT\] state=DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="DONE"; break
       fi
@@ -759,6 +809,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     elif [[ "${TASK_STATE}" == "DONE" && "${GRASP_MODEL}" == "contact_probe" ]]; then
       RC=0
       echo "[prepare] contact_probe complete: no-weld lift/hold/lower/release only; full transport unverified"
+    elif [[ "${TASK_STATE}" == "CONTACT_HOLD_MECHANISM_PASS" ]]; then
+      RC=0
+      echo "[prepare] contact hold mechanism only: fixed-arm hold and release passed; no lift/load claim"
     elif [[ "${TASK_STATE}" == "GRASP_CONTACT_CONFIRMED" ]]; then
       if grasp_contact_confirmed; then
         RC=0
@@ -863,6 +916,7 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
 
   stop_group runner "${RUNNER_PGID}" "${RUNNER_PID}"
   RUNNER_PID=""; RUNNER_PGID=""
+  observe_task_error_if_requested
   echo "prepare exit code: ${RC}"
   exit "${RC}"
 fi

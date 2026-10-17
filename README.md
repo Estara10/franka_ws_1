@@ -20,7 +20,6 @@
 - 当前内部柔顺是 MuJoCo 硬件层的自适应关节伺服增益。
 - 外部笛卡尔阻抗监督器默认关闭，完整轨迹桥和控制器切换链尚待实现。
 - A1 可复现随机场景尚待开发。
-- 模式 B 视觉仅保留实验框架，不属于当前验收主线。
 
 详细架构、阶段顺序和已知风险见 [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md)。
 
@@ -52,9 +51,8 @@ source install/setup.bash
 脚本提供：
 
 - 模式 A：固定场景，以及 `rigid`、`compliant`、`chomp_only`、`compliant_chomp` 旧模式名。
-- 模式 B：视觉动态抓取框架。
 
-一键脚本当前会检查源码时间并可能自动构建，也会创建日志；模式 B 还会修改 MuJoCo 场景源码。
+一键脚本当前会检查源码时间并可能自动构建，也会创建日志。
 这些行为属于已记录技术债。运行前建议先确认 `git status`，不要把它当作纯只读启动器。
 
 MoveIt 启动文件已经自动包含 MuJoCo。不要再单独启动第二个 MuJoCo 实例。需要分步调试时见
@@ -90,7 +88,7 @@ ros2 topic echo /joint_states --once
 - `archive/`：旧包、历史修补代码、旧文档和运行产物；有 `COLCON_IGNORE` 隔离。
 - `check_environment.sh`、`diagnose.sh`：遗留脚本，含旧工作区路径和失效入口；不被当前流程调用，
   可由用户确认后删除。
-- `scripts/`：实验记录、离线绘图、指标比较、实时面板和模式 B 视觉框架。完整用途和稳定命令见
+- `scripts/`：实验记录、离线绘图、指标比较和实时面板。完整用途和稳定命令见
   [`scripts/README.md`](scripts/README.md)。
 - `run_latency_benchmark.sh`、`run_task_metrics_benchmark.sh`：会连续启动完整仿真实验的基准脚本，
   不是普通只读分析命令。

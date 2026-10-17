@@ -7,7 +7,11 @@ float64 closing_force_limit_per_finger_n
 bool left_finger_rod_contact
 bool right_finger_rod_contact
 uint64 update_seq
-# Physics-thread measurements. Forces are sums over finger-pad / rod contacts.
+# Per-gripper physics-thread measurements. `left`/`right` below mean this
+# gripper's left/right finger body, not the robot arm. Normal/tangent magnitudes
+# sum that finger's pad/rod contacts; rod_force_* is the net world-frame force
+# ON THE ROD from both fingers of this one gripper. Add the mj_left and mj_right
+# arm values once to obtain the two-gripper total.
 float64 normal_left_n
 float64 normal_right_n
 float64 tangent_left_n

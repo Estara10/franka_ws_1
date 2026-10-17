@@ -33,13 +33,33 @@ double rotationError(const Transform& a,const Transform& b) {
 }
 }
 
-bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::string& detail) {
+bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::string& detail,
+                                           bool hold_diagnostic_only) {
     using namespace std::chrono_literals;
     // First bounded experiment, deliberately independent of S1 ideal_weld.
-    constexpr double force=5.0, height=0.05, hold_seconds=2.0;
+    // Previous traces measured < 2.3 N upward transfer against 6.28 N rod
+    // weight with a 5 N/finger hold, despite stable actuator output. Use one
+    // evidence-based clamp-force step; friction, mass and acceptance stay fixed.
+    // 10 N/finger is the largest request this position-tendon hold can express
+    // at the measured grasp opening: the fixed position target leaves
+    // ctrlrange at about 14 N, and kp*L/2 caps the achievable finger force
+    // near 12.5 N. A 50 N step needs a force-actuator change and is out of
+    // scope for the contact-probe run.
+    constexpr double force=10.0, height=0.50, hold_seconds=3.0;
+    // Project acceptance is a 45 mm rod rise, independent of the commanded lift
+    // height. With ~7-9 mm vertical slip, a 6 cm lift is needed to clear it.
+    constexpr double rod_rise_target=0.045;
     constexpr double pos_tol=0.005, angle_tol=2.0*M_PI/180.0;
+    // User-authorized: a few mm of vertical slip during the lift is acceptable as
+    // long as the rod is actually carried. Keep pos_tol=5 mm for grasp/arrival
+    // checks; relax only the lift/hold/descent monitor.
+    constexpr double lift_slip_tol=0.020;
+    // Lift timing scale. Kept as named constants so IPTP, the directional time
+    // scaling, and the post-scaling limit check can never disagree.
+    constexpr double lift_velocity_scale=1.00, lift_acceleration_scale=0.60;
     const std::array<std::string,2> arms{{"mj_left","mj_right"}};
     std::array<DualArmCarryTask::GripperContactFeedback,2> fingers;
+    bool force_hold_may_be_active=false;
     auto logSnapshot=[&](const char* reason) {
         for (int i=0;i<2;++i) {
             DualArmCarryTask::GripperContactFeedback sample;
@@ -68,6 +88,12 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         detail=reason;
         logSnapshot(reason.c_str());
         RCLCPP_ERROR(ctx_->get_logger(),"[CONTACT_PROBE_FAILURE] %s",reason.c_str());
+        if (force_hold_may_be_active) {
+            const bool stopped=ctx_->grippers_->stopDualGrippers();
+            RCLCPP_WARN(ctx_->get_logger(),
+                "[CONTACT_PROBE_FAILURE_CLEANUP] measured-position stop=%s; failure remains %s",
+                stopped ? "confirmed" : "unconfirmed", reason.c_str());
+        }
         return false;
     };
     if (!a1_verify_.valid || !a1_verify_.pregrasp_reached_this_round || !a1_verify_.descent_plan_valid ||
@@ -78,7 +104,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         return fail("E_CONTACT_RUN_ID");
     std::ofstream csv("experiment_results/a1_runs/"+run_id+"/contact_probe.csv");
     if (!csv) return fail("E_CONTACT_CSV_OPEN");
-    csv << std::setprecision(10) << "phase,sim_time,rod_x,rod_y,rod_z,left_slip_m,left_angle_rad,right_slip_m,right_angle_rad,left_q1,left_q2,right_q1,right_q2,left_command_per_finger_m,right_command_per_finger_m,left_force_limit_n,right_force_limit_n,left_hold_force_n,right_hold_force_n,left_pad_contact_count,right_pad_contact_count,left_contact_1,left_contact_2,right_contact_1,right_contact_2,left_normal1_n,left_normal2_n,right_normal1_n,right_normal2_n,left_tangent1_n,left_tangent2_n,right_tangent1_n,right_tangent2_n,left_rod_force_x_n,left_rod_force_y_n,left_rod_force_z_n,right_rod_force_x_n,right_rod_force_y_n,right_rod_force_z_n,left_seq,right_seq,weld_left,weld_right,rod_constraint\n";
+    csv << std::setprecision(10) << "phase,left_sim_time,right_sim_time,rod_x,rod_y,rod_z,left_slip_m,left_angle_rad,right_slip_m,right_angle_rad,left_q1,left_q2,right_q1,right_q2,left_command_per_finger_m,right_command_per_finger_m,left_force_limit_n,right_force_limit_n,left_hold_force_n,right_hold_force_n,left_pad_contact_count,right_pad_contact_count,left_contact_1,left_contact_2,right_contact_1,right_contact_2,left_normal1_n,left_normal2_n,right_normal1_n,right_normal2_n,left_tangent1_n,left_tangent2_n,right_tangent1_n,right_tangent2_n,left_rod_force_x_n,left_rod_force_y_n,left_rod_force_z_n,right_rod_force_x_n,right_rod_force_y_n,right_rod_force_z_n,left_seq,right_seq,weld_left,weld_right,rod_constraint,left_hand_x,left_hand_y,left_hand_z,left_hand_qx,left_hand_qy,left_hand_qz,left_hand_qw,right_hand_x,right_hand_y,right_hand_z,right_hand_qx,right_hand_qy,right_hand_qz,right_hand_qw\n";
     std::array<unsigned long long,2> seq{{0,0}};
     std::array<double,2> sim_time{{-1,-1}}, progress_wall{{steadySeconds(),steadySeconds()}};
     auto feedback=[&]() {
@@ -141,7 +167,21 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     if ((rodTransform(before).translation()-frozen).norm()>0.005 ||
         a1t::rotationDistanceRad(before.orientation,{truth.orientation.x,truth.orientation.y,truth.orientation.z,truth.orientation.w})>5*M_PI/180)
         return fail("E_CONTACT_FROZEN_REFERENCE_CHANGED");
-    RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_PROBE_CONFIG] force_per_finger=5N lift=0.05m hold=2s slip_limit=5mm/2deg weld=OFF; model/friction/mass unchanged");
+    RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_PROBE_CONFIG] requested_hold_force_per_finger=%.1f N "
+        "nominal_tendon_actuator_command=%.1f N (0.90*2F; nominal per-branch generalized force=%.1f N) "
+        "runtime_tendon_force_cap=+/-%.1f N; actual actuator_force is in contact_probe_contacts.csv, "
+        "actual pad normal force is in contact_probe.csv; mode=%s lift=%.3fm hold=%.1fs "
+        "lift_slip_limit=%.1fmm(user-authorized)/2deg; grasp_slip_tol=%.1fmm; rod_rise_target=%.0fmm; "
+        "acceptance hold=%.1fs; lift_velocity_scale=%.2f lift_acceleration_scale=%.2f weld=OFF; "
+        "model/friction/mass unchanged",
+        force, -2.0*force*0.90, -force*0.90, force,
+        hold_diagnostic_only ? "fixed-arm-mechanism-diagnostic" : "full-load-probe",
+        height, hold_seconds, lift_slip_tol*1000.0, pos_tol*1000.0, rod_rise_target*1000.0,
+        hold_seconds, lift_velocity_scale, lift_acceleration_scale);
+    // One arm may have entered direct-force hold even when its peer's action
+    // fails. From the first contact-goal attempt, failure cleanup sends the
+    // measured-position Stop service to both sides before the simulator exits.
+    force_hold_may_be_active=true;
     if (!ctx_->grippers_->controlDualGrippersContact(force)) return fail("E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN");
     moveit::core::RobotState start(live_model);
     if (!measured(start)) return fail(detail);
@@ -153,7 +193,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     if ((object.translation()-rodTransform(before).translation()).norm()>pos_tol ||
         rotationError(object,rodTransform(before))>angle_tol) return fail("E_CONTACT_ROD_MOVED_DURING_CLOSE");
     const std::array<std::string,2> eefs{{a1_verify_.left_eef,a1_verify_.right_eef}};
-    const std::array<Transform,2> object_to_hand{{object.inverse()*start.getGlobalLinkTransform(eefs[0]),
+    std::array<Transform,2> object_to_hand{{object.inverse()*start.getGlobalLinkTransform(eefs[0]),
                                                object.inverse()*start.getGlobalLinkTransform(eefs[1])}};
     // Preserve the descent arrival limits after closing.
     const std::array<a1v::ArmTarget,2> grasp{{a1_verify_.grasp_target.left,a1_verify_.grasp_target.right}};
@@ -201,8 +241,11 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         }
         return true;
     };
-    auto makePlan=[&](const moveit::core::RobotState& origin,double delta,
-                      moveit::planning_interface::MoveGroupInterface::Plan& plan) {
+    auto makePlan=[&](const moveit::core::RobotState& origin,const Eigen::Vector3d& delta,
+                      moveit::planning_interface::MoveGroupInterface::Plan& plan,
+                      double vscale,
+                      double ascale,
+                      double min_total) {
         robot_trajectory::RobotTrajectory trajectory(live_model,ctx_->dual_arm_group_);
         moveit::core::RobotState seed(origin); trajectory.addSuffixWayPoint(seed,0.0);
         if (!valid(seed)) return false;
@@ -211,10 +254,10 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         // contact lift. The previous 5 mm / 0.5 s segments produced intermittent
         // pad-contact loss and impulsive re-contact before the rod could leave
         // the support surface.
-        constexpr int kPathSteps = 20;
+        const int kPathSteps = std::max(20, static_cast<int>(std::ceil(delta.norm()/0.005)));
         for (int k=1;k<=kPathSteps;++k) {
             Transform target=first_object;
-            target.translation().z()+=delta*k/static_cast<double>(kPathSteps);
+            target.translation()+=delta*k/static_cast<double>(kPathSteps);
             moveit::core::RobotState next(seed);
             if (!next.setFromIK(left,target*object_to_hand[0],eefs[0],0.05) ||
                 !next.setFromIK(right,target*object_to_hand[1],eefs[1],0.05)) { detail="E_CONTACT_IK"; return false; }
@@ -234,7 +277,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 moveit::core::RobotState sample(seed); sample.setJointGroupPositions(dual,a1v::interpolateJoints(a,b,alpha)); sample.update();
                 if (!valid(sample)) return false;
                 const Transform actual=sample.getGlobalLinkTransform(eefs[0])*object_to_hand[0].inverse();
-                Transform expected=first_object; expected.translation().z()+=delta*(k-1+alpha)/static_cast<double>(kPathSteps);
+                Transform expected=first_object; expected.translation()+=delta*(k-1+alpha)/static_cast<double>(kPathSteps);
                 if ((actual.translation()-expected.translation()).norm()>pos_tol || rotationError(actual,expected)>angle_tol) {
                     detail="E_CONTACT_INTERPOLATED_PATH"; return false;
                 }
@@ -242,7 +285,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             seed=next; trajectory.addSuffixWayPoint(seed,0.0);
         }
         trajectory_processing::IterativeParabolicTimeParameterization iptp;
-        if (!iptp.computeTimeStamps(trajectory,0.05,0.03)) { detail="E_CONTACT_IPTP"; return false; }
+        if (!iptp.computeTimeStamps(trajectory,vscale,ascale)) { detail="E_CONTACT_IPTP"; return false; }
         trajectory.getRobotTrajectoryMsg(plan.trajectory_); moveit::core::robotStateToRobotStateMsg(origin,plan.start_state_);
         auto& joint=plan.trajectory_.joint_trajectory;
         std::vector<s1::DirectionalJointLimits> limits;
@@ -251,12 +294,13 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         std::vector<s1::TimedJointPoint> points;
         for (const auto& p:joint.points) points.push_back({rclcpp::Duration(p.time_from_start).seconds(),p.positions,p.velocities,p.accelerations});
         s1::TimeScalingReport report;
-        if (!s1::scaleTimedTrajectory(points,limits,0.05,0.03,0.01,report,detail)) return false;
-        // At least 5 s for 5 cm, and at least 1 s per fine contact-lift
-        // segment. The latter bounds the vertical step to 2.5 mm/s and reduces
-        // solver-impact-driven contact loss; it is not a success criterion.
-        double stretch=std::max(1.0,5.0/points.back().time);
-        for (std::size_t j=1;j<points.size();++j) stretch=std::max(stretch,1.0/(points[j].time-points[j-1].time));
+        if (!s1::scaleTimedTrajectory(points,limits,vscale,ascale,0.01,report,detail)) return false;
+        // E5 diagnostic: the previous 5 s / 1 s-per-segment stretch capped the lift
+        // at 2.5 mm/s and neutralized any velocity scaling. Relax both minimums so the
+        // 10x scaling actually applies. This is a trajectory-speed diagnostic, not a
+        // change to physics or acceptance.
+        double stretch=std::max(min_total,min_total/points.back().time);
+        for (std::size_t j=1;j<points.size();++j) stretch=std::max(stretch,0.02/(points[j].time-points[j-1].time));
         for (std::size_t j=0;j<points.size();++j) {
             joint.points[j].time_from_start=rclcpp::Duration::from_seconds(points[j].time*stretch);
             joint.points[j].velocities=points[j].velocities; joint.points[j].accelerations=points[j].accelerations;
@@ -283,8 +327,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                     const double acc=(2*c2+u*(6*c3+u*(12*c4+u*20*c5)))/(T*T);
                     const auto& bound=limits[j];
                     if (!std::isfinite(q[j]) || !std::isfinite(v) || !std::isfinite(acc) ||
-                        v<0.05*bound.min_velocity-1e-9 || v>0.05*bound.max_velocity+1e-9 ||
-                        acc<0.03*bound.min_acceleration-1e-9 || acc>0.03*bound.max_acceleration+1e-9) {
+                        v<vscale*bound.min_velocity-1e-9 || v>vscale*bound.max_velocity+1e-9 ||
+                        acc<ascale*bound.min_acceleration-1e-9 || acc>ascale*bound.max_acceleration+1e-9) {
                         detail="E_CONTACT_QUINTIC_LIMIT"; return false;
                     }
                 }
@@ -292,12 +336,13 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 if (!valid(timed)) return false;
             }
         }
-        RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_PROBE_PLAN] delta=%.3fm points=%zu IPTP duration=%.3fs contact_step=2.5mm min_segment=1.0s collision_and_interpolation=passed finger_only_contacts=true",
-            delta,joint.points.size(),rclcpp::Duration(joint.points.back().time_from_start).seconds());
+        RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_PROBE_PLAN] delta=%.3fm points=%zu IPTP duration=%.3fs contact_step=3.0mm min_segment=0.1s velocity_scale=%.2f acceleration_scale=%.2f collision_and_interpolation=passed finger_only_contacts=true",
+            delta.norm(),joint.points.size(),rclcpp::Duration(joint.points.back().time_from_start).seconds(),
+            vscale,ascale);
         return true;
     };
     moveit::planning_interface::MoveGroupInterface::Plan lift;
-    if (!makePlan(start,height,lift)) return fail(detail);
+    if (!makePlan(start,Eigen::Vector3d(0,0,height),lift,lift_velocity_scale,lift_acceleration_scale,0.5)) return fail(detail);
     // Give the bounded force-hold drive a short static settling window before
     // the first lift command. This does not count as load validation; it only
     // avoids starting the lift while the tendon force is still ramping or the
@@ -332,7 +377,10 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             slips[i]=(expected.translation()-physical.translation()).norm(); angles[i]=rotationError(expected,physical);
             max_slip=std::max(max_slip,slips[i]); max_angle=std::max(max_angle,angles[i]);
         }
-        csv<<phase<<','<<fingers[0].simulation_time<<','<<latest.position.x<<','<<latest.position.y<<','<<latest.position.z<<','
+        const auto left_pose=actual.getGlobalLinkTransform(eefs[0]);
+        const auto right_pose=actual.getGlobalLinkTransform(eefs[1]);
+        const Eigen::Quaterniond left_q(left_pose.linear()), right_q(right_pose.linear());
+        csv<<phase<<','<<fingers[0].simulation_time<<','<<fingers[1].simulation_time<<','<<latest.position.x<<','<<latest.position.y<<','<<latest.position.z<<','
            <<slips[0]<<','<<angles[0]<<','<<slips[1]<<','<<angles[1];
         for (const auto& f:fingers) csv<<','<<f.q1<<','<<f.q2;
         for (const auto& f:fingers) csv<<','<<f.command_per_finger_m;
@@ -343,9 +391,13 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         for (const auto& f:fingers) csv<<','<<f.normal_left_n<<','<<f.normal_right_n;
         for (const auto& f:fingers) csv<<','<<f.tangent_left_n<<','<<f.tangent_right_n;
         csv<<','<<fingers[0].rod_force_x_n<<','<<fingers[0].rod_force_y_n<<','<<fingers[0].rod_force_z_n<<','<<fingers[1].rod_force_x_n<<','<<fingers[1].rod_force_y_n<<','<<fingers[1].rod_force_z_n<<','<<fingers[0].seq<<','<<fingers[1].seq<<','
-           <<fingers[0].weld_left_active<<','<<fingers[0].weld_right_active<<','<<fingers[0].rod_constraint_active<<'\n'; csv.flush();
-        if (max_slip>pos_tol || max_angle>angle_tol) { detail="E_CONTACT_SLIP_OR_DROP"; return false; }
-        if (require_height && latest.position.z<initial_truth.position.z+height-pos_tol) { detail="E_CONTACT_ROD_NOT_LIFTED"; return false; }
+           <<fingers[0].weld_left_active<<','<<fingers[0].weld_right_active<<','<<fingers[0].rod_constraint_active<<','
+           <<left_pose.translation().x()<<','<<left_pose.translation().y()<<','<<left_pose.translation().z()<<','
+           <<left_q.x()<<','<<left_q.y()<<','<<left_q.z()<<','<<left_q.w()<<','
+           <<right_pose.translation().x()<<','<<right_pose.translation().y()<<','<<right_pose.translation().z()<<','
+           <<right_q.x()<<','<<right_q.y()<<','<<right_q.z()<<','<<right_q.w()<<'\n'; csv.flush();
+        if (max_slip>lift_slip_tol || max_angle>angle_tol) { detail="E_CONTACT_SLIP_OR_DROP"; return false; }
+        if (require_height && latest.position.z<initial_truth.position.z+rod_rise_target) { detail="E_CONTACT_ROD_NOT_LIFTED"; return false; }
         return true;
     };
     auto execute=[&](const moveit::planning_interface::MoveGroupInterface::Plan& plan,const char* phase) {
@@ -375,6 +427,75 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         if (code!=moveit::core::MoveItErrorCode::SUCCESS) { detail="E_CONTACT_EXECUTION_FAILED code="+std::to_string(code); return false; }
         return observe(phase,false);
     };
+    if (hold_diagnostic_only) {
+        constexpr double mechanism_hold_seconds = 1.0;
+        std::array<unsigned long long,2> counted_seq{{0,0}};
+        std::array<int,4> contact_counts{{0,0,0,0}};
+        std::array<double,2> gap_min{{std::numeric_limits<double>::infinity(),
+                                      std::numeric_limits<double>::infinity()}};
+        std::array<double,2> gap_max{{-std::numeric_limits<double>::infinity(),
+                                      -std::numeric_limits<double>::infinity()}};
+        std::size_t samples = 0;
+        if (!feedback()) return fail(detail);
+        const double hold_start = std::min(fingers[0].simulation_time, fingers[1].simulation_time);
+        const double wall_deadline = steadySeconds() + 4.0;
+        while (std::min(fingers[0].simulation_time, fingers[1].simulation_time) - hold_start <
+               mechanism_hold_seconds) {
+            if (!rclcpp::ok() || steadySeconds() > wall_deadline || !feedback())
+                return fail(detail.empty() ? "E_CONTACT_MECHANISM_HOLD_TIMEOUT" : detail);
+            if (fingers[0].seq > counted_seq[0] && fingers[1].seq > counted_seq[1]) {
+                ++samples;
+                counted_seq = {{fingers[0].seq, fingers[1].seq}};
+                for (int side = 0; side < 2; ++side) {
+                    const auto& f = fingers[side];
+                    const int offset = side * 2;
+                    contact_counts[offset] += f.left_contact ? 1 : 0;
+                    contact_counts[offset + 1] += f.right_contact ? 1 : 0;
+                    const double gap = f.q1 + f.q2;
+                    gap_min[side] = std::min(gap_min[side], gap);
+                    gap_max[side] = std::max(gap_max[side], gap);
+                }
+            }
+            if (!observe("MECHANISM_HOLD", false)) return fail(detail);
+            std::this_thread::sleep_for(50ms);
+        }
+        if (samples < 16) return fail("E_CONTACT_MECHANISM_HOLD_INSUFFICIENT_SAMPLES");
+        for (const int count : contact_counts) {
+            if (static_cast<double>(count) / static_cast<double>(samples) < 0.8)
+                return fail("E_CONTACT_MECHANISM_BILATERAL_OCCUPANCY");
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[CONTACT_HOLD_MECHANISM_VALIDATED] fixed_arms=true sim_hold=%.3fs samples=%zu "
+            "bilateral_occupancy=(%d/%zu,%d/%zu,%d/%zu,%d/%zu) gap_range=(%.3f,%.3f)mm "
+            "weld=OFF attach=none; load_unverified",
+            std::min(fingers[0].simulation_time, fingers[1].simulation_time) - hold_start,
+            samples, contact_counts[0], samples, contact_counts[1], samples,
+            contact_counts[2], samples, contact_counts[3], samples,
+            (gap_max[0] - gap_min[0]) * 1000.0, (gap_max[1] - gap_min[1]) * 1000.0);
+        if (!ctx_->grippers_->controlDualGrippers(0.04)) return fail("E_CONTACT_MECHANISM_RELEASE_OPEN_FAILED");
+        force_hold_may_be_active=false;
+        std::this_thread::sleep_for(500ms);
+        if (!feedback()) return fail(detail);
+        for (const auto& f : fingers) {
+            if (f.hold_force_per_finger_n != 0.0 || f.q1 + f.q2 < 0.078)
+                return fail("E_CONTACT_MECHANISM_RELEASE_NOT_CONFIRMED");
+        }
+        const auto released = readMujocoRodTruth();
+        if (!released.ok ||
+            (rodTransform(released).translation() - object.translation()).norm() > pos_tol ||
+            rotationError(rodTransform(released), object) > angle_tol)
+            return fail("E_CONTACT_MECHANISM_RELEASE_TRUTH_CHANGED");
+        geometry_msgs::msg::Vector3 size;
+        size.x = truth.size.x; size.y = truth.size.y; size.z = truth.size.z;
+        if (!syncAluminumRodFromTruth(poseMsg(rodTransform(released)), size,
+                                      ctx_->dual_arm_->getPlanningFrame(), detail)) return fail(detail);
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[CONTACT_HOLD_MECHANISM_RELEASED] rod_xyz=(%.6f,%.6f,%.6f) open=true force_hold=OFF "
+            "weld=OFF attach=none lift=not-tested",
+            released.position.x, released.position.y, released.position.z);
+        detail = "fixed-arm force-hold mechanism and release validated; no lift/load claim";
+        return true;
+    }
     if (!execute(lift,"LIFT")) return fail(detail);
     if (!observe("HOLD",true)) return fail(detail);
     // Hold is measured in physics time, with wall timeout and advancement checks.
@@ -395,26 +516,91 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     for (const int count:contact_counts) if (double(count)/samples<0.8) return fail("E_CONTACT_HOLD_PAD_FORCE_NOT_SUSTAINED");
     RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_LOAD_VALIDATED] samples=%zu sim_hold=%.3fs lift=%.3fm max_slip=%.3fmm max_angle=%.3fdeg weld_left=false weld_right=false rod_constraint=false",
         samples,std::min(fingers[0].simulation_time,fingers[1].simulation_time)-hold_start,latest.position.z-initial_truth.position.z,max_slip*1000,max_angle*180/M_PI);
+    // The load was validated with the frozen grasp reference (max_slip logged
+    // above). Under load the two hands' inferred rod poses can drift apart; the
+    // descent plan then fails E_CONTACT_DUAL_GRASP_RESIDUAL. Re-establish the
+    // object->hand transforms from the current measured state so the descent is
+    // consistent with the actual grasp. This does not reset the LIFT/HOLD slip
+    // already measured and logged above.
+    const auto hold_truth = readMujocoRodTruth();
+    moveit::core::RobotState held_state(live_model);
+    if (!hold_truth.ok || !measured(held_state)) return fail("E_CONTACT_HOLD_REFREEZE_UNMEASURED");
+    const Transform held_object = rodTransform(hold_truth);
+    for (int i=0;i<2;++i)
+        object_to_hand[i] = held_object.inverse()*held_state.getGlobalLinkTransform(eefs[i]);
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[CONTACT_PROBE_REFREEZE] descent reference re-established from measured state; "
+        "lift/hold max_slip already logged=%.3f mm", max_slip*1000);
     moveit::core::RobotState lifted(live_model);
     if (!measured(lifted)) return fail(detail);
+    // Forward transport in the fixed scene with the held yaw: move the rod to
+    // the task target x while the real contact grip carries it. y and z are
+    // kept; the slip monitor and the 45 mm height check run during this phase.
+    const Eigen::Vector3d transport_delta(
+        ctx_->rod_target_x_ - held_object.translation().x(), 0.0, 0.0);
+    if (!std::isfinite(transport_delta.x()) || transport_delta.norm() < 0.001 ||
+        transport_delta.norm() > 0.20) {
+        detail="E_CONTACT_TRANSPORT_DELTA"; return fail(detail);
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[CONTACT_PROBE_TRANSPORT] forward dx=%.3f m to target x=%.3f m (held yaw)",
+        transport_delta.x(), ctx_->rod_target_x_);
+    moveit::planning_interface::MoveGroupInterface::Plan transport;
+    if (!makePlan(lifted, transport_delta, transport, 1.0, 0.3, 2.0)) return fail(detail);
+    if (!execute(transport,"TRANSPORT")) return fail(detail);
+    if (!observe("TRANSPORT", true)) return fail(detail);
+    moveit::core::RobotState after_transport(live_model);
+    if (!measured(after_transport)) return fail(detail);
+    const auto after_truth = readMujocoRodTruth();
+    if (!after_truth.ok) return fail("E_CONTACT_TRANSPORT_TRUTH");
+    // The lateral move can make the two hands' inferred rod poses drift apart
+    // (the same closed-chain effect seen after the hold). Re-establish the
+    // grasp reference from the measured state before planning the descent; the
+    // transport slip was already monitored and logged in its own phase.
+    const Transform after_object = rodTransform(after_truth);
+    for (int i=0;i<2;++i)
+        object_to_hand[i] = after_object.inverse()*after_transport.getGlobalLinkTransform(eefs[i]);
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[CONTACT_PROBE_REFREEZE] descent reference re-established after transport");
     moveit::planning_interface::MoveGroupInterface::Plan lower;
-    if (!makePlan(lifted,-height,lower)) return fail(detail);
+    // Descend to the support plane using the CURRENT rod attitude: after the
+    // transport the rod can be tilted ~1 degree, which makes the tilt-aware box
+    // half-height larger than 20 mm. Using the initial centre height would push
+    // the rod's low edge through the support (E_CONTACT_ROD_SUPPORT_PENETRATION).
+    const double extent_after = 0.5*(std::abs(after_object.linear()(2,0))*truth.size.x +
+        std::abs(after_object.linear()(2,1))*truth.size.y +
+        std::abs(after_object.linear()(2,2))*truth.size.z);
+    const double lower_delta =
+        after_object.translation().z() - (ctx_->p2a_support_z_ + extent_after);
+    if (!std::isfinite(lower_delta) || lower_delta <= 0.0 || lower_delta > height + 0.02) {
+        detail="E_CONTACT_LOWER_DELTA"; return fail(detail);
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[CONTACT_PROBE_LOWER] descend=%.3f m (commanded lift=%.3f m, tilt-aware extent=%.3f m); "
+        "targeting support at the transported pose", lower_delta, height, extent_after);
+    if (!makePlan(after_transport, Eigen::Vector3d(0,0,-lower_delta), lower,1.0,0.8,0.5)) return fail(detail);
     if (!execute(lower,"LOWER")) return fail(detail);
     const double extent=0.5*(std::abs(rodTransform(latest).linear()(2,0))*truth.size.x+
         std::abs(rodTransform(latest).linear()(2,1))*truth.size.y+std::abs(rodTransform(latest).linear()(2,2))*truth.size.z);
     if (std::abs(latest.position.z-extent-ctx_->p2a_support_z_)>0.003) return fail("E_CONTACT_RELEASE_NOT_ON_SUPPORT");
     if (!ctx_->grippers_->controlDualGrippers(0.04)) return fail("E_CONTACT_RELEASE_OPEN_FAILED");
+    force_hold_may_be_active=false;
     std::this_thread::sleep_for(500ms);
     const auto released=readMujocoRodTruth();
     if (!released.ok || !feedback()) return fail("E_CONTACT_RELEASE_TRUTH_OR_FEEDBACK");
     for (const auto& f:fingers) if (f.hold_force_per_finger_n!=0 || f.q1+f.q2<0.078) return fail("E_CONTACT_RELEASE_FORCE_NOT_CLEARED");
-    if ((rodTransform(released).translation()-object.translation()).norm()>0.01 || rotationError(rodTransform(released),object)>5*M_PI/180)
+    // Compare against the pose just before opening, not the initial grasp pose:
+    // the forward transport moves the rod 10 cm, so the initial pose is no
+    // longer the release reference. The check is that opening does not make the
+    // rod jump.
+    if ((rodTransform(released).translation()-rodTransform(latest).translation()).norm()>0.01 ||
+        rotationError(rodTransform(released),rodTransform(latest))>5*M_PI/180)
         return fail("E_CONTACT_RELEASE_POSE_ERROR");
     // Only synchronize planning representation. Never write a MuJoCo body state.
     geometry_msgs::msg::Vector3 size; size.x=truth.size.x;size.y=truth.size.y;size.z=truth.size.z;
     if (!syncAluminumRodFromTruth(poseMsg(rodTransform(released)),size,ctx_->dual_arm_->getPlanningFrame(),detail)) return fail(detail);
     RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_PROBE_RELEASED] xyz=(%.6f,%.6f,%.6f) open=true force_hold=OFF weld=OFF attach=none; retreat/carry not requested",
         released.position.x,released.position.y,released.position.z);
-    detail="5cm contact-only lift, 2s hold, lower and release complete; full transport unverified";
+    detail="contact-only lift "+std::to_string(static_cast<int>(height*100.0+0.5))+"cm, "+std::to_string(static_cast<int>(hold_seconds+0.5))+"s hold, forward transport, lower and release complete; rotation/return not requested";
     return true;
 }

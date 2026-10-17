@@ -243,6 +243,54 @@ GripperController::GripperController(rclcpp::Node* node, const GripperClientConf
 {
 }
 
+bool GripperController::stopDualGrippers()
+{
+    using namespace std::chrono_literals;
+    std::unique_lock<std::mutex> call_guard(call_mutex_, std::try_to_lock);
+    bool expected_idle = false;
+    if (!call_guard.owns_lock() || !in_flight_.compare_exchange_strong(expected_idle, true)) {
+        RCLCPP_ERROR(node_->get_logger(), "[夹爪停止] another gripper request is unresolved; stop not sent");
+        return false;
+    }
+    struct Release { std::atomic<bool>* flag; ~Release() { flag->store(false); } } release{&in_flight_};
+    if (contact_goal_unknown_.load() || pending_->count() != 0) {
+        RCLCPP_ERROR(node_->get_logger(), "[夹爪停止] unresolved action state; stop not sent");
+        return false;
+    }
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr left, right;
+    {
+        std::lock_guard<std::mutex> lock(client_mutex_);
+        if (!left_stop_client_)
+            left_stop_client_ = node_->create_client<std_srvs::srv::Trigger>("/mj_left_gripper_sim_node/stop");
+        if (!right_stop_client_)
+            right_stop_client_ = node_->create_client<std_srvs::srv::Trigger>("/mj_right_gripper_sim_node/stop");
+        left = left_stop_client_;
+        right = right_stop_client_;
+    }
+    const auto service_wait = std::chrono::duration<double>(std::min(1.0, cfg_.server_timeout_sec));
+    if (!left->wait_for_service(service_wait) || !right->wait_for_service(service_wait)) {
+        RCLCPP_ERROR(node_->get_logger(), "[夹爪停止] stop service unavailable within bound");
+        return false;
+    }
+    const auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
+    auto left_future = left->async_send_request(request);
+    auto right_future = right->async_send_request(request);
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    if (left_future.wait_until(deadline) != std::future_status::ready ||
+        right_future.wait_until(deadline) != std::future_status::ready) {
+        RCLCPP_ERROR(node_->get_logger(), "[夹爪停止] stop response timed out; actuator restoration unconfirmed");
+        return false;
+    }
+    const auto left_response = left_future.get();
+    const auto right_response = right_future.get();
+    const bool ok = left_response && right_response && left_response->success && right_response->success;
+    RCLCPP_INFO(node_->get_logger(),
+        "[夹爪停止] both stop services responded left=%d right=%d",
+        left_response && left_response->success ? 1 : 0,
+        right_response && right_response->success ? 1 : 0);
+    return ok;
+}
+
 bool GripperController::refuseIfUnknownOutstanding(const char* what)
 {
     const int outstanding = pending_->count();
@@ -613,7 +661,7 @@ bool GripperController::controlDualGrippersContact(double force_per_finger_n)
         }
         ContactAction::Goal goal;
         goal.width = 0.0;  // desired total opening; progressive server command is bounded
-        goal.speed = 0.005;  // explicit contact approach, total gap m/s
+        goal.speed = 0.015;  // explicit contact approach, total gap m/s (3x faster; server limit 0.02)
         goal.force = force_per_finger_n;  // positive: checked simulator tendon force hold, N per finger
         goal.epsilon.inner = 0.005;
         goal.epsilon.outer = 0.005;

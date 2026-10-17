@@ -25,6 +25,37 @@
 
 namespace franka_gripper {
 
+inline constexpr double kMaxContactForcePerFingerN = 50.0;
+// The requested contact hold maps to 90% of the 2*per-finger split-tendon
+// actuator output (50 N/finger -> nominal -90 N actuator output).
+inline constexpr double kContactHoldForceCommandFraction = 0.90;
+// The fixed-arm direct-force trace produced 0.67/0.77 mm peak-to-peak gap
+// motion while keeping each pad in contact on >=18/20 samples. A 0.5 mm
+// window rejected that observed stable hold; 1.0 mm remains below the prior
+// position-hold scatter (0.86/1.00 mm) and is paired with >=16/20 per finger.
+inline constexpr double kContactForceStableGapSpreadM = 0.001;
+inline constexpr int kContactForceStableOccupancySamples = 16;
+
+inline bool contactForceWindowAccepted(std::size_t sample_count, double duration_s,
+                                       int left_contact_samples, int right_contact_samples,
+                                       double gap_spread_m) {
+  return sample_count == 20 && std::isfinite(duration_s) && duration_s >= 0.18 &&
+      left_contact_samples >= kContactForceStableOccupancySamples &&
+      right_contact_samples >= kContactForceStableOccupancySamples &&
+      std::isfinite(gap_spread_m) && gap_spread_m <= kContactForceStableGapSpreadM;
+}
+// During explicit contact hold, the symmetric tendon mode has k=0.5*1200=600
+// N/m per finger coordinate and effective finger mass 0.015 kg + 0.1 kg
+// armature. Critical damping is 2*sqrt(600*0.115)=16.61 N s/m. The model's
+// default is 1 N s/m, so add 15.6 only while force hold is active.
+inline constexpr double kContactHoldAdditionalFingerDampingNsPerM = 15.6;
+
+inline double contactHoldFingerDamping(double model_damping, bool force_hold_active) {
+  if (!std::isfinite(model_damping) || model_damping < 0.0)
+    return std::numeric_limits<double>::quiet_NaN();
+  return model_damping + (force_hold_active ? kContactHoldAdditionalFingerDampingNsPerM : 0.0);
+}
+
 /// Per-gripper handoff between the action-server callbacks and the MuJoCo
 /// physics thread.
 ///
@@ -49,7 +80,14 @@ struct GripperSharedState {
   // Commands remain owned by the action server; measurements by physics.
   double closing_force_limit_per_finger_n {0.0};
   double hold_force_per_finger_n {0.0};  // 0 = ordinary position mode
+  double hold_reference_tendon_length {0.0};
   bool force_hold_supported {false};
+  bool force_hold_fault {false};
+  bool direct_force_mode_active {false};
+  bool stop_at_current_position {false};
+  // `left` and `right` are this gripper's two finger bodies. Each magnitude
+  // sums its pad/rod contact points; rod_force_xyz is the net world force on the
+  // rod from both fingers of this gripper. The task sums the two arm vectors.
   double normal_left_n {0.0}, normal_right_n {0.0};
   double tangent_left_n {0.0}, tangent_right_n {0.0};
   double rod_force_x_n {0.0}, rod_force_y_n {0.0}, rod_force_z_n {0.0};
@@ -76,7 +114,11 @@ struct GripperFeedback {
   // Commands remain owned by the action server; measurements by physics.
   double closing_force_limit_per_finger_n {0.0};
   double hold_force_per_finger_n {0.0};  // 0 = ordinary position mode
+  double hold_reference_tendon_length {0.0};
   bool force_hold_supported {false};
+  bool force_hold_fault {false};
+  bool direct_force_mode_active {false};
+  bool stop_at_current_position {false};
   double normal_left_n {0.0}, normal_right_n {0.0};
   double tangent_left_n {0.0}, tangent_right_n {0.0};
   double rod_force_x_n {0.0}, rod_force_y_n {0.0}, rod_force_z_n {0.0};
@@ -111,7 +153,11 @@ inline GripperFeedback readFeedback(const std::shared_ptr<GripperSharedState>& s
   out.finger_q1 = state->finger_q1;
   out.finger_q2 = state->finger_q2;
   out.hold_force_per_finger_n = state->hold_force_per_finger_n;
+  out.hold_reference_tendon_length = state->hold_reference_tendon_length;
   out.force_hold_supported = state->force_hold_supported;
+  out.force_hold_fault = state->force_hold_fault;
+  out.direct_force_mode_active = state->direct_force_mode_active;
+  out.stop_at_current_position = state->stop_at_current_position;
   out.normal_left_n = state->normal_left_n; out.normal_right_n = state->normal_right_n;
   out.tangent_left_n = state->tangent_left_n; out.tangent_right_n = state->tangent_right_n;
   out.rod_force_x_n = state->rod_force_x_n;
@@ -134,35 +180,151 @@ inline GripperFeedback readFeedback(const std::shared_ptr<GripperSharedState>& s
 inline bool writeCommand(const std::shared_ptr<GripperSharedState>& state,
                          double per_finger_m, double closing_force_limit_n = 0.0) {
   if (!state || !std::isfinite(per_finger_m) || !std::isfinite(closing_force_limit_n) ||
-      closing_force_limit_n < 0.0 || closing_force_limit_n > 5.0) {
+      closing_force_limit_n < 0.0 || closing_force_limit_n > kMaxContactForcePerFingerN) {
     return false;
   }
   std::lock_guard<std::mutex> lock(state->mutex);
   if (closing_force_limit_n > 0.0 && !state->force_hold_supported) return false;
   state->closing_force_limit_per_finger_n = closing_force_limit_n;
   state->hold_force_per_finger_n = 0.0;
+  state->hold_reference_tendon_length = 0.0;
+  state->force_hold_fault = false;
+  state->stop_at_current_position = false;
   state->command_per_finger = per_finger_m;
   return true;
 }
 
 // A positive request is supported only by the checked 0.5/0.5 position tendon.
-// Physics uses ctrl = actuator_length - 2*F/kp (clamped to ctrlrange). With
-// bias=-kp*length and no velocity bias this bounds closing tendon force at 2F.
-inline bool writeForceHold(const std::shared_ptr<GripperSharedState>& state, double force_n) {
-  if (!state || !std::isfinite(force_n) || force_n <= 0.0 || force_n > 5.0) return false;
+// The reference length is latched at first bilateral contact. The physics
+// thread keeps the native tendon position servo and temporarily limits its
+// actuator force to 2F (one half per finger); ordinary position commands do
+// not enter this contact-only hold mode. The position target must fit ctrlrange.
+inline bool writeForceHold(const std::shared_ptr<GripperSharedState>& state, double force_n,
+                           double reference_tendon_length) {
+  if (!state || !std::isfinite(force_n) || force_n <= 0.0 ||
+      force_n > kMaxContactForcePerFingerN ||
+      !std::isfinite(reference_tendon_length) || reference_tendon_length < 0.0 ||
+      reference_tendon_length > 0.08) return false;
   std::lock_guard<std::mutex> lock(state->mutex);
-  if (!state->force_hold_supported) return false;
+  if (!state->force_hold_supported || state->force_hold_fault) return false;
   state->closing_force_limit_per_finger_n = force_n;
   state->hold_force_per_finger_n = force_n;
+  state->hold_reference_tendon_length = reference_tendon_length;
+  state->stop_at_current_position = false;
   return true;
 }
-inline double forceHoldPositionTarget(double length, double kp, double force_n,
-                                     double min_ctrl, double max_ctrl) {
-  if (!std::isfinite(length) || !std::isfinite(kp) || kp <= 0.0 ||
-      !std::isfinite(force_n) || force_n <= 0.0 || force_n > 5.0 ||
+
+inline void requestForceHoldStopAtCurrent(const std::shared_ptr<GripperSharedState>& state,
+                                          bool actuator_fault = false) {
+  if (!state) return;
+  std::lock_guard<std::mutex> lock(state->mutex);
+  state->closing_force_limit_per_finger_n = 0.0;
+  state->hold_force_per_finger_n = 0.0;
+  state->hold_reference_tendon_length = 0.0;
+  state->stop_at_current_position = true;
+  state->force_hold_fault = state->force_hold_fault || actuator_fault;
+}
+
+inline void publishDirectForceModeActive(const std::shared_ptr<GripperSharedState>& state,
+                                         bool active) {
+  if (!state) return;
+  std::lock_guard<std::mutex> lock(state->mutex);
+  state->direct_force_mode_active = active;
+}
+
+inline void publishStoppedTendonPosition(const std::shared_ptr<GripperSharedState>& state,
+                                          double tendon_position_m) {
+  if (!state || !std::isfinite(tendon_position_m)) return;
+  std::lock_guard<std::mutex> lock(state->mutex);
+  state->command_per_finger = tendon_position_m;
+  state->stop_at_current_position = false;
+}
+
+inline void failForceHoldAtCurrent(const std::shared_ptr<GripperSharedState>& state,
+                                   double tendon_position_m) {
+  requestForceHoldStopAtCurrent(state, true);
+  publishStoppedTendonPosition(state, tendon_position_m);
+}
+inline double boundedForceLimitPositionTarget(double length, double reference_length,
+                                              double kp, double force_n,
+                                              double min_ctrl, double max_ctrl) {
+  if (!std::isfinite(length) || !std::isfinite(reference_length) ||
+      reference_length < 0.0 || reference_length > 0.08 ||
+      !std::isfinite(kp) || kp <= 0.0 ||
+      !std::isfinite(force_n) || force_n <= 0.0 ||
+      force_n > kMaxContactForcePerFingerN ||
       !std::isfinite(min_ctrl) || !std::isfinite(max_ctrl) || min_ctrl > max_ctrl)
     return std::numeric_limits<double>::quiet_NaN();
-  return std::clamp(length - 2.0 * force_n / kp, min_ctrl, max_ctrl);
+  const double max_tendon_force = 2.0 * force_n;
+  const double desired_tendon_force = std::clamp(
+      kp * (reference_length - length) - max_tendon_force,
+      -max_tendon_force, max_tendon_force);
+  return std::clamp(length + desired_tendon_force / kp, min_ctrl, max_ctrl);
+}
+
+inline bool forceHoldActuatorForceRange(double force_n, double& lower, double& upper) {
+  if (!std::isfinite(force_n) || force_n <= 0.0 ||
+      force_n > kMaxContactForcePerFingerN) return false;
+  const double tendon_limit = 2.0 * force_n;
+  lower = -tendon_limit;
+  upper = tendon_limit;
+  return true;
+}
+
+/// EXPERIMENTAL, NOT A VALIDATED BASELINE: fixed position target for the
+/// explicit contact hold. The target is latched from the first bilateral-
+/// contact tendon length; the native position servo then supplies a restoring
+/// response while its actuator force is capped by forceHoldActuatorForceRange().
+/// This variant failed the isolated physical reproduction and is retained only
+/// for traceability; `command_fraction` preserves the previous direct-force
+/// hold's 90% operating point.
+inline double forceHoldPositionTarget(double reference_tendon_length,
+                                     double force_per_finger_n,
+                                     double kp,
+                                     double command_fraction,
+                                     double ctrl_min, double ctrl_max) {
+  if (!std::isfinite(reference_tendon_length) || reference_tendon_length < 0.0 ||
+      reference_tendon_length > 0.08 || !std::isfinite(force_per_finger_n) ||
+      force_per_finger_n <= 0.0 || force_per_finger_n > kMaxContactForcePerFingerN ||
+      !std::isfinite(kp) || kp <= 0.0 || !std::isfinite(command_fraction) ||
+      command_fraction <= 0.0 || command_fraction > 1.0 ||
+      !std::isfinite(ctrl_min) || !std::isfinite(ctrl_max) || ctrl_min > ctrl_max) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  // Each split-tendon branch has coefficient 0.5, so one actuator-force unit
+  // contributes half a unit to each finger. Keep the existing force level and
+  // sign; changing only to a fixed position target adds common-mode restoring
+  // stiffness that the direct-force command did not have.
+  const double actuator_force = -2.0 * force_per_finger_n * command_fraction;
+  const double target = reference_tendon_length + actuator_force / kp;
+  // Do not silently turn an unavailable force into a smaller one by clipping
+  // the position target. The physics thread treats NaN as an actuator fault.
+  if (target < ctrl_min || target > ctrl_max)
+    return std::numeric_limits<double>::quiet_NaN();
+  return target;
+}
+
+/// Maps a positive per-finger closing-force request to the signed force on the
+/// split-tendon actuator. Each tendon branch uses `finger_tendon_coefficient`
+/// and the actuator multiplies tendon force by `actuator_gear`. Positive finger
+/// q opens the hand, so a closing command is negative.
+inline double directClosingTendonForceCommand(double force_per_finger_n,
+                                              double finger_tendon_coefficient,
+                                              double actuator_gear,
+                                              double command_fraction,
+                                              double ctrl_min, double ctrl_max) {
+  if (!std::isfinite(force_per_finger_n) || force_per_finger_n <= 0.0 ||
+      force_per_finger_n > kMaxContactForcePerFingerN ||
+      !std::isfinite(finger_tendon_coefficient) || finger_tendon_coefficient <= 0.0 ||
+      !std::isfinite(actuator_gear) || actuator_gear <= 0.0 ||
+      !std::isfinite(command_fraction) || command_fraction <= 0.0 || command_fraction > 1.0 ||
+      !std::isfinite(ctrl_min) || !std::isfinite(ctrl_max) || ctrl_min > ctrl_max)
+    return std::numeric_limits<double>::quiet_NaN();
+  const double actuator_force = -force_per_finger_n * command_fraction /
+      (finger_tendon_coefficient * actuator_gear);
+  if (actuator_force < ctrl_min || actuator_force > ctrl_max)
+    return std::numeric_limits<double>::quiet_NaN();
+  return actuator_force;
 }
 
 /// Publishes one physics sample. Called from the physics thread only.

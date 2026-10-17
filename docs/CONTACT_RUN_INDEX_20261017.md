@@ -1,0 +1,68 @@
+# contact_probe 2026-10-17 全部运行索引
+
+本表覆盖今天的全部 `lidio_contact_probe_yaw10_20261017_*` 运行目录，按时间排序。
+配置列取运行时 `[CONTACT_PROBE_CONFIG]`/`[CONTACT_PROBE_PLAN]` 的实际值；`-` 表示该次未进入该阶段。
+启动/规划失败（DDS、`/get_sim_info`、P2b、控制器）无物理数据，不是承载结论；失败目录全部保留。
+
+| run | lift/hold/slip | vscale | plan dur | 结果 |
+|---|---|---|---|---|
+| 20261017_085140 | 0.05/2/5 | - | 32.172 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_085514 | -/-/- | - | - | 启动/规划失败（无物理数据） |
+| 20261017_085803 | 0.05/2/5 | - | 32.175 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_090946 | -/-/- | - | - | 启动/规划失败（无物理数据） |
+| 20261017_091014 | 0.05/2/5 | - | 32.172 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_091423 | 0.05/2/5 | - | 31.911 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_091746 | 0.05/2/5 | - | 31.916 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_092002 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_092157 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_092645 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_093336 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_093959 | -/-/- | - | - | 启动/规划失败（无物理数据） |
+| 20261017_094120 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_094526 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_094822 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_100451 | -/-/- | - | - | 启动/规划失败（无物理数据） |
+| 20261017_100700 | 0.05/2/5 | - | - | 启动/规划失败：[P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=passed p2_acceptance=true |
+| 20261017_113058 | 0.05/2/5 | - | 31.910 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_121704 | -/-/- | - | - | 启动/规划失败（无物理数据） |
+| 20261017_130603 | 0.05/2/5 | - | 31.916 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_131332 | 0.05/2/5 | - | 31.918 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_132414 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_133244 | 0.05/2/5 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_134117 | -/-/- | - | - | 启动/规划失败（无物理数据） |
+| 20261017_134301 | 0.05/2/5 | - | 31.907 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_135303 | 0.05/2/5 | - | 31.910 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_135746 | 0.05/2/15 | - | 31.912 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_140247 | 0.05/2/5 | - | 31.915 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_140713 | 0.05/2/5 | 0.20 | 37.905 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_141604 | 0.05/2/5 | 0.50 | 3.860 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_142616 | 0.05/2/10 | 0.50 | 3.860 | **FAILED** E_CONTACT_ROD_NOT_LIFTED |
+| 20261017_143218 | -/-/- | - | - | 启动/规划失败（无物理数据） |
+| 20261017_143348 | 0.06/2/12 | 0.50 | 3.813 | **FAILED** E_CONTACT_HOLD: E_CONTACT_SLIP_OR_DROP |
+| 20261017_145407 | 0.06/2/12 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_145545 | -/-/- | - | - | 启动/规划失败：[P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=failed p2_acceptance=false |
+| 20261017_145624 | 0.06/2/12 | 1.00 | 3.940 | **FAILED** E_CONTACT_HOLD: E_CONTACT_SLIP_OR_DROP |
+| 20261017_145909 | 0.06/2/12 | 0.50 | 3.791 | VALIDATED max_slip=10.877mm rod_rise=47.0mm hold=2.060s；后续 **FAILED** E_CONTACT_DUAL_GRASP_RESIDUAL |
+| 20261017_150054 | 0.06/2/12 | 0.50 | 3.791 | VALIDATED max_slip=11.456mm rod_rise=46.0mm hold=2.040s；后续 **FAILED** E_CONTACT_ROD_SUPPORT_PENETRATION |
+| 20261017_150226 | 0.06/2/12 | 0.50 | 3.935 | VALIDATED max_slip=11.037mm rod_rise=47.0mm hold=2.002s；后续 **DONE** |
+| 20261017_150853 | 0.06/2/12 | 0.50 | 3.788 | VALIDATED max_slip=11.390mm rod_rise=47.0mm hold=2.062s；后续 **DONE** |
+| 20261017_151205 | 0.06/2/12 | 0.50 | 16.675 | **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_152357 | 0.06/2/12 | 0.50 | 3.780 | **FAILED** E_CONTACT_HOLD_PAD_FORCE_NOT_SUSTAINED |
+| 20261017_152558 | 0.06/2/12 | 0.50 | 3.779 | **FAILED** E_CONTACT_HOLD: E_CONTACT_SLIP_OR_DROP |
+| 20261017_152946 | 0.06/2/12 | 1.00 | 0.790 | VALIDATED max_slip=5.945mm rod_rise=51.0mm hold=2.002s；后续 **DONE** |
+| 20261017_153128 | 0.06/2/12 | 1.00 | 3.372 | VALIDATED max_slip=12.856mm rod_rise=483.0mm hold=3.012s；后续 **DONE** |
+| 20261017_153548 | 0.06/2/12 | 1.00 | 3.941 | VALIDATED max_slip=14.723mm rod_rise=482.0mm hold=3.058s；后续 **FAILED** E_CONTACT_QUINTIC_LIMIT |
+| 20261017_153709 | 0.06/2/12 | 1.00 | 3.996 | VALIDATED max_slip=14.298mm rod_rise=481.0mm hold=3.014s；后续 **FAILED** E_CONTACT_QUINTIC_LIMIT |
+| 20261017_153934 | -/-/- | - | - | 启动/规划失败：[P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=passed p2_acceptance=true |
+| 20261017_154015 | 0.06/2/12 | 1.00 | 3.995 | VALIDATED max_slip=14.778mm rod_rise=480.0mm hold=3.070s；后续 **FAILED** E_CONTACT_QUINTIC_LIMIT |
+| 20261017_154139 | -/-/- | - | - | 启动/规划失败：[P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=failed p2_acceptance=false |
+| 20261017_154220 | 0.06/2/12 | 1.00 | 2.000 | VALIDATED max_slip=13.498mm rod_rise=482.0mm hold=3.016s；后续 **FAILED** E_CONTACT_DUAL_GRASP_RESIDUAL |
+| 20261017_154340 | 0.06/2/12 | 1.00 | 2.000 | VALIDATED max_slip=15.019mm rod_rise=480.0mm hold=3.000s；后续 **FAILED** E_CONTACT_ROD_SUPPORT_PENETRATION |
+| 20261017_154512 | 0.06/2/12 | 1.00 | 4.211 | VALIDATED max_slip=15.112mm rod_rise=481.0mm hold=3.038s；后续 **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_154628 | 0.06/2/12 | 1.00 | 4.023 | **FAILED** E_CONTACT_HOLD_PAD_FORCE_NOT_SUSTAINED |
+| 20261017_154748 | 0.06/2/12 | - | - | **FAILED** E_CONTACT_GRASP_ACTION_FAILED_OR_UNKNOWN |
+| 20261017_154909 | 0.500/3.0/20.0 | 1.00 | 4.240 | VALIDATED max_slip=12.324mm rod_rise=488.0mm hold=3.036s；后续 **FAILED** E_CONTACT_SLIP_OR_DROP |
+| 20261017_155036 | 0.500/3.0/20.0 | 1.00 | 3.903 | **FAILED** E_CONTACT_HOLD_PAD_FORCE_NOT_SUSTAINED |
+| 20261017_155151 | 0.500/3.0/20.0 | 1.00 | 4.464 | VALIDATED max_slip=10.981mm rod_rise=491.0mm hold=3.000s；后续 **FAILED** E_CONTACT_RELEASE_POSE_ERROR |
+| 20261017_155319 | 0.500/3.0/20.0 | 1.00 | 4.464 | VALIDATED max_slip=11.362mm rod_rise=491.0mm hold=3.012s；后续 **DONE** |
+| 20261017_155952 | 0.500/3.0/20.0 | 1.00 | 4.460 | VALIDATED max_slip=10.822mm rod_rise=491.0mm hold=3.060s；后续 **DONE** |

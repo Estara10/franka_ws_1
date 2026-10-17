@@ -15,8 +15,10 @@
 #pragma once
 
 #include <memory>
+#include <array>
 #include <string>
 #include <vector>
+#include <fstream>
 
 #include <hardware_interface/visibility_control.h>
 #include <hardware_interface/hardware_info.hpp>
@@ -30,6 +32,7 @@
 #include <std_msgs/msg/float64_multi_array.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <boost/thread.hpp>
 #include <mujoco/mujoco.h>
 
@@ -119,8 +122,31 @@ class FrankaMjHardwareSystem : public mujoco_ros2_control::MujocoRos2SystemInter
   std::map<std::string, ModelBase*> model_pointers_;
   std::map<std::string, std::shared_ptr<franka_gripper::GripperSimActionServer>> gripper_nodes_;
   std::map<std::string, std::shared_ptr<franka_gripper::GripperSharedState>> gripper_states_ptrs_;  // guarded handoff, see gripper_shared_state.hpp
-  struct GripperContactBodyIds { int left_finger {-1}; int right_finger {-1}; int rod {-1}; };
+  std::map<std::string, std::array<double, 2>> gripper_finger_damping_base_;
+  struct GripperActuatorConfig {
+    mjtByte dyntype {mjDYN_NONE};
+    mjtByte gaintype {mjGAIN_FIXED};
+    mjtByte biastype {mjBIAS_NONE};
+    mjtByte ctrllimited {0};
+    mjtByte forcelimited {0};
+    std::array<mjtNum, mjNDYN> dynprm{};
+    std::array<mjtNum, mjNGAIN> gainprm{};
+    std::array<mjtNum, mjNBIAS> biasprm{};
+    std::array<mjtNum, 6> gear{};
+    std::array<mjtNum, 2> ctrlrange{};
+    std::array<mjtNum, 2> forcerange{};
+  };
+  std::map<std::string, GripperActuatorConfig> gripper_actuator_config_base_;
+  std::map<std::string, bool> gripper_direct_force_active_;
+  struct GripperContactBodyIds {
+    int left_finger {-1}; int right_finger {-1}; int rod {-1}; int rod_geom {-1}; int hand_link8 {-1};
+  };
   std::map<std::string, GripperContactBodyIds> gripper_contact_body_ids_;
+  // Optional contact-probe trace, written only by the MuJoCo physics thread.
+  std::ofstream contact_probe_trace_;
+  std::uint64_t contact_probe_trace_tick_ {0};
+  bool contact_probe_single_pad_active_ {false};
+  std::array<bool, 2> contact_probe_first_contact_logged_ {{false, false}};
 
   /// \brief last time the write method was called.
   rclcpp::Time last_update_sim_time_mj_;

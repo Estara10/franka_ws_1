@@ -18,6 +18,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(franka_msgs REQUIRED)
 find_package(moveit_msgs REQUIRED)
@@ -84,6 +85,7 @@ ament_target_dependencies(gripper_client
   rclcpp_action
   control_msgs
   franka_msgs
+  std_srvs
 )
 target_link_libraries(gripper_client gripper_protocol)
 
@@ -114,6 +116,7 @@ ament_target_dependencies(dual_arm_carry_task_node
   sensor_msgs
   tf2_geometry_msgs
   std_msgs
+  std_srvs
   control_msgs
   franka_msgs
   moveit_msgs
@@ -238,7 +241,7 @@ if(BUILD_TESTING)
   # Interface test: the production client driven against a minimal ROS fake
   # action server. Not a helper test.
   ament_add_gtest(test_gripper_client_faults test/test_gripper_client_faults.cpp)
-  ament_target_dependencies(test_gripper_client_faults rclcpp rclcpp_action control_msgs)
+  ament_target_dependencies(test_gripper_client_faults rclcpp rclcpp_action control_msgs std_srvs)
   target_link_libraries(test_gripper_client_faults gripper_client)
   set_tests_properties(test_gripper_client_faults PROPERTIES TIMEOUT 120)
 endif()

@@ -1,4 +1,5 @@
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
+#include <future>
 #include <set>
 
 namespace mujoco_ros2_control {
@@ -35,7 +36,15 @@ std::string MujocoRos2ControlPluginPrivate::getURDF() const
 
 		try {
 			auto f = parameters_client->get_parameters({ this->robot_description_ });
-			executor_->spin_until_future_complete(f);
+			// MujocoEnv already spins this shared executor from its ROS thread.
+			// Spinning it again here can throw "spin_some() called while already
+			// spinning" during plugin loading. Wait for that executor to service
+			// the async parameter request instead of attempting a nested spin.
+			while (rclcpp::ok() && f.wait_for(100ms) != std::future_status::ready) {
+			}
+			if (!rclcpp::ok()) {
+				return {};
+			}
 			std::vector<rclcpp::Parameter> values = f.get();
 			urdf_string                           = values[0].as_string();
 		} catch (const std::exception &e) {
