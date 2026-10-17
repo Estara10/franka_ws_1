@@ -1,0 +1,3 @@
+[INFO] [1792248339.549649857] [dual_impedance_no_load_bridge]: [NO_LOAD] hold=3.0s move=5.0mm/1.0s holds=3.0s goal_topic=mj_left_and_mj_right/dual_cartesian_impedance_controller/desired_pose
+[ERROR] [1792248349.550013174] [dual_impedance_no_load_bridge]: [NO_LOAD] failed: switch to impedance
+[ros2run]: Process exited with failure 1

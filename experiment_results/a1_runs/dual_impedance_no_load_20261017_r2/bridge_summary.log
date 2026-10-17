@@ -1,0 +1,8 @@
+[INFO] [1792247426.239121913] [dual_impedance_no_load_bridge]: [NO_LOAD] hold=3.0s move=5.0mm/1.0s holds=3.0s goal_topic=mj_left_and_mj_right/dual_cartesian_impedance_controller/desired_pose
+[INFO] [1792247427.315923827] [dual_impedance_no_load_bridge]: [NO_LOAD] switch activate=sim_multi_mode_controller deactivate=dual_panda_arm_controller ok=1
+[INFO] [1792247427.315982052] [dual_impedance_no_load_bridge]: [NO_LOAD] impedance controller requested
+[INFO] [1792247427.326980498] [dual_impedance_no_load_bridge]: [NO_LOAD] initial left=(0.3070,0.0000,0.5908) right=(0.3070,0.0000,0.5908)
+[INFO] [1792247434.433595309] [dual_impedance_no_load_bridge]: [NO_LOAD] impedance sequence complete after 7.11 s
+[INFO] [1792247434.438319370] [dual_impedance_no_load_bridge]: [NO_LOAD] switch activate=dual_panda_arm_controller deactivate=sim_multi_mode_controller ok=1
+[INFO] [1792247434.448586688] [dual_impedance_no_load_bridge]: [NO_LOAD] trajectory controller seeded from the measured joint state
+[INFO] [1792247434.448654398] [dual_impedance_no_load_bridge]: [NO_LOAD] returned to the trajectory controller

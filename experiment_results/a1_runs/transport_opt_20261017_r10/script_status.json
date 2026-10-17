@@ -1,0 +1,10 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "transport_opt_20261017_r10",
+  "stage": "prepare",
+  "outcome_code": "E_TRUTH_NOT_PUBLISHED",
+  "detail": "runner did not publish truth in time",
+  "ros_domain_id": "113",
+  "ros_localhost_only": "1",
+  "manifest_present": true
+}

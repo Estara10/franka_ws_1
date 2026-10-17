@@ -33,6 +33,8 @@ find_package(controller_manager_msgs REQUIRED)
 find_package(mujoco_ros_msgs REQUIRED)
 # A1 P1b: rod pose truth message.
 find_package(dual_arm_a1_msgs REQUIRED)
+# S2 transport projection smoothing: Eigen only, no ROS dependency.
+find_package(Eigen3 REQUIRED)
 
 # Include directories
 include_directories(
@@ -43,6 +45,20 @@ include_directories(
 add_executable(dual_arm_carry_task_node
   src/carry_task_state_machine.cpp src/dual_arm_controller.cpp src/contact_load_probe.cpp
 )
+
+# S3: no-load validation driver for the dual-arm Cartesian impedance chain.
+add_executable(dual_impedance_no_load_bridge src/dual_impedance_no_load_bridge.cpp)
+ament_target_dependencies(dual_impedance_no_load_bridge
+  rclcpp
+  rclcpp_action
+  controller_manager_msgs
+  control_msgs
+  multi_mode_control_msgs
+  sensor_msgs
+  trajectory_msgs
+  geometry_msgs
+)
+target_link_libraries(dual_impedance_no_load_bridge Eigen3::Eigen)
 
 add_executable(communication_latency_monitor_node
   src/communication_latency_monitor.cpp
@@ -104,6 +120,30 @@ ament_target_dependencies(a1_sample_validator
 add_executable(a1_scene_runner_node
   src/a1_scene_runner_node.cpp
 )
+
+# S2: closed-chain projected path smoothing for the transport segment. Pure
+# Eigen, model-agnostic; forward kinematics and every feasibility check enter
+# through callbacks, so the objective and stopping rules are testable offline.
+add_library(coordinated_path_optimizer src/coordinated_path_optimizer.cpp)
+target_include_directories(coordinated_path_optimizer PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(coordinated_path_optimizer Eigen3::Eigen)
+
+# S2 time profile: constrained re-timing of a FIXED geometric path. Pure Eigen,
+# no ROS dependency; the geometry never moves, only s(tau).
+add_library(time_profile_optimizer src/time_profile_optimizer.cpp)
+target_include_directories(time_profile_optimizer PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(time_profile_optimizer Eigen3::Eigen)
+
+# Offline replay: reads the saved transport sample and writes the candidate
+# trajectory. No ROS, no simulation.
+add_executable(time_profile_replay src/time_profile_replay.cpp)
+target_link_libraries(time_profile_replay time_profile_optimizer)
 
 ament_target_dependencies(dual_arm_carry_task_node
   rclcpp
@@ -179,11 +219,12 @@ ament_target_dependencies(dual_arm_carry_task_node
   mujoco_ros_msgs
 )
 
-target_link_libraries(dual_arm_carry_task_node a1_truth a1_sample_validator gripper_protocol gripper_client)
+target_link_libraries(dual_arm_carry_task_node a1_truth a1_sample_validator gripper_protocol gripper_client coordinated_path_optimizer time_profile_optimizer)
 
 # Install targets
 install(TARGETS
   dual_arm_carry_task_node
+  dual_impedance_no_load_bridge
   communication_latency_monitor_node
   task_metrics_monitor_node
   adaptive_compliance_supervisor_node
@@ -193,6 +234,8 @@ install(TARGETS
   a1_sample_validator
   gripper_protocol
   gripper_client
+  coordinated_path_optimizer
+  time_profile_optimizer
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -232,6 +275,13 @@ if(BUILD_TESTING)
   ament_add_gtest(test_s1_object_pose test/test_s1_object_pose.cpp)
 
   ament_add_gtest(test_s1_time_scaling test/test_s1_time_scaling.cpp)
+
+  ament_add_gtest(test_coordinated_path_optimizer
+    test/test_coordinated_path_optimizer.cpp)
+  target_link_libraries(test_coordinated_path_optimizer coordinated_path_optimizer)
+
+  ament_add_gtest(test_time_profile_optimizer test/test_time_profile_optimizer.cpp)
+  target_link_libraries(test_time_profile_optimizer time_profile_optimizer)
 
   ament_add_gtest(test_gripper_protocol test/test_gripper_protocol.cpp)
   target_link_libraries(test_gripper_protocol gripper_protocol)

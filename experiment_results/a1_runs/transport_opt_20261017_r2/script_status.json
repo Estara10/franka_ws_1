@@ -1,0 +1,10 @@
+{
+  "written_by": "scripts/a1_run_scene.sh",
+  "run_id": "transport_opt_20261017_r2",
+  "stage": "cleanup",
+  "outcome_code": "E_SCRIPT_INTERRUPTED",
+  "detail": "script exited with code 2",
+  "ros_domain_id": "113",
+  "ros_localhost_only": "1",
+  "manifest_present": true
+}

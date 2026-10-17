@@ -7,6 +7,13 @@
 阶段计划和执行器任务应与本文一致。旧任务提示词、审阅意见及实验记录作为当时的上下文，
 不自动累积为长期约束；发生冲突时按本文当前准则解释或修订任务，不要求用户重复确认。
 
+### 2026-10-17 接续状态
+
+今日修改、运行证据、已知缺口和队友操作入口见
+[HANDOFF_20261017.md](HANDOFF_20261017.md)。S2 运输几何/时间剖面离线探索均未达
+执行收益门槛，结束这两条分支；S3 仅空载链路通过，先补独立审阅、控制器侧参考超时
+与收尾复验，再接无 weld 悬空保持和扰动对照，不反复重开 S2 调参。
+
 ## 项目定位与长期开发准则
 
 本项目属于**大学生创新创业训练项目**，以学习、研究探索、算法实现、功能验证和成果展示
@@ -175,8 +182,9 @@ S1不追加理想模型验收；当前优先补齐用户要求的无weld接触�
 
 全程 weld/杆固定约束为 0（任务 CSV 与逐接触 CSV 的对应列全为 0），杆由 pad–杆接触
 承载；但杆相对手仍有约 10.8–11.4 mm 竖直滑移，本阶段使用用户授权的 20 mm 滑移窗口，
-原 5 mm 判据未满足。原 S1 ideal_weld 不改义；probe 的横向运输仅 10 cm 前进，未做
-旋转/返回。算法、配置与运行命令见 [CONTACT_LOAD_PROBE.md](CONTACT_LOAD_PROBE.md)，
+原 5 mm 判据未满足。原 S1 ideal_weld 不改义；当前 probe 已扩展为 10 cm 前进、
+转至绝对 +20° 与释放后退回，固定批量结果见交接文档，不代表更大旋转或工作区泛化。
+算法、配置与运行命令见 [CONTACT_LOAD_PROBE.md](CONTACT_LOAD_PROBE.md)，
 逐轮记录见 [CONTACT_HANDOFF_20261016.md](CONTACT_HANDOFF_20261016.md)。
 
 ### 启动和仿真层
@@ -209,6 +217,7 @@ INIT → APPROACH → GRASP → WAITING_PHYSICS → LIFT → TRANSPORT
 
 ### 抓取与对象状态
 
+以下描述适用于旧任务/显式理想抓持链，不能套用于无 weld 的 `contact_probe`：
 夹爪闭合后，任务发布 `/grasp_weld_active=true`，MuJoCo 硬件插件启用左右手与杆之间的
 weld；同时任务把杆作为 AttachedCollisionObject 加入 MoveIt。放置时逆序解除 weld、
 打开夹爪、detach 并把杆恢复到世界场景。仿真场景和 PlanningScene 必须保持一致。
@@ -216,9 +225,11 @@ weld；同时任务把杆作为 AttachedCollisionObject 加入 MoveIt。放置�
 ## 轨迹规划的真实状态
 
 当前接近和部分抓取动作使用 Pilz PTP；运输、旋转和下降主要由逐点 IK 手工构造轨迹，
-随后使用 TOTG，部分路径再使用 Ruckig。MoveIt 配置虽然注册了 CHOMP，但核心任务代码
-目前没有真正调用 CHOMP。因此 `chomp_only` 和 `compliant_chomp` 仍是历史模式名，不能
-把它们描述成已经完成 CHOMP 优化的实验组。
+随后使用 TOTG，部分路径再使用 Ruckig。MoveIt 配置注册 CHOMP 并不表示旧主状态机
+自动完成了 CHOMP 优化。2026-10-17 的 contact plan-compare 分支已实际
+调用并执行 CHOMP，但它不显式约束双臂闭链，当前不作为默认优化方案。
+`chomp_only` 和 `compliant_chomp` 仍是历史模式名，不能仅凭名称认定优化完成。
+当前接触运输使用 IK+IPTP；S2 投影与时间剖面实现及有限收益见当天交接。
 
 后续目标链路是：
 
@@ -243,13 +254,14 @@ weld；同时任务把杆作为 AttachedCollisionObject 加入 MoveIt。放置�
 ### 外部柔顺
 
 `adaptive_compliance_supervisor` 只根据力反馈调节笛卡尔刚度和阻尼；它本身不生成连续的
-期望末端轨迹。完整外部阻抗还需要轨迹到末端目标的桥接、无跳变控制器切换、力矩限制、
-超时保护和恢复策略。
+期望末端轨迹。2026-10-17 新增的 `dual_impedance_no_load_bridge` 已验证空载 pose/twist
+参考、力矩限幅与控制器切换，最大误差 2.16 mm / 0.38°；它不是该监督器已完成搬运集成。
+控制器侧参考超时、独立审阅、抓持后承载与扰动对照仍未完成，完整外部柔顺仍属实验性。
 
 `dual_panda_arm_controller` 与 `sim_multi_mode_controller` 不能同时 active。外部监督器默认
 关闭是为了避免控制资源冲突，而不是已经完成集成。外部阻抗应先在 MuJoCo 中验证：若成功率、
 精度和内力/振动指标均可靠，再作为正式方案；否则保留为 experimental，仿真默认继续使用
-内部柔顺。
+刚性关节伺服。现有内部柔顺对照未显示接触搬运收益，不作为当前默认研究基线。
 
 长期实验模式计划为：
 

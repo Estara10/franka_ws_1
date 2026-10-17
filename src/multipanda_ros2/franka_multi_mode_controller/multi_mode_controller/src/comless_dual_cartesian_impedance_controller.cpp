@@ -2,6 +2,7 @@
 #include <multi_mode_controller/utils/controller_factory.h>
 #include <multi_mode_controller/utils/damping_design.h>
 #include <multi_mode_controller/utils/nullspace_projection.h>
+#include <multi_mode_controller/utils/panda_limits.h>
 // SEEMS LIKE A POINTER ISSUE.
 // WHEN TWO CLASSES DERIVE FROM THE SAME PARENT, IT DOESN'T SEEM TO WORK
 using namespace panda_controllers;
@@ -20,6 +21,10 @@ static auto registration = ControllerFactory::registerClass<Controller>(
 
 void Controller::computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
     const Pose& desired_poses, const Params& p) {
+  const double now = get_wall_time();
+  const double dt = have_previous_time_ ? (now - previous_time_) : 0.0;
+  previous_time_ = now;
+  have_previous_time_ = true;
   // measurement setup
   // double start_time = get_wall_time();
   // std::vector<std::array<double,7>> taus_(2);
@@ -65,17 +70,44 @@ void Controller::computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
     Vector7d tau_task, tau_nullspace, tau_d;
     Matrix6d D = sqrtDesign<6>(pandaCartesianInertia(jacobian, inertia),
         p.params[i].stiffness, p.params[i].damping_ratio);
-    tau_task << jacobian.transpose() * (-p.params[i].stiffness*error - D*(jacobian*qD));
+    // Task torque: the damping term acts on the difference between the
+    // reference twist and the twist the arm actually has, measured in the same
+    // frame as the error and the zero Jacobian. A moving reference is not
+    // treated as if it were stationary.
+    const Vector6d reference_twist = desired.twist;
+    const Vector6d current_twist = jacobian * qD;
+    const Vector6d spring_force = -p.params[i].stiffness * error;
+    const Vector6d damping_force = D * (reference_twist - current_twist);
+    tau_task << jacobian.transpose() * (spring_force + damping_force);
     tau_nullspace <<
         getDynamicallyConsistentNullspaceProjection<7>(inertia, jacobian) *
         (p.params[i].nullspace_stiffness * (desired.q_n - current.q_n) -
         (2.0 * std::sqrt(p.params[i].nullspace_stiffness)) * qD);
+    // coriolis is the only feed-forward term: MuJoCo runs this model with
+    // body gravcomp=1, so gravity is already cancelled by the simulator and
+    // adding a gravity term here would compensate it twice.
     tau_d << tau_task + tau_nullspace + coriolis + tau_collision + tau_manipulability;
 
+    const TorqueLimitResult limited = applyTorqueLimits(
+        tau_d, previous_tau_[i], dt, panda_limits::tau_max, panda_limits::tauD_max);
+    if (limited.nonfinite_input) ++nonfinite_cycles_;
+    if (limited.saturated) ++saturated_cycles_;
+    if (limited.rate_limited) ++rate_limited_cycles_;
+    previous_tau_[i] = limited.tau;
     for (size_t j = 0; j < 7; ++j) {
-      (*tau[i])[j] = std::min(10.0, tau_d[j]); // saturate the torque mag
-      // taus_[i][j] = std::min(10.0, tau_d[j]); // measurement 
+      (*tau[i])[j] = limited.tau[j];
     }
+    last_raw_tau_[i] = tau_d;
+  }
+  if (++limit_log_cycle_ % 500 == 0) {
+    RCLCPP_INFO_STREAM_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+        "impedance torque protection: nonfinite=" << nonfinite_cycles_
+        << " magnitude_limited=" << saturated_cycles_
+        << " rate_limited=" << rate_limited_cycles_
+        << " last_raw=" << last_raw_tau_[0].transpose()
+        << " last_applied=" << previous_tau_[0].transpose()
+        << " last_raw_right=" << last_raw_tau_[1].transpose()
+        << " last_applied_right=" << previous_tau_[1].transpose());
   }
   /*Uncomment for logging */
   // if(getCounter() < max_count_){
@@ -124,6 +156,19 @@ Pose Controller::getCurrentPoseImpl() {
   }
   // RCLCPP_INFO_STREAM_THROTTLE(node_->get_logger(), *node_->get_clock(), 500, "getCurrentPoseImpl: " << p.position.transpose() << " " << p.orientation);
   return p;
+}
+
+void Controller::startImpl() {
+  // A fresh activation starts from rest with no carried-over rate state.
+  for (int i = 0; i < 2; ++i) {
+    previous_tau_[i].setZero();
+    last_raw_tau_[i].setZero();
+  }
+  previous_time_ = 0.0;
+  have_previous_time_ = false;
+  nonfinite_cycles_ = 0;
+  saturated_cycles_ = 0;
+  rate_limited_cycles_ = 0;
 }
 
 bool Controller::hasOffsetImpl() {

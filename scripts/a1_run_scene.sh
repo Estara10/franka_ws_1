@@ -200,7 +200,12 @@ if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 && "${GRASP_MODEL}" != "contact_pr
   exit 2
 fi
 if [[ "${GRASP_MODEL}" == "ideal_weld" || "${GRASP_MODEL}" == "contact_probe" ]]; then
-  GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1
+  if [[ "${CONTACT_TRANSPORT_PLAN_ONLY:-0}" -eq 1 ]]; then
+    # S2 plan-only: the static checks are needed, the execution entries are not.
+    P2A_CHECK=1; P2B_CHECK=0; PREGRASP_EXECUTE=0; GRASP_DESCENT=0; GRASP_CONTACT_CLOSE=0
+  else
+    GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1
+  fi
   if [[ "${GRASP_CONTACT_CLOSE}" -eq 1 || "${GRIPPER_SELFTEST}" -eq 1 ]]; then
     echo "error: ideal_weld/contact_probe is exclusive with contact-close and gripper selftest" >&2; exit 3
   fi
@@ -730,6 +735,15 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     P2A_ARGS+=(grasp_contact_close:="$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)")
     P2A_ARGS+=(grasp_model:="${GRASP_MODEL}")
     P2A_ARGS+=(contact_hold_diagnostic_only:="$([[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]] && echo true || echo false)")
+    # P4/S2 phase 1: planner comparison. Gated by an explicit environment
+    # variable so the ordinary contact-probe path never changes.
+    if [[ "${CONTACT_PLAN_COMPARE:-0}" -eq 1 ]]; then
+      P2A_ARGS+=(contact_plan_compare:=true)
+    fi
+    # S2 transport projection comparison: planning only, never any motion.
+    if [[ "${CONTACT_TRANSPORT_PLAN_ONLY:-0}" -eq 1 ]]; then
+      P2A_ARGS+=(contact_transport_plan_only:=true)
+    fi
     if [[ "${TASK_TARGET_FIELDS}" -eq 3 ]]; then
       P2A_ARGS+=(rod_target_x:="${TASK_TARGET_X}" rod_target_y:="${TASK_TARGET_Y}"
                  rod_target_yaw_deg:="${TASK_TARGET_YAW_DEG}")
@@ -766,6 +780,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     TASK_DEADLINE=$((SECONDS + TASK_TIMEOUT))
     TASK_STATE=""
     while (( SECONDS < TASK_DEADLINE )); do
+      if [[ "${GRASP_MODEL}" == "contact_probe" ]] && grep -q '\[CONTACT_PROBE_RESULT\] state=PLAN_COMPARE_DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+        TASK_STATE="PLAN_COMPARE_DONE"; break
+      fi
       if [[ "${GRASP_MODEL}" == "contact_probe" ]] && grep -q '\[CONTACT_PROBE_RESULT\] state=DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="DONE"; break
       fi
@@ -774,6 +791,12 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
       fi
       if grep -q '\[S1_IDEAL_WELD_RESULT\] state=DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="DONE"; break
+      fi
+      # S2 transport plan-only: checked before the PREPARED marker, because the
+      # comparison runs inside the prepare step and never publishes PREPARED.
+      if [[ "${CONTACT_TRANSPORT_PLAN_ONLY:-0}" -eq 1 ]] && \
+         grep -q '\[TRANSPORT_OPT_RESULT\] state=PLAN_ONLY_DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+        TASK_STATE="PLAN_ONLY_DONE"; break
       fi
       if grep -q "已发布准备完成状态(PREPARED)" "${RUN_DIR}/task_launch.log" 2>/dev/null; then
         TASK_STATE="PREPARED"; break
@@ -812,6 +835,12 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     elif [[ "${TASK_STATE}" == "CONTACT_HOLD_MECHANISM_PASS" ]]; then
       RC=0
       echo "[prepare] contact hold mechanism only: fixed-arm hold and release passed; no lift/load claim"
+    elif [[ "${TASK_STATE}" == "PLAN_COMPARE_DONE" ]]; then
+      RC=0
+      echo "[prepare] P4/S2 phase 1: planner comparison complete; no carry claim"
+    elif [[ "${TASK_STATE}" == "PLAN_ONLY_DONE" ]]; then
+      RC=0
+      echo "[prepare] S2 transport projection comparison complete: planning only; no motion was sent"
     elif [[ "${TASK_STATE}" == "GRASP_CONTACT_CONFIRMED" ]]; then
       if grasp_contact_confirmed; then
         RC=0

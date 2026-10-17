@@ -7,6 +7,7 @@ WS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${WS_DIR}"
 
 OBSERVE_ON_ERROR=0
+INTERNAL_COMPLIANCE=0
 # Display mode: headless for experiments (default), --use-rviz to watch the
 # simulation. Pass exactly one; --headless is the safe default.
 DISPLAY_FLAG="--headless"
@@ -14,9 +15,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --headless) DISPLAY_FLAG="--headless"; shift ;;
     --use-rviz) DISPLAY_FLAG="--use-rviz"; shift ;;
+    --internal-compliance) INTERNAL_COMPLIANCE=1; shift ;;
     --observe-on-error) OBSERVE_ON_ERROR=1; shift ;;
     -h|--help)
-      echo "usage: run_contact_probe_local.sh [--headless|--use-rviz] [--observe-on-error]"
+      echo "usage: run_contact_probe_local.sh [--headless|--use-rviz] [--internal-compliance] [--observe-on-error]"
       exit 0
       ;;
     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
@@ -57,18 +59,29 @@ export ROS_LOCALHOST_ONLY=1
 
 # contact_probe's checked-in default is the rigid validation profile. Refuse
 # an inherited A/B override so this one run does not silently change factors.
-if [[ "${CONTACT_PROBE_RIGID:-true}" != "true" ]]; then
-  echo "error: CONTACT_PROBE_RIGID is not true; unset the override for the baseline probe" >&2
-  exit 2
+# The compliant A/B round must request the profile explicitly.
+if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
+  export CONTACT_PROBE_RIGID=false
+  export MJ_INTERNAL_COMPLIANCE_ENABLED=true
+else
+  if [[ "${CONTACT_PROBE_RIGID:-true}" != "true" ]]; then
+    echo "error: CONTACT_PROBE_RIGID is not true; unset the override for the baseline probe" >&2
+    echo "       (use --internal-compliance for the explicit compliant A/B round)" >&2
+    exit 2
+  fi
+  export CONTACT_PROBE_RIGID=true
 fi
-export CONTACT_PROBE_RIGID=true
 CONTACT_HOLD_DIAGNOSTIC_ONLY="${CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY:-0}"
 if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" != "0" && "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" != "1" ]]; then
   echo "error: CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY must be 0 or 1" >&2
   exit 2
 fi
 
-RUN_ID="${CONTACT_PROBE_RUN_ID:-lidio_contact_probe_yaw10_$(date +%Y%m%d_%H%M%S)}"
+if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
+  RUN_ID="${CONTACT_PROBE_RUN_ID:-lidio_contact_probe_compliant_$(date +%Y%m%d_%H%M%S)}"
+else
+  RUN_ID="${CONTACT_PROBE_RUN_ID:-lidio_contact_probe_yaw10_$(date +%Y%m%d_%H%M%S)}"
+fi
 if ! [[ "${RUN_ID}" =~ ^[A-Za-z0-9_.-]+$ ]] || [[ "${RUN_ID}" == "." || "${RUN_ID}" == ".." ]]; then
   echo "error: CONTACT_PROBE_RUN_ID may only contain letters, digits, '_', '-' and '.'" >&2
   exit 2
@@ -89,6 +102,11 @@ if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
   echo "contact_probe: HOLD-MECHANISM diagnostic only at (0.50, 0.00, +10 deg); no lift"
 else
   echo "contact_probe: full fixed initial pose (0.50, 0.00, +10 deg), current default profile"
+fi
+if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
+  echo "contact_probe profile: COMPLIANT (internal compliance enabled; CONTACT_PROBE_RIGID=false)"
+else
+  echo "contact_probe profile: RIGID (internal compliance disabled; CONTACT_PROBE_RIGID=true)"
 fi
 echo "MuJoCo: ${MUJOCO_DIR}"
 echo "ROS_DOMAIN_ID: ${ROS_DOMAIN_ID}"

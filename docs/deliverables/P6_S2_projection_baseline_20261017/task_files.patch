@@ -1,0 +1,782 @@
+diff --git a/docs/CONTACT_HANDOFF_20261016.md b/docs/CONTACT_HANDOFF_20261016.md
+index 37721da..a50bffb 100644
+--- a/docs/CONTACT_HANDOFF_20261016.md
++++ b/docs/CONTACT_HANDOFF_20261016.md
+@@ -383,3 +383,11 @@ profile 的结论数据。
+ - **B（测试后关闭）**：creep hold（保持 2 s 内缓慢上移 4 mm）已实现并验证：保持期杆反而从 413.3 掉到 405.7 mm（下滑 7.6 mm，比静止保持更差）、左指失接触，且执行超过 2 s 等待窗口触发 `E_CONTACT_HOLD_CREEP_TIMEOUT`。代码保留，用 `creep_hold_enabled=false` 关闭；creep 计划额外跳过双臂残差检查（碰撞/支撑/限位仍检查）。
+ - 可视化 run `..._185847`（A-only）：`samples=33 sim_hold=2.040s lift=0.391m max_slip=9.366mm max_angle=1.364deg duty=(0.91,0.88,0.79,0.91)`；finger2 0.788 记录警告；运输 `dx=-0.098 dy=-0.001 dyaw=10.3°`；落回 0.385 m；释放 `(0.3963,-0.0041,0.0207)`；`state=DONE`。阶段滑移：抬升 5.01、保持 7.67、运输 5.68、落回 7.67 mm。
+ - 同配置 A-only 无窗口 run `..._185606` 同样 DONE（max_slip 9.493、duty 0.79 记录后继续）。
++
++## 2026-10-17 P4/S2 Phase 1：双臂运输规划器对照（run `lidio_contact_probe_yaw10_20261017_191610`）
++
++- 新增 `contact_plan_compare`（默认 false，经 launch→状态机→context→probe 贯通，仅 contact_probe 可用、与 hold-diagnostic 互斥）。开启时在抬升/保持/重建立后不执行运输，先比较 A（现有物体空间 IK+IPTP）与 B（MoveIt CHOMP，同一起点、同一终点关节目标），输出 `plan_compare.csv` 与 `[PLAN_COMPARE]/[PLAN_COMPARE_RESULT]`。
++- A：success=1，21 点，2.223 s，双臂残差最大 **0.085 mm / 0.009°**，碰撞 0，限位/速度/加速度超限 0，123 样本，jerk max/p95=40.0/15.9。
++- B（CHOMP）：success=1（code=1），planning 0.316 s，12 点，1.083 s，双臂残差最大 **4.299 mm / 0.977°**（≤5 mm/2°），碰撞 0，限位/速度/加速度超限 0，58 样本，jerk max/p95=87.0/52.5。
++- 判定：CHOMP 维持双臂闭链且无碰撞/超限，满足 Phase 2 条件；同会话执行 CHOMP 运输，实测 1.238 s（IPTP 基线 164743/185847：2.438/2.424 s），运输期滑移 3.66/5.62 mm（基线 4.21/5.24、5.68/4.82 mm），随后落回与释放完成；`[CONTACT_PROBE_RESULT] state=PLAN_COMPARE_DONE`（未写成 DONE/承载成功）。
++- 第一次尝试 `..._191428` 因 `setPlannerId` 未切到 chomp pipeline、且碰撞评估误用 live model 而无效，目录保留；修正后重跑为本次结果。执行期关节速度/加速度峰值未单独记录（指标监控关闭），仅确认执行计划在评估中无速度/加速度超限。未提交。
+diff --git a/scripts/a1_run_scene.sh b/scripts/a1_run_scene.sh
+index 5fd05f6..44d4ab1 100755
+--- a/scripts/a1_run_scene.sh
++++ b/scripts/a1_run_scene.sh
+@@ -730,6 +730,11 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
+     P2A_ARGS+=(grasp_contact_close:="$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)")
+     P2A_ARGS+=(grasp_model:="${GRASP_MODEL}")
+     P2A_ARGS+=(contact_hold_diagnostic_only:="$([[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]] && echo true || echo false)")
++    # P4/S2 phase 1: planner comparison. Gated by an explicit environment
++    # variable so the ordinary contact-probe path never changes.
++    if [[ "${CONTACT_PLAN_COMPARE:-0}" -eq 1 ]]; then
++      P2A_ARGS+=(contact_plan_compare:=true)
++    fi
+     if [[ "${TASK_TARGET_FIELDS}" -eq 3 ]]; then
+       P2A_ARGS+=(rod_target_x:="${TASK_TARGET_X}" rod_target_y:="${TASK_TARGET_Y}"
+                  rod_target_yaw_deg:="${TASK_TARGET_YAW_DEG}")
+@@ -766,6 +771,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
+     TASK_DEADLINE=$((SECONDS + TASK_TIMEOUT))
+     TASK_STATE=""
+     while (( SECONDS < TASK_DEADLINE )); do
++      if [[ "${GRASP_MODEL}" == "contact_probe" ]] && grep -q '\[CONTACT_PROBE_RESULT\] state=PLAN_COMPARE_DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
++        TASK_STATE="PLAN_COMPARE_DONE"; break
++      fi
+       if [[ "${GRASP_MODEL}" == "contact_probe" ]] && grep -q '\[CONTACT_PROBE_RESULT\] state=DONE' "${RUN_DIR}/task_launch.log" 2>/dev/null; then
+         TASK_STATE="DONE"; break
+       fi
+@@ -812,6 +820,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
+     elif [[ "${TASK_STATE}" == "CONTACT_HOLD_MECHANISM_PASS" ]]; then
+       RC=0
+       echo "[prepare] contact hold mechanism only: fixed-arm hold and release passed; no lift/load claim"
++    elif [[ "${TASK_STATE}" == "PLAN_COMPARE_DONE" ]]; then
++      RC=0
++      echo "[prepare] P4/S2 phase 1: planner comparison complete; no carry claim"
+     elif [[ "${TASK_STATE}" == "GRASP_CONTACT_CONFIRMED" ]]; then
+       if grasp_contact_confirmed; then
+         RC=0
+diff --git a/scripts/run_contact_probe_local.sh b/scripts/run_contact_probe_local.sh
+index 3d6382b..5dfd242 100755
+--- a/scripts/run_contact_probe_local.sh
++++ b/scripts/run_contact_probe_local.sh
+@@ -7,6 +7,7 @@ WS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ cd "${WS_DIR}"
+ 
+ OBSERVE_ON_ERROR=0
++INTERNAL_COMPLIANCE=0
+ # Display mode: headless for experiments (default), --use-rviz to watch the
+ # simulation. Pass exactly one; --headless is the safe default.
+ DISPLAY_FLAG="--headless"
+@@ -14,9 +15,10 @@ while [[ $# -gt 0 ]]; do
+   case "$1" in
+     --headless) DISPLAY_FLAG="--headless"; shift ;;
+     --use-rviz) DISPLAY_FLAG="--use-rviz"; shift ;;
++    --internal-compliance) INTERNAL_COMPLIANCE=1; shift ;;
+     --observe-on-error) OBSERVE_ON_ERROR=1; shift ;;
+     -h|--help)
+-      echo "usage: run_contact_probe_local.sh [--headless|--use-rviz] [--observe-on-error]"
++      echo "usage: run_contact_probe_local.sh [--headless|--use-rviz] [--internal-compliance] [--observe-on-error]"
+       exit 0
+       ;;
+     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
+@@ -57,18 +59,29 @@ export ROS_LOCALHOST_ONLY=1
+ 
+ # contact_probe's checked-in default is the rigid validation profile. Refuse
+ # an inherited A/B override so this one run does not silently change factors.
+-if [[ "${CONTACT_PROBE_RIGID:-true}" != "true" ]]; then
+-  echo "error: CONTACT_PROBE_RIGID is not true; unset the override for the baseline probe" >&2
+-  exit 2
++# The compliant A/B round must request the profile explicitly.
++if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
++  export CONTACT_PROBE_RIGID=false
++  export MJ_INTERNAL_COMPLIANCE_ENABLED=true
++else
++  if [[ "${CONTACT_PROBE_RIGID:-true}" != "true" ]]; then
++    echo "error: CONTACT_PROBE_RIGID is not true; unset the override for the baseline probe" >&2
++    echo "       (use --internal-compliance for the explicit compliant A/B round)" >&2
++    exit 2
++  fi
++  export CONTACT_PROBE_RIGID=true
+ fi
+-export CONTACT_PROBE_RIGID=true
+ CONTACT_HOLD_DIAGNOSTIC_ONLY="${CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY:-0}"
+ if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" != "0" && "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" != "1" ]]; then
+   echo "error: CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY must be 0 or 1" >&2
+   exit 2
+ fi
+ 
+-RUN_ID="${CONTACT_PROBE_RUN_ID:-lidio_contact_probe_yaw10_$(date +%Y%m%d_%H%M%S)}"
++if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
++  RUN_ID="${CONTACT_PROBE_RUN_ID:-lidio_contact_probe_compliant_$(date +%Y%m%d_%H%M%S)}"
++else
++  RUN_ID="${CONTACT_PROBE_RUN_ID:-lidio_contact_probe_yaw10_$(date +%Y%m%d_%H%M%S)}"
++fi
+ if ! [[ "${RUN_ID}" =~ ^[A-Za-z0-9_.-]+$ ]] || [[ "${RUN_ID}" == "." || "${RUN_ID}" == ".." ]]; then
+   echo "error: CONTACT_PROBE_RUN_ID may only contain letters, digits, '_', '-' and '.'" >&2
+   exit 2
+@@ -90,6 +103,11 @@ if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
+ else
+   echo "contact_probe: full fixed initial pose (0.50, 0.00, +10 deg), current default profile"
+ fi
++if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
++  echo "contact_probe profile: COMPLIANT (internal compliance enabled; CONTACT_PROBE_RIGID=false)"
++else
++  echo "contact_probe profile: RIGID (internal compliance disabled; CONTACT_PROBE_RIGID=true)"
++fi
+ echo "MuJoCo: ${MUJOCO_DIR}"
+ echo "ROS_DOMAIN_ID: ${ROS_DOMAIN_ID}"
+ echo "ROS_HOME: ${ROS_HOME:-<ROS default>}"
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp b/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp
+index 75ba8ec..3e54918 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp
+@@ -54,6 +54,7 @@ enum class TaskState {
+     GRASP_POSE_REACHED, // A1 P3a-2b: 已下降到抓取位姿并实测到位；夹爪保持打开，不是抓取成功
+     GRASP_CONTACT_CONFIRMED, // A1 P3a-2c: 双手双指对杆接触并通过新鲜稳定窗口
+     CONTACT_HOLD_MECHANISM_VALIDATED, // fixed-arm hold diagnostic only; no load/lift claim
++    PLAN_COMPARE_DONE, // P4/S2 phase 1: planner comparison only; not a carry claim
+     GRIPPER_TEST_DONE, // A1 P3a-2a: 空载开合测试结束；机械臂未动，不是搬运 DONE
+     DONE,
+     ERROR
+@@ -177,6 +178,10 @@ public:
+     bool grasp_contact_close_ {false};
+     std::string grasp_model_ {"none"};
+     bool contact_hold_diagnostic_only_ {false};
++    // P4/S2 phase 1: compare the current object-space transport plan with a
++    // MoveIt CHOMP plan to the same joint target. Planning only unless the
++    // CHOMP plan also passes the closed-chain/collision/limit checks.
++    bool contact_plan_compare_ {false};
+     std::atomic<bool> weld_state_received_ {false};
+     std::atomic<bool> weld_state_active_ {false};
+     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr weld_state_sub_;
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/dual_arm_controller.hpp b/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/dual_arm_controller.hpp
+index c6f4a2e..dd1b72a 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/dual_arm_controller.hpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/dual_arm_controller.hpp
+@@ -97,7 +97,8 @@ public:
+     bool runGraspDescent(const a1t::TruthPayload& truth, std::string& detail);
+     bool runGraspContact(const a1t::TruthPayload& truth, std::string& detail);
+     bool runContactLoadProbe(const a1t::TruthPayload& truth, std::string& detail,
+-                             bool hold_diagnostic_only = false);
++                             bool hold_diagnostic_only = false,
++                             bool plan_compare = false);
+     bool runIdealWeldCarry(const a1t::TruthPayload& truth, std::string& detail);
+     // A1 P3a-2b: build the Cartesian descent from the ACTUAL reached pre-grasp
+     // state, solve it with combined-state IK on the criterion model, and verify
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/launch/dual_arm_carry_task.launch.py b/src/multipanda_ros2/dual_arm_carry_task/launch/dual_arm_carry_task.launch.py
+index 767bb76..8f62ceb 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/launch/dual_arm_carry_task.launch.py
++++ b/src/multipanda_ros2/dual_arm_carry_task/launch/dual_arm_carry_task.launch.py
+@@ -124,6 +124,7 @@ def launch_setup(context, *args, **kwargs):
+             'grasp_contact_close': LaunchConfiguration('grasp_contact_close'),
+             'grasp_model': LaunchConfiguration('grasp_model'),
+             'contact_hold_diagnostic_only': LaunchConfiguration('contact_hold_diagnostic_only'),
++            'contact_plan_compare': LaunchConfiguration('contact_plan_compare'),
+             'descent_steps': LaunchConfiguration('descent_steps'),
+             'descent_max_xy_dev_m': LaunchConfiguration('descent_max_xy_dev_m'),
+             'descent_max_angle_dev_deg': LaunchConfiguration('descent_max_angle_dev_deg'),
+@@ -463,6 +464,11 @@ def generate_launch_description():
+     contact_hold_diagnostic_only_arg = DeclareLaunchArgument(
+         'contact_hold_diagnostic_only', default_value='false',
+         description='仅用于一次接触保持机制诊断：预抓取/下降/接触闭合后固定机械臂观测1s并释放，绝不抬升')
++    contact_plan_compare_arg = DeclareLaunchArgument(
++        'contact_plan_compare', default_value='false',
++        description='P4/S2 phase 1: 抬升/保持/重建立之后不执行运输，改为对照当前物体空间路径与 '
++                    'MoveIt CHOMP 规划（同一起点与终点），输出 plan_compare.csv；仅在 CHOMP 通过'
++                    '闭链/碰撞/限位检查时条件执行一次 CHOMP 运输。需要 grasp_model=contact_probe')
+     descent_steps_arg = DeclareLaunchArgument(
+         'descent_steps', default_value='20',
+         description='下降轨迹的分段数（目标点 = 分段数 + 1，含两端）')
+@@ -765,6 +771,7 @@ def generate_launch_description():
+         grasp_contact_close_arg,
+         grasp_model_arg,
+         contact_hold_diagnostic_only_arg,
++        contact_plan_compare_arg,
+         descent_steps_arg,
+         descent_max_xy_dev_m_arg,
+         descent_max_angle_dev_deg_arg,
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp b/src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp
+index 333df95..6e96cbf 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp
+@@ -22,6 +22,7 @@ const char* to_stage_name(TaskState state)
+         case TaskState::GRASP_POSE_REACHED: return "GRASP_POSE_REACHED";
+         case TaskState::GRASP_CONTACT_CONFIRMED: return "GRASP_CONTACT_CONFIRMED";
+         case TaskState::CONTACT_HOLD_MECHANISM_VALIDATED: return "CONTACT_HOLD_MECHANISM_VALIDATED";
++        case TaskState::PLAN_COMPARE_DONE: return "PLAN_COMPARE_DONE";
+         case TaskState::GRIPPER_TEST_DONE: return "GRIPPER_TEST_DONE";
+         case TaskState::DONE: return "DONE";
+         case TaskState::ERROR: return "ERROR";
+@@ -113,6 +114,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
+         this->declare_parameter<bool>("grasp_contact_close", false);
+         this->declare_parameter<std::string>("grasp_model", "none");
+         this->declare_parameter<bool>("contact_hold_diagnostic_only", false);
++        this->declare_parameter<bool>("contact_plan_compare", false);
+         this->declare_parameter<int>("descent_steps", 20);
+         this->declare_parameter<double>("descent_max_xy_dev_m", 0.002);
+         this->declare_parameter<double>("descent_max_angle_dev_deg", 1.0);
+@@ -202,12 +204,14 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
+         grasp_model_ = this->get_parameter("grasp_model").as_string();
+         contact_hold_diagnostic_only_ =
+             this->get_parameter("contact_hold_diagnostic_only").as_bool();
++        contact_plan_compare_ = this->get_parameter("contact_plan_compare").as_bool();
+         RCLCPP_INFO(this->get_logger(),
+                     "[P3A2C_CONFIG] grasp_contact_close=%s (parameter default=false), grasp_descent=%s, "
+-                    "contact_hold_diagnostic_only=%s",
++                    "contact_hold_diagnostic_only=%s, contact_plan_compare=%s",
+                     grasp_contact_close_ ? "true" : "false",
+                     grasp_descent_ ? "true" : "false",
+-                    contact_hold_diagnostic_only_ ? "true" : "false");
++                    contact_hold_diagnostic_only_ ? "true" : "false",
++                    contact_plan_compare_ ? "true" : "false");
+         RCLCPP_INFO(this->get_logger(), "[S1_CONFIG] grasp_model=%s (default=none)", grasp_model_.c_str());
+         descent_steps_ = this->get_parameter("descent_steps").as_int();
+         descent_max_xy_dev_m_ = this->get_parameter("descent_max_xy_dev_m").as_double();
+@@ -454,6 +458,20 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
+             publish_stage(task_stage_pub_, getCurrentState());
+             return;
+         }
++        if (contact_plan_compare_ && grasp_model_ != "contact_probe") {
++            RCLCPP_ERROR(this->get_logger(),
++                         "✗ contact_plan_compare requires explicit grasp_model=contact_probe");
++            setCurrentState(TaskState::ERROR);
++            publish_stage(task_stage_pub_, getCurrentState());
++            return;
++        }
++        if (contact_plan_compare_ && contact_hold_diagnostic_only_) {
++            RCLCPP_ERROR(this->get_logger(),
++                         "✗ contact_plan_compare and contact_hold_diagnostic_only are mutually exclusive");
++            setCurrentState(TaskState::ERROR);
++            publish_stage(task_stage_pub_, getCurrentState());
++            return;
++        }
+         if ((grasp_model_ == "ideal_weld" || grasp_model_ == "contact_probe") &&
+             (!prepare_only_ || rod_pose_source_ != kRodPoseSourceA1Truth || !p2a_check_ ||
+              !p2b_check_ || !pregrasp_execute_ || !grasp_descent_ || grasp_contact_close_ ||
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/src/contact_load_probe.cpp b/src/multipanda_ros2/dual_arm_carry_task/src/contact_load_probe.cpp
+index 1e6bac9..5f0648b 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/src/contact_load_probe.cpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/src/contact_load_probe.cpp
+@@ -6,6 +6,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cmath>
++#include <cstdlib>
+ #include <fstream>
+ #include <future>
+ #include <iomanip>
+@@ -34,7 +35,7 @@ double rotationError(const Transform& a,const Transform& b) {
+ }
+ 
+ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::string& detail,
+-                                           bool hold_diagnostic_only) {
++                                           bool hold_diagnostic_only, bool plan_compare) {
+     using namespace std::chrono_literals;
+     // First bounded experiment, deliberately independent of S1 ideal_weld.
+     // Previous traces measured < 2.3 N upward transfer against 6.28 N rod
+@@ -253,6 +254,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+     };
+     auto makePlan=[&](const moveit::core::RobotState& origin,const Eigen::Vector3d& delta,
+                       moveit::planning_interface::MoveGroupInterface::Plan& plan,
++                      const char* label,
+                       double vscale,
+                       double ascale,
+                       double min_total,
+@@ -316,8 +318,28 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+         // at 2.5 mm/s and neutralized any velocity scaling. Relax both minimums so the
+         // 10x scaling actually applies. This is a trajectory-speed diagnostic, not a
+         // change to physics or acceptance.
+-        double stretch=std::max(min_total,min_total/points.back().time);
+-        for (std::size_t j=1;j<points.size();++j) stretch=std::max(stretch,0.02/(points[j].time-points[j-1].time));
++        // NOTE: min_total enters as an absolute stretch floor, not a duration floor:
++        // stretch = max(min_total, min_total/T, 0.02/min_segment_dt). For the
++        // transport call min_total=2.0 therefore doubles the IPTP duration.
++        const double t_scaled=points.back().time;
++        const double stretch_abs=min_total;
++        const double stretch_rel=min_total/t_scaled;
++        double stretch_min_total=std::max(stretch_abs,stretch_rel);
++        double stretch=stretch_min_total;
++        double stretch_segment=1.0;
++        for (std::size_t j=1;j<points.size();++j) {
++            const double s=0.02/(points[j].time-points[j-1].time);
++            stretch_segment=std::max(stretch_segment,s);
++            stretch=std::max(stretch,s);
++        }
++        const char* binding = stretch<=1.0+1e-9 ? "none" :
++            (stretch_segment>stretch_min_total+1e-9 ? "segment" : "min_total");
++        RCLCPP_INFO(ctx_->get_logger(),
++            "[CONTACT_PLAN_TIMING] label=%s points=%zu t_scaled=%.4f scale=%.4f "
++            "stretch_abs=%.4f stretch_rel=%.4f stretch_min_total=%.4f "
++            "stretch_segment=%.4f stretch=%.4f final=%.4f binding=%s",
++            label,points.size(),t_scaled,report.scale,stretch_abs,stretch_rel,
++            stretch_min_total,stretch_segment,stretch,t_scaled*stretch,binding);
+         for (std::size_t j=0;j<points.size();++j) {
+             joint.points[j].time_from_start=rclcpp::Duration::from_seconds(points[j].time*stretch);
+             joint.points[j].velocities=points[j].velocities; joint.points[j].accelerations=points[j].accelerations;
+@@ -364,7 +386,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+         return true;
+     };
+     moveit::planning_interface::MoveGroupInterface::Plan lift;
+-    if (!makePlan(start,Eigen::Vector3d(0,0,height),lift,1.0,0.4,1.0)) return fail(detail);
++    if (!makePlan(start,Eigen::Vector3d(0,0,height),lift,"lift",1.0,0.4,1.0)) return fail(detail);
+     // Give the bounded force-hold drive a short static settling window before
+     // the first lift command. This does not count as load validation; it only
+     // avoids starting the lift while the tendon force is still ramping or the
+@@ -428,6 +450,12 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+         const auto& joint=plan.trajectory_.joint_trajectory;
+         for (std::size_t j=0;j<joint.joint_names.size();++j)
+             if (std::abs(dispatch_start.getVariablePosition(joint.joint_names[j])-joint.points.front().positions[j])>0.002) {
++                RCLCPP_ERROR(ctx_->get_logger(),
++                    "[CONTACT_DISPATCH] phase=%s joint=%s measured=%.5f plan_start=%.5f delta=%.5f",
++                    phase,joint.joint_names[j].c_str(),
++                    dispatch_start.getVariablePosition(joint.joint_names[j]),
++                    joint.points.front().positions[j],
++                    dispatch_start.getVariablePosition(joint.joint_names[j])-joint.points.front().positions[j]);
+                 detail="E_CONTACT_DISPATCH_START_MOVED"; return false;
+             }
+         if (!observe("PRE_EXECUTE",false)) return false;
+@@ -449,6 +477,43 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+         if (code!=moveit::core::MoveItErrorCode::SUCCESS) { detail="E_CONTACT_EXECUTION_FAILED code="+std::to_string(code); return false; }
+         return observe(phase,false);
+     };
++    // Post-release free-space execution: the force hold is intentionally OFF and
++    // the rod is no longer attached, so the contact monitoring in execute()
++    // (force-mode, slip, height) does not apply. Keep the dispatch-start check,
++    // the action outcome and the wall-clock deadline.
++    auto executeFree=[&](const moveit::planning_interface::MoveGroupInterface::Plan& plan,const char* phase) {
++        moveit::core::RobotState dispatch_start(live_model);
++        if (!measured(dispatch_start)) return false;
++        const auto& joint=plan.trajectory_.joint_trajectory;
++        for (std::size_t j=0;j<joint.joint_names.size();++j)
++            if (std::abs(dispatch_start.getVariablePosition(joint.joint_names[j])-joint.points.front().positions[j])>0.002) {
++                RCLCPP_ERROR(ctx_->get_logger(),
++                    "[CONTACT_DISPATCH] phase=%s joint=%s measured=%.5f plan_start=%.5f delta=%.5f",
++                    phase,joint.joint_names[j].c_str(),
++                    dispatch_start.getVariablePosition(joint.joint_names[j]),
++                    joint.points.front().positions[j],
++                    dispatch_start.getVariablePosition(joint.joint_names[j])-joint.points.front().positions[j]);
++                detail="E_CONTACT_DISPATCH_START_MOVED"; return false;
++            }
++        auto promise=std::make_shared<std::promise<int>>(); auto future=promise->get_future();
++        const auto iface=ctx_->dual_arm_; auto copy=std::make_shared<moveit::planning_interface::MoveGroupInterface::Plan>(plan);
++        std::thread worker([iface,copy,promise]() { try { promise->set_value(iface->execute(*copy).val); } catch (...) { promise->set_value(-999); } });
++        const double deadline=steadySeconds()+std::max(30.0,3*rclcpp::Duration(joint.points.back().time_from_start).seconds()+5);
++        bool timed_out=false;
++        while (future.wait_for(0ms)!=std::future_status::ready) {
++            if (!rclcpp::ok() || steadySeconds()>deadline) { timed_out=true; iface->stop(); break; }
++            std::this_thread::sleep_for(50ms);
++        }
++        if (future.wait_for(2s)!=std::future_status::ready) {
++            worker.detach(); detail="E_CONTACT_EXECUTION_OUTCOME_UNKNOWN; no further motion"; return false;
++        }
++        worker.join(); const int code=future.get();
++        if (timed_out) { detail="E_CONTACT_EXECUTION_TIMEOUT"; return false; }
++        if (code!=moveit::core::MoveItErrorCode::SUCCESS) {
++            detail="E_CONTACT_EXECUTION_FAILED code="+std::to_string(code); return false;
++        }
++        return true;
++    };
+     if (hold_diagnostic_only) {
+         constexpr double mechanism_hold_seconds = 1.0;
+         std::array<unsigned long long,2> counted_seq{{0,0}};
+@@ -534,7 +599,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+         const std::string detail_before_creep = detail;
+         relax_dual_residual = true;
+         const bool creep_planned =
+-            makePlan(hold_state, Eigen::Vector3d(0,0,0.004), creep, 0.02, 0.012, 2.0);
++            makePlan(hold_state, Eigen::Vector3d(0,0,0.004), creep, "creep", 0.02, 0.012, 2.0);
+         relax_dual_residual = false;
+         if (creep_planned) {
+             creep_promise = std::make_shared<std::promise<int>>();
+@@ -634,9 +699,298 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+         transport_delta.x(), transport_delta.y(), transport_dyaw*180.0/M_PI,
+         ctx_->rod_target_x_, ctx_->rod_target_y_, ctx_->rod_target_yaw_rad_*180.0/M_PI);
+     moveit::planning_interface::MoveGroupInterface::Plan transport;
+-    if (!makePlan(lifted, transport_delta, transport, 1.0, 0.3, 2.0, transport_dyaw)) return fail(detail);
++    // S2b timing experiment: min_total is an absolute stretch floor in makePlan
++    // (stretch = max(min_total, min_total/T, ...)), so 2.0 doubles the IPTP
++    // transport duration. 1.0 leaves the scaled timing untouched.
++    double transport_stretch=2.0;
++    if (const char* raw=std::getenv("CONTACT_TRANSPORT_STRETCH")) {
++        const double value=std::atof(raw);
++        if (std::isfinite(value) && value>0.0) transport_stretch=value;
++    }
++    RCLCPP_INFO(ctx_->get_logger(),
++        "[CONTACT_PROBE_TRANSPORT_STRETCH] value=%.3f (env CONTACT_TRANSPORT_STRETCH, default 2.0)",
++        transport_stretch);
++    const double transport_plan_start=steadySeconds();
++    if (!makePlan(lifted, transport_delta, transport, "transport", 1.0, 0.3, transport_stretch, transport_dyaw)) return fail(detail);
++    const double transport_plan_sec=steadySeconds()-transport_plan_start;
++    if (plan_compare) {
++        // P4/S2 phase 1: compare the current object-space transport plan (A)
++        // with a MoveIt CHOMP plan to the SAME final joint target (B). Nothing
++        // is executed here unless B also preserves the dual closed chain,
++        // collides nowhere and stays inside the joint limits.
++        std::ofstream compare_csv("experiment_results/a1_runs/"+run_id+"/plan_compare.csv");
++        if (!compare_csv) return fail("E_PLAN_COMPARE_CSV_OPEN");
++        compare_csv<<std::setprecision(10)
++            <<"planner,sample_index,t,left_inferred_x,left_inferred_y,left_inferred_z,"
++              "right_inferred_x,right_inferred_y,right_inferred_z,"
++              "dual_pos_err_mm,dual_ang_err_deg,rod_path_pos_err_mm,rod_path_ang_err_deg,"
++              "collision,joint_limit_violation,vel_violation,acc_violation\n";
++        const Transform first_object_lifted=lifted.getGlobalLinkTransform(eefs[0])*object_to_hand[0].inverse();
++        Transform target_object=first_object_lifted;
++        target_object.translation()+=transport_delta;
++        target_object.linear()=Eigen::AngleAxisd(transport_dyaw,Eigen::Vector3d::UnitZ())
++            .toRotationMatrix()*first_object_lifted.linear();
++        struct CompareStats {
++            bool planned{false};
++            int plan_code{0};
++            double planning_sec{0.0};
++            std::size_t points{0};
++            double duration{0.0};
++            std::size_t samples{0};
++            double max_dual_pos_mm{0.0};
++            double max_dual_ang_deg{0.0};
++            double max_rod_pos_mm{0.0};
++            double max_rod_ang_deg{0.0};
++            std::size_t collisions{0};
++            std::string first_collision;
++            bool limit_violation{false};
++            bool vel_violation{false};
++            bool acc_violation{false};
++            std::string violation_detail;
++            double max_jerk{0.0};
++            double p95_jerk{0.0};
++        };
++        auto evaluatePlan=[&](const std::string& planner,
++                              const moveit::planning_interface::MoveGroupInterface::Plan& plan,
++                              CompareStats& stats) {
++            const auto& jt=plan.trajectory_.joint_trajectory;
++            if (jt.points.size()<2) return false;
++            stats.points=jt.points.size();
++            stats.duration=rclcpp::Duration(jt.points.back().time_from_start).seconds();
++            std::vector<s1::DirectionalJointLimits> limits;
++            for (const auto& name:jt.joint_names) {
++                const auto& b=live_model->getVariableBounds(name);
++                limits.push_back({b.min_velocity_,b.max_velocity_,b.min_acceleration_,
++                                  b.max_acceleration_,b.velocity_bounded_,b.acceleration_bounded_});
++            }
++            struct Sample { std::vector<double> q,v,a; double t; };
++            std::vector<Sample> samples;
++            const auto& first=jt.points.front();
++            samples.push_back({first.positions,first.velocities,first.accelerations,0.0});
++            for (std::size_t k=1;k<jt.points.size();++k) {
++                const auto& a=jt.points[k-1]; const auto& b=jt.points[k];
++                const double T=rclcpp::Duration(b.time_from_start).seconds()-
++                               rclcpp::Duration(a.time_from_start).seconds();
++                if (!(T>0.0)) continue;
++                const int n=std::max(2,static_cast<int>(std::ceil(T/0.02)));
++                for (int s=1;s<=n;++s) {
++                    const double u=double(s)/n;
++                    Sample sample; sample.q.resize(a.positions.size());
++                    sample.v.resize(a.positions.size()); sample.a.resize(a.positions.size());
++                    sample.t=rclcpp::Duration(a.time_from_start).seconds()+u*T;
++                    for (std::size_t j=0;j<sample.q.size();++j) {
++                        const double av=j<a.velocities.size()?a.velocities[j]:0.0;
++                        const double aa=j<a.accelerations.size()?a.accelerations[j]:0.0;
++                        const double bv=j<b.velocities.size()?b.velocities[j]:0.0;
++                        const double ba=j<b.accelerations.size()?b.accelerations[j]:0.0;
++                        const double c0=a.positions[j],c1=av*T,c2=0.5*aa*T*T;
++                        const double D=b.positions[j]-c0-c1-c2;
++                        const double V=bv*T-c1-2*c2;
++                        const double A=ba*T*T-2*c2;
++                        const double c3=10*D-4*V+0.5*A,c4=-15*D+7*V-A,c5=6*D-3*V+0.5*A;
++                        sample.q[j]=c0+u*(c1+u*(c2+u*(c3+u*(c4+u*c5))));
++                        sample.v[j]=(c1+u*(2*c2+u*(3*c3+u*(4*c4+u*5*c5))))/T;
++                        sample.a[j]=(2*c2+u*(6*c3+u*(12*c4+u*20*c5)))/(T*T);
++                    }
++                    samples.push_back(std::move(sample));
++                }
++            }
++            std::vector<double> jerks;
++            const Sample* previous=nullptr;
++            std::size_t limit_violations=0,vel_violations=0,acc_violations=0;
++            for (std::size_t index=0;index<samples.size();++index) {
++                const auto& sample=samples[index];
++                moveit::core::RobotState state(live_model);
++                state.setVariablePositions(jt.joint_names,sample.q);
++                state.update();
++                // Collision and bounds are checked on the criterion model, exactly
++                // like valid(); using the live model against the criterion scene
++                // reports contacts that do not exist in the validated setup.
++                moveit::core::RobotState criterion_state(criterion_model);
++                for (const auto& name:criterion_model->getVariableNames())
++                    criterion_state.setVariablePosition(name,state.getVariablePosition(name));
++                criterion_state.update();
++                const bool limit_bad=!criterion_state.satisfiesBounds(criterion_dual,1e-4);
++                bool vel_bad=false,acc_bad=false;
++                for (std::size_t j=0;j<sample.q.size() && j<limits.size();++j) {
++                    const auto& b=limits[j];
++                    if (sample.v[j]<b.min_velocity-1e-9 || sample.v[j]>b.max_velocity+1e-9) vel_bad=true;
++                    if (sample.a[j]<b.min_acceleration-1e-9 || sample.a[j]>b.max_acceleration+1e-9) acc_bad=true;
++                }
++                if (limit_bad) { ++limit_violations; if (!stats.limit_violation) {
++                    stats.limit_violation=true;
++                    stats.violation_detail="joint bounds at sample "+std::to_string(index); } }
++                if (vel_bad) { ++vel_violations; if (!stats.vel_violation) {
++                    stats.vel_violation=true;
++                    stats.violation_detail+=(stats.violation_detail.empty()?"":"; ")+
++                        std::string("velocity at sample ")+std::to_string(index); } }
++                if (acc_bad) { ++acc_violations; if (!stats.acc_violation) {
++                    stats.acc_violation=true;
++                    stats.violation_detail+=(stats.violation_detail.empty()?"":"; ")+
++                        std::string("acceleration at sample ")+std::to_string(index); } }
++                if (previous!=nullptr) {
++                    const double dt=sample.t-previous->t;
++                    if (dt>1e-9) {
++                        double jerk=0.0;
++                        for (std::size_t j=0;j<sample.a.size() && j<previous->a.size();++j)
++                            jerk=std::max(jerk,std::abs(sample.a[j]-previous->a[j])/dt);
++                        jerks.push_back(jerk);
++                    }
++                }
++                previous=&sample;
++                const Transform inferred=state.getGlobalLinkTransform(eefs[0])*object_to_hand[0].inverse();
++                const Transform inferred_right=state.getGlobalLinkTransform(eefs[1])*object_to_hand[1].inverse();
++                const double dual_pos=(inferred.translation()-inferred_right.translation()).norm()*1000.0;
++                const double dual_ang=rotationError(inferred,inferred_right)*180.0/M_PI;
++                const double rod_pos=(inferred.translation()-target_object.translation()).norm()*1000.0;
++                const double rod_ang=rotationError(inferred,target_object)*180.0/M_PI;
++                stats.max_dual_pos_mm=std::max(stats.max_dual_pos_mm,dual_pos);
++                stats.max_dual_ang_deg=std::max(stats.max_dual_ang_deg,dual_ang);
++                stats.max_rod_pos_mm=std::max(stats.max_rod_pos_mm,rod_pos);
++                stats.max_rod_ang_deg=std::max(stats.max_rod_ang_deg,rod_ang);
++                bool collision=false;
++                const double extent=0.5*(std::abs(inferred.linear()(2,0))*truth.size.x+
++                    std::abs(inferred.linear()(2,1))*truth.size.y+
++                    std::abs(inferred.linear()(2,2))*truth.size.z);
++                const double clearance=inferred.translation().z()-extent-ctx_->p2a_support_z_;
++                if (!updateRod(inferred)) {
++                    return false;
++                }
++                auto local_acm=acm;
++                local_acm.setEntry(a1_verify_.rod_id,a1_verify_.support_id,clearance<=0.003);
++                collision_detection::CollisionRequest req; req.contacts=true; req.max_contacts=20;
++                collision_detection::CollisionResult res;
++                scene->checkCollision(req,res,criterion_state,local_acm);
++                if (res.collision) {
++                    collision=true;
++                    stats.collisions+=std::max<std::size_t>(1,res.contacts.size());
++                    if (stats.first_collision.empty() && !res.contacts.empty())
++                        stats.first_collision=res.contacts.begin()->first.first+"<->"+
++                            res.contacts.begin()->first.second;
++                }
++                compare_csv<<planner<<','<<index<<','<<sample.t<<','
++                    <<inferred.translation().x()<<','<<inferred.translation().y()<<','<<inferred.translation().z()<<','
++                    <<inferred_right.translation().x()<<','<<inferred_right.translation().y()<<','<<inferred_right.translation().z()<<','
++                    <<dual_pos<<','<<dual_ang<<','<<rod_pos<<','<<rod_ang<<','
++                    <<(collision?1:0)<<','<<(limit_bad?1:0)<<','<<(vel_bad?1:0)<<','<<(acc_bad?1:0)<<'\n';
++            }
++            compare_csv.flush();
++            stats.samples=samples.size();
++            if (!jerks.empty()) {
++                std::sort(jerks.begin(),jerks.end());
++                stats.max_jerk=jerks.back();
++                const std::size_t p95=static_cast<std::size_t>(0.95*double(jerks.size()));
++                stats.p95_jerk=jerks[std::min(p95,jerks.size()-1)];
++            }
++            (void)limit_violations; (void)vel_violations; (void)acc_violations;
++            return true;
++        };
++        CompareStats baseline_stats;
++        baseline_stats.planned=true;
++        baseline_stats.planning_sec=transport_plan_sec;
++        evaluatePlan("baseline",transport,baseline_stats);
++        moveit::planning_interface::MoveGroupInterface::Plan chomp_plan;
++        CompareStats chomp_stats;
++        double chomp_planning_sec=0.0;
++        const auto& transport_joint=transport.trajectory_.joint_trajectory;
++        if (!transport_joint.points.empty() &&
++            ctx_->dual_arm_->setJointValueTarget(transport_joint.joint_names,
++                                                 transport_joint.points.back().positions)) {
++            ctx_->dual_arm_->setStartStateToCurrentState();
++            // In this MoveIt2 setup CHOMP is a planning PIPELINE; setting only
++            // the planner id leaves the request on the previous (Pilz) pipeline
++            // and move_group rejects it before CHOMP ever runs.
++            ctx_->dual_arm_->setPlanningPipelineId("chomp");
++            ctx_->dual_arm_->setPlannerId("chomp");
++            ctx_->dual_arm_->setPlanningTime(5.0);
++            ctx_->dual_arm_->setNumPlanningAttempts(1);
++            ctx_->dual_arm_->setMaxVelocityScalingFactor(1.0);
++            ctx_->dual_arm_->setMaxAccelerationScalingFactor(0.3);
++            const double plan_start=steadySeconds();
++            const auto code=ctx_->dual_arm_->plan(chomp_plan);
++            chomp_planning_sec=steadySeconds()-plan_start;
++            chomp_stats.plan_code=code.val;
++            chomp_stats.planned=(code.val==moveit::core::MoveItErrorCode::SUCCESS);
++            if (!chomp_stats.planned)
++                chomp_stats.violation_detail="plan failed code="+std::to_string(code.val);
++        } else {
++            chomp_stats.violation_detail="joint target not set";
++        }
++        chomp_stats.planning_sec=chomp_planning_sec;
++        if (chomp_stats.planned) evaluatePlan("chomp",chomp_plan,chomp_stats);
++        auto logCompare=[&](const char* planner,const CompareStats& s) {
++            RCLCPP_INFO(ctx_->get_logger(),
++                "[PLAN_COMPARE] planner=%s success=%d plan_code=%d planning_time=%.3f points=%zu duration=%.3f "
++                "max_dual_pos_mm=%.3f max_dual_ang_deg=%.3f max_rod_pos_mm=%.3f max_rod_ang_deg=%.3f "
++                "collisions=%zu first_collision=%s limit_violations=%d vel_violations=%d acc_violations=%d "
++                "samples=%zu max_jerk=%.3f p95_jerk=%.3f",
++                planner,s.planned?1:0,s.plan_code,s.planning_sec,s.points,s.duration,
++                s.max_dual_pos_mm,s.max_dual_ang_deg,s.max_rod_pos_mm,s.max_rod_ang_deg,
++                s.collisions,s.first_collision.empty()?"none":s.first_collision.c_str(),
++                s.limit_violation?1:0,s.vel_violation?1:0,s.acc_violation?1:0,
++                s.samples,s.max_jerk,s.p95_jerk);
++        };
++        logCompare("baseline",baseline_stats);
++        logCompare("chomp",chomp_stats);
++        const bool chomp_chain_ok=chomp_stats.planned &&
++            chomp_stats.max_dual_pos_mm<=5.0 && chomp_stats.max_dual_ang_deg<=2.0;
++        const bool chomp_eligible=chomp_chain_ok && chomp_stats.collisions==0 &&
++            !chomp_stats.limit_violation && !chomp_stats.vel_violation && !chomp_stats.acc_violation;
++        RCLCPP_INFO(ctx_->get_logger(),
++            "[PLAN_COMPARE_RESULT] baseline_success=%d chomp_success=%d chomp_within_5mm2deg=%d "
++            "chomp_collisions=%zu chomp_limit_violations=%d chomp_vel_violations=%d chomp_acc_violations=%d "
++            "execute_chomp=%d phase2=%s",
++            baseline_stats.planned?1:0,chomp_stats.planned?1:0,chomp_chain_ok?1:0,
++            chomp_stats.collisions,chomp_stats.limit_violation?1:0,chomp_stats.vel_violation?1:0,
++            chomp_stats.acc_violation?1:0,chomp_eligible?1:0,
++            chomp_eligible?"executing_same_session":"not_executed");
++        if (!baseline_stats.planned) return fail("E_PLAN_COMPARE_BASELINE_PLAN");
++        if (!chomp_eligible) {
++            // Plan-only round: stop the force hold and end without transport.
++            const bool stopped=ctx_->grippers_->stopDualGrippers();
++            force_hold_may_be_active=false;
++            RCLCPP_INFO(ctx_->get_logger(),
++                "[PLAN_COMPARE] phase 1 complete; transport not executed (gripper stop=%s)",
++                stopped?"confirmed":"unconfirmed");
++            detail="plan comparison complete: baseline planned; CHOMP "+
++                std::string(chomp_stats.planned?"planned":"failed")+
++                (chomp_stats.planned?
++                    (" (max dual "+std::to_string(chomp_stats.max_dual_pos_mm)+" mm / "+
++                     std::to_string(chomp_stats.max_dual_ang_deg)+" deg, collisions="+
++                     std::to_string(chomp_stats.collisions)+")"):"")+
++                "; transport not executed";
++            return true;
++        }
++        RCLCPP_INFO(ctx_->get_logger(),
++            "[PLAN_COMPARE] phase 2: executing the CHOMP transport from the same start state");
++        transport=chomp_plan;
++    }
+     if (!execute(transport,"TRANSPORT")) return fail(detail);
+     if (!observe("TRANSPORT", true)) return fail(detail);
++    // The 1x transport leaves the arm servos settling after the action returns.
++    // Wait for a stable measured joint state before re-freezing and planning the
++    // lower; otherwise the measured state can drift >2 mrad between planning and
++    // dispatch and execute() rejects the lower with E_CONTACT_DISPATCH_START_MOVED.
++    {
++        moveit::core::RobotState settle_prev(live_model);
++        if (!measured(settle_prev)) return fail(detail);
++        std::vector<double> prev_q,cur_q;
++        settle_prev.copyJointGroupPositions(dual,prev_q);
++        const double settle_start=steadySeconds();
++        bool settled=false;
++        while (steadySeconds()-settle_start<2.0) {
++            std::this_thread::sleep_for(100ms);
++            moveit::core::RobotState settle_cur(live_model);
++            if (!measured(settle_cur)) return fail(detail);
++            settle_cur.copyJointGroupPositions(dual,cur_q);
++            double max_delta=0.0;
++            for (std::size_t i=0;i<cur_q.size();++i)
++                max_delta=std::max(max_delta,std::abs(cur_q[i]-prev_q[i]));
++            if (max_delta<0.0005) { settled=true; break; }
++            prev_q=cur_q;
++        }
++        if (!settled) return fail("E_CONTACT_POST_TRANSPORT_SETTLE");
++    }
+     moveit::core::RobotState after_transport(live_model);
+     if (!measured(after_transport)) return fail(detail);
+     const auto after_truth = readMujocoRodTruth();
+@@ -666,7 +1020,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+     RCLCPP_INFO(ctx_->get_logger(),
+         "[CONTACT_PROBE_LOWER] descend=%.3f m (commanded lift=%.3f m, tilt-aware extent=%.3f m); "
+         "targeting support at the transported pose", lower_delta, height, extent_after);
+-    if (!makePlan(after_transport, Eigen::Vector3d(0,0,-lower_delta), lower,1.0,0.8,0.5)) return fail(detail);
++    if (!makePlan(after_transport, Eigen::Vector3d(0,0,-lower_delta), lower,"lower",1.0,0.8,0.5)) return fail(detail);
+     if (!execute(lower,"LOWER")) return fail(detail);
+     const double extent=0.5*(std::abs(rodTransform(latest).linear()(2,0))*truth.size.x+
+         std::abs(rodTransform(latest).linear()(2,1))*truth.size.y+std::abs(rodTransform(latest).linear()(2,2))*truth.size.z);
+@@ -687,8 +1041,30 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
+     // Only synchronize planning representation. Never write a MuJoCo body state.
+     geometry_msgs::msg::Vector3 size; size.x=truth.size.x;size.y=truth.size.y;size.z=truth.size.z;
+     if (!syncAluminumRodFromTruth(poseMsg(rodTransform(released)),size,ctx_->dual_arm_->getPlanningFrame(),detail)) return fail(detail);
+-    RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_PROBE_RELEASED] xyz=(%.6f,%.6f,%.6f) open=true force_hold=OFF weld=OFF attach=none; retreat/carry not requested",
++    RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_PROBE_RELEASED] xyz=(%.6f,%.6f,%.6f) open=true force_hold=OFF weld=OFF attach=none; retreat requested",
+         released.position.x,released.position.y,released.position.z);
+-    detail="contact-only lift "+std::to_string(static_cast<int>(height*100.0+0.5))+"cm, "+std::to_string(static_cast<int>(hold_seconds+0.5))+"s hold, forward transport with yaw rotation, lower and release complete; arm return not requested";
++    // Post-release retreat: move both hands straight up, clear of the released
++    // rod. The rod is no longer attached, so the frozen hand-object transform is
++    // only used to keep the two arms coordinated; the scene rod is synced to the
++    // released truth pose above.
++    {
++        moveit::core::RobotState retreat_start(live_model);
++        if (!measured(retreat_start)) return fail(detail);
++        const Transform released_object=rodTransform(released);
++        for (int i=0;i<2;++i)
++            object_to_hand[i]=released_object.inverse()*retreat_start.getGlobalLinkTransform(eefs[i]);
++        moveit::planning_interface::MoveGroupInterface::Plan retreat;
++        if (!makePlan(retreat_start,Eigen::Vector3d(0,0,0.15),retreat,"retreat",1.0,0.4,1.0))
++            return fail(detail);
++        if (!executeFree(retreat,"RETREAT")) return fail(detail);
++        const auto after_retreat=readMujocoRodTruth();
++        RCLCPP_INFO(ctx_->get_logger(),
++            "[CONTACT_PROBE_RETREAT] hands lifted 0.150 m after release; rod=(%.6f,%.6f,%.6f) "
++            "state=retreated weld=OFF attach=none",
++            after_retreat.ok?after_retreat.position.x:std::nan(""),
++            after_retreat.ok?after_retreat.position.y:std::nan(""),
++            after_retreat.ok?after_retreat.position.z:std::nan(""));
++    }
++    detail="contact-only lift "+std::to_string(static_cast<int>(height*100.0+0.5))+"cm, "+std::to_string(static_cast<int>(hold_seconds+0.5))+"s hold, forward transport with yaw rotation, lower, release and retreat complete; arm return not requested";
+     return true;
+ }
+diff --git a/src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp b/src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp
+index f89fd35..f0f1d83 100644
+--- a/src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp
++++ b/src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp
+@@ -1264,11 +1264,17 @@ bool DualArmController::prepareFromA1Truth()
+                                 } else if (ctx_->grasp_model_ == "contact_probe") {
+                                     std::string probe_detail;
+                                     const bool probe_ok = runContactLoadProbe(
+-                                        truth, probe_detail, ctx_->contact_hold_diagnostic_only_);
++                                        truth, probe_detail, ctx_->contact_hold_diagnostic_only_,
++                                        ctx_->contact_plan_compare_);
+                                     if (ctx_->contact_hold_diagnostic_only_) {
+                                         RCLCPP_INFO(ctx_->get_logger(),
+                                             "[CONTACT_HOLD_MECHANISM_RESULT] state=%s detail=%s",
+                                             probe_ok ? "PASS" : "FAILED", probe_detail.c_str());
++                                    } else if (ctx_->contact_plan_compare_) {
++                                        RCLCPP_INFO(ctx_->get_logger(),
++                                            "[CONTACT_PROBE_RESULT] state=%s detail=%s",
++                                            probe_ok ? "PLAN_COMPARE_DONE" : "FAILED",
++                                            probe_detail.c_str());
+                                     } else {
+                                         RCLCPP_INFO(ctx_->get_logger(), "[CONTACT_PROBE_RESULT] state=%s detail=%s",
+                                             probe_ok ? "DONE" : "FAILED", probe_detail.c_str());
+@@ -1276,6 +1282,9 @@ bool DualArmController::prepareFromA1Truth()
+                                     if (ctx_->contact_hold_diagnostic_only_) {
+                                         ctx_->setCurrentState(probe_ok ?
+                                             TaskState::CONTACT_HOLD_MECHANISM_VALIDATED : TaskState::ERROR);
++                                    } else if (ctx_->contact_plan_compare_) {
++                                        ctx_->setCurrentState(probe_ok ?
++                                            TaskState::PLAN_COMPARE_DONE : TaskState::ERROR);
+                                     } else {
+                                         ctx_->setCurrentState(probe_ok ? TaskState::DONE : TaskState::ERROR);
+                                     }
+diff --git a/src/multipanda_ros2/franka_hardware/src/sim/franka_mj_hardware_system.cpp b/src/multipanda_ros2/franka_hardware/src/sim/franka_mj_hardware_system.cpp
+index 0f086a2..3e2e274 100644
+--- a/src/multipanda_ros2/franka_hardware/src/sim/franka_mj_hardware_system.cpp
++++ b/src/multipanda_ros2/franka_hardware/src/sim/franka_mj_hardware_system.cpp
+@@ -1013,7 +1013,16 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
+ 
+       current_K_scale = 0.95 * current_K_scale + 0.05 * target_K;
+       current_D_scale = 0.95 * current_D_scale + 0.05 * target_D;
+-      
++
++      // P5/S3 observation: prove whether the internal compliance is actually
++      // triggered and how far it moves the gains. Rate-limited only; no control
++      // value or threshold is changed here.
++      if (loop_cnt % 1000 == 0) {
++          RCLCPP_INFO(getLogger(),
++              "[internal_compliance] internal_stress=%.4f K_scale=%.4f D_scale=%.4f",
++              internal_stress, current_K_scale, current_D_scale);
++      }
++
+       if (loop_cnt % 10 == 0 && adaptive_pub_) {
+           std_msgs::msg::Float64MultiArray msg;
+           msg.data.push_back(current_K_scale * 100.0);

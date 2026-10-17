@@ -383,3 +383,11 @@ profile 的结论数据。
 - **B（测试后关闭）**：creep hold（保持 2 s 内缓慢上移 4 mm）已实现并验证：保持期杆反而从 413.3 掉到 405.7 mm（下滑 7.6 mm，比静止保持更差）、左指失接触，且执行超过 2 s 等待窗口触发 `E_CONTACT_HOLD_CREEP_TIMEOUT`。代码保留，用 `creep_hold_enabled=false` 关闭；creep 计划额外跳过双臂残差检查（碰撞/支撑/限位仍检查）。
 - 可视化 run `..._185847`（A-only）：`samples=33 sim_hold=2.040s lift=0.391m max_slip=9.366mm max_angle=1.364deg duty=(0.91,0.88,0.79,0.91)`；finger2 0.788 记录警告；运输 `dx=-0.098 dy=-0.001 dyaw=10.3°`；落回 0.385 m；释放 `(0.3963,-0.0041,0.0207)`；`state=DONE`。阶段滑移：抬升 5.01、保持 7.67、运输 5.68、落回 7.67 mm。
 - 同配置 A-only 无窗口 run `..._185606` 同样 DONE（max_slip 9.493、duty 0.79 记录后继续）。
+
+## 2026-10-17 P4/S2 Phase 1：双臂运输规划器对照（run `lidio_contact_probe_yaw10_20261017_191610`）
+
+- 新增 `contact_plan_compare`（默认 false，经 launch→状态机→context→probe 贯通，仅 contact_probe 可用、与 hold-diagnostic 互斥）。开启时在抬升/保持/重建立后不执行运输，先比较 A（现有物体空间 IK+IPTP）与 B（MoveIt CHOMP，同一起点、同一终点关节目标），输出 `plan_compare.csv` 与 `[PLAN_COMPARE]/[PLAN_COMPARE_RESULT]`。
+- A：success=1，21 点，2.223 s，双臂残差最大 **0.085 mm / 0.009°**，碰撞 0，限位/速度/加速度超限 0，123 样本，jerk max/p95=40.0/15.9。
+- B（CHOMP）：success=1（code=1），planning 0.316 s，12 点，1.083 s，双臂残差最大 **4.299 mm / 0.977°**（≤5 mm/2°），碰撞 0，限位/速度/加速度超限 0，58 样本，jerk max/p95=87.0/52.5。
+- 判定：CHOMP 维持双臂闭链且无碰撞/超限，满足 Phase 2 条件；同会话执行 CHOMP 运输，实测 1.238 s（IPTP 基线 164743/185847：2.438/2.424 s），运输期滑移 3.66/5.62 mm（基线 4.21/5.24、5.68/4.82 mm），随后落回与释放完成；`[CONTACT_PROBE_RESULT] state=PLAN_COMPARE_DONE`（未写成 DONE/承载成功）。
+- 第一次尝试 `..._191428` 因 `setPlannerId` 未切到 chomp pipeline、且碰撞评估误用 live model 而无效，目录保留；修正后重跑为本次结果。执行期关节速度/加速度峰值未单独记录（指标监控关闭），仅确认执行计划在评估中无速度/加速度超限。未提交。

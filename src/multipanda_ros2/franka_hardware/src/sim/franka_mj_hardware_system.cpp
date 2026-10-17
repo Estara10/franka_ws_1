@@ -1013,7 +1013,16 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
 
       current_K_scale = 0.95 * current_K_scale + 0.05 * target_K;
       current_D_scale = 0.95 * current_D_scale + 0.05 * target_D;
-      
+
+      // P5/S3 observation: prove whether the internal compliance is actually
+      // triggered and how far it moves the gains. Rate-limited only; no control
+      // value or threshold is changed here.
+      if (loop_cnt % 1000 == 0) {
+          RCLCPP_INFO(getLogger(),
+              "[internal_compliance] internal_stress=%.4f K_scale=%.4f D_scale=%.4f",
+              internal_stress, current_K_scale, current_D_scale);
+      }
+
       if (loop_cnt % 10 == 0 && adaptive_pub_) {
           std_msgs::msg::Float64MultiArray msg;
           msg.data.push_back(current_K_scale * 100.0);

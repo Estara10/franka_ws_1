@@ -1,0 +1,444 @@
+[INFO] [launch]: All log files can be found below /home/lidio/franka_ws_1/launch_logs/transport_opt_20261017_r11/2026-10-17-21-25-27-396538-Estara-411278
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [robot_state_publisher-1]: process started with pid [411283]
+[INFO] [move_group-2]: process started with pid [411285]
+[INFO] [mujoco_node-3]: process started with pid [411287]
+[INFO] [joint_state_publisher-4]: process started with pid [411289]
+[INFO] [ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5]: process started with pid [411291]
+[INFO] [ros2 run controller_manager spawner joint_state_broadcaster --controller-manager-timeout 60 --service-call-timeout 60-6]: process started with pid [411293]
+[INFO] [ros2 run controller_manager spawner force_torque_sensor_broadcaster_left --controller-manager-timeout 60 --service-call-timeout 60-7]: process started with pid [411295]
+[INFO] [ros2 run controller_manager spawner force_torque_sensor_broadcaster_right --controller-manager-timeout 60 --service-call-timeout 60-8]: process started with pid [411299]
+[robot_state_publisher-1] [INFO] [1792243527.926609574] [robot_state_publisher]: got segment base_link
+[robot_state_publisher-1] [INFO] [1792243527.926690667] [robot_state_publisher]: got segment mj_left_hand
+[robot_state_publisher-1] [INFO] [1792243527.926695646] [robot_state_publisher]: got segment mj_left_hand_tcp
+[robot_state_publisher-1] [INFO] [1792243527.926698539] [robot_state_publisher]: got segment mj_left_leftfinger
+[robot_state_publisher-1] [INFO] [1792243527.926701270] [robot_state_publisher]: got segment mj_left_link0
+[robot_state_publisher-1] [INFO] [1792243527.926703775] [robot_state_publisher]: got segment mj_left_link1
+[robot_state_publisher-1] [INFO] [1792243527.926706221] [robot_state_publisher]: got segment mj_left_link2
+[robot_state_publisher-1] [INFO] [1792243527.926708747] [robot_state_publisher]: got segment mj_left_link3
+[robot_state_publisher-1] [INFO] [1792243527.926711108] [robot_state_publisher]: got segment mj_left_link4
+[robot_state_publisher-1] [INFO] [1792243527.926713437] [robot_state_publisher]: got segment mj_left_link5
+[robot_state_publisher-1] [INFO] [1792243527.926715766] [robot_state_publisher]: got segment mj_left_link6
+[robot_state_publisher-1] [INFO] [1792243527.926718095] [robot_state_publisher]: got segment mj_left_link7
+[robot_state_publisher-1] [INFO] [1792243527.926720364] [robot_state_publisher]: got segment mj_left_link8
+[robot_state_publisher-1] [INFO] [1792243527.926722637] [robot_state_publisher]: got segment mj_left_rightfinger
+[robot_state_publisher-1] [INFO] [1792243527.926725145] [robot_state_publisher]: got segment mj_right_hand
+[robot_state_publisher-1] [INFO] [1792243527.926727463] [robot_state_publisher]: got segment mj_right_hand_tcp
+[robot_state_publisher-1] [INFO] [1792243527.926729840] [robot_state_publisher]: got segment mj_right_leftfinger
+[robot_state_publisher-1] [INFO] [1792243527.926732237] [robot_state_publisher]: got segment mj_right_link0
+[robot_state_publisher-1] [INFO] [1792243527.926734645] [robot_state_publisher]: got segment mj_right_link1
+[robot_state_publisher-1] [INFO] [1792243527.926737017] [robot_state_publisher]: got segment mj_right_link2
+[robot_state_publisher-1] [INFO] [1792243527.926739377] [robot_state_publisher]: got segment mj_right_link3
+[robot_state_publisher-1] [INFO] [1792243527.926741697] [robot_state_publisher]: got segment mj_right_link4
+[robot_state_publisher-1] [INFO] [1792243527.926743976] [robot_state_publisher]: got segment mj_right_link5
+[robot_state_publisher-1] [INFO] [1792243527.926746283] [robot_state_publisher]: got segment mj_right_link6
+[robot_state_publisher-1] [INFO] [1792243527.926748545] [robot_state_publisher]: got segment mj_right_link7
+[robot_state_publisher-1] [INFO] [1792243527.926750913] [robot_state_publisher]: got segment mj_right_link8
+[robot_state_publisher-1] [INFO] [1792243527.926753179] [robot_state_publisher]: got segment mj_right_rightfinger
+[mujoco_node-3] [32m[DEBUG] [1792243527.945087410] [mujoco_server] [RosAPI]: Declaring default ros parameters[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.946268488] [mujoco_server] [Configure]: Configuring simulation server[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.946298292] [mujoco_server] [FetchRosConfiguration]: Fetching configuration[0m
+[mujoco_node-3] [33m[WARN] [1792243527.946319635] [mujoco_server] [FetchRosConfiguration]: The 'no_x' parameter is deprecated. Use 'no_render' instead.[0m
+[mujoco_node-3] [0m[INFO] [1792243527.946345809] [mujoco_server] [FetchRosConfiguration]: Using modelfile /home/lidio/franka_ws_1/install/franka_description/share/franka_description/mujoco/franka/dual_scene.xml[0m
+[mujoco_node-3] [31m[ERROR] [1792243527.946363462] [mujoco_server] [SetupServices]: Effective namespace: /[0m
+[mujoco_node-3] [0m[INFO] [1792243527.956044508] [mujoco_server] [Configure]: Using MuJoCo library version 3.2.0[0m
+[mujoco_node-3] [0m[INFO] [1792243527.956082283] [mujoco_server] [Configure]: Compiled with render backend: GLFW[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.956096456] [mujoco_server] [SetupClockPublisher]: Setting up clock publisher[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.967594840] [mujoco_server] [Configure]: Starting offscreen render thread[0m
+[mujoco_node-3] [0m[INFO] [1792243527.967756638] [mujoco_server] [Configure]: Running MuJoCo in single-threaded mode (19 threads available)[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.971538467] [mujoco_server] [StartPhysicsLoop]: Starting physics loop[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.971610699] [mujoco_server] [StartEventLoop]: Starting event loop[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.971637449] [mujoco_server] [PhysicsLoop]: Physics loop started[0m
+[mujoco_node-3] [0m[INFO] [1792243527.971695969] [mujoco_server] [main]: Running headless[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.971708973] [mujoco_server] [EventLoop]: Starting event loop[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.971726957] [mujoco_server] [EventLoop]: Initializing queued model and data[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.971716586] [mujoco_server] [WaitForPhysicsJoin]: Waiting for physics join[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.971734159] [mujoco_server] [InitModelFromQueue]: 	Model is a regular file. Loading from filesystem[0m
+[mujoco_node-3] [32m[DEBUG] [1792243527.971755827] [mujoco_server] [InitModelFromQueue]: 	Loading xml file[0m
+[move_group-2] [INFO] [1792243527.972783362] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.00394127 seconds
+[move_group-2] [INFO] [1792243527.972854271] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[move_group-2] [INFO] [1792243528.000223927] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Publishing maintained planning scene on 'monitored_planning_scene'
+[move_group-2] [INFO] [1792243528.000433990] [moveit.ros_planning_interface.moveit_cpp]: Listening to 'joint_states' for joint states
+[move_group-2] [INFO] [1792243528.001179296] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[move_group-2] [INFO] [1792243528.001544661] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/attached_collision_object' for attached collision objects
+[move_group-2] [INFO] [1792243528.001562268] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting planning scene monitor
+[move_group-2] [INFO] [1792243528.001896222] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/planning_scene'
+[move_group-2] [INFO] [1792243528.001911911] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting world geometry update monitor for collision objects, attached objects, octomap updates.
+[move_group-2] [INFO] [1792243528.002162152] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to 'collision_object'
+[move_group-2] [INFO] [1792243528.003169610] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to 'planning_scene_world' for planning scene world geometry
+[move_group-2] [WARN] [1792243528.003587749] [moveit.ros.occupancy_map_monitor.middleware_handle]: Resolution not specified for Octomap. Assuming resolution = 0.1 instead
+[move_group-2] [ERROR] [1792243528.003605797] [moveit.ros.occupancy_map_monitor.middleware_handle]: No 3D sensor plugin(s) defined for octomap updates
+[move_group-2] [INFO] [1792243528.004772569] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'ompl'
+[move_group-2] [INFO] [1792243528.019988379] [moveit.ros_planning.planning_pipeline]: Using planning interface 'OMPL'
+[move_group-2] [INFO] [1792243528.023675127] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.path_tolerance' was not set. Using default value: 0.100000
+[move_group-2] [INFO] [1792243528.023703102] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.resample_dt' was not set. Using default value: 0.100000
+[move_group-2] [INFO] [1792243528.023711019] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.min_angle_change' was not set. Using default value: 0.001000
+[move_group-2] [INFO] [1792243528.023737742] [moveit_ros.fix_workspace_bounds]: Param 'ompl.default_workspace_bounds' was not set. Using default value: 10.000000
+[move_group-2] [INFO] [1792243528.023758190] [moveit_ros.fix_start_state_bounds]: Param 'ompl.start_state_max_bounds_error' was set to 0.100000
+[move_group-2] [INFO] [1792243528.023765787] [moveit_ros.fix_start_state_bounds]: Param 'ompl.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-2] [INFO] [1792243528.023781240] [moveit_ros.fix_start_state_collision]: Param 'ompl.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-2] [INFO] [1792243528.023788773] [moveit_ros.fix_start_state_collision]: Param 'ompl.jiggle_fraction' was not set. Using default value: 0.020000
+[move_group-2] [INFO] [1792243528.023795495] [moveit_ros.fix_start_state_collision]: Param 'ompl.max_sampling_attempts' was not set. Using default value: 100
+[move_group-2] [INFO] [1792243528.023808937] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Add Time Optimal Parameterization'
+[move_group-2] [INFO] [1792243528.023814906] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Resolve constraint frames to robot links'
+[move_group-2] [INFO] [1792243528.023819214] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Workspace Bounds'
+[move_group-2] [INFO] [1792243528.023823502] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Bounds'
+[move_group-2] [INFO] [1792243528.023827783] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State In Collision'
+[move_group-2] [INFO] [1792243528.023831815] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Path Constraints'
+[move_group-2] [INFO] [1792243528.026329913] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'chomp'
+[move_group-2] [INFO] [1792243528.030768211] [moveit.ros_planning.planning_pipeline]: Using planning interface 'CHOMP'
+[move_group-2] [INFO] [1792243528.033018594] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.path_tolerance' was not set. Using default value: 0.100000
+[move_group-2] [INFO] [1792243528.033035938] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.resample_dt' was not set. Using default value: 0.100000
+[move_group-2] [INFO] [1792243528.033042780] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.min_angle_change' was not set. Using default value: 0.001000
+[move_group-2] [INFO] [1792243528.033066807] [moveit_ros.fix_workspace_bounds]: Param 'chomp.default_workspace_bounds' was not set. Using default value: 10.000000
+[move_group-2] [INFO] [1792243528.033087059] [moveit_ros.fix_start_state_bounds]: Param 'chomp.start_state_max_bounds_error' was set to 0.100000
+[move_group-2] [INFO] [1792243528.033094130] [moveit_ros.fix_start_state_bounds]: Param 'chomp.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-2] [INFO] [1792243528.033108333] [moveit_ros.fix_start_state_collision]: Param 'chomp.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-2] [INFO] [1792243528.033114899] [moveit_ros.fix_start_state_collision]: Param 'chomp.jiggle_fraction' was not set. Using default value: 0.020000
+[move_group-2] [INFO] [1792243528.033120104] [moveit_ros.fix_start_state_collision]: Param 'chomp.max_sampling_attempts' was not set. Using default value: 100
+[move_group-2] [INFO] [1792243528.033132927] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Add Time Optimal Parameterization'
+[move_group-2] [INFO] [1792243528.033138205] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Resolve constraint frames to robot links'
+[move_group-2] [INFO] [1792243528.033167226] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Workspace Bounds'
+[move_group-2] [INFO] [1792243528.033173315] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Bounds'
+[move_group-2] [INFO] [1792243528.033177606] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State In Collision'
+[move_group-2] [INFO] [1792243528.033181545] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Path Constraints'
+[move_group-2] [INFO] [1792243528.033788530] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'pilz_industrial_motion_planner'
+[move_group-2] [INFO] [1792243528.037100560] [moveit.pilz_industrial_motion_planner.joint_limits_aggregator]: Reading limits from namespace robot_description_planning
+[move_group-2] [INFO] [1792243528.042408970] [moveit.pilz_industrial_motion_planner]: Available plugins: pilz_industrial_motion_planner/PlanningContextLoaderCIRC pilz_industrial_motion_planner/PlanningContextLoaderLIN pilz_industrial_motion_planner/PlanningContextLoaderPTP 
+[move_group-2] [INFO] [1792243528.042430363] [moveit.pilz_industrial_motion_planner]: About to load: pilz_industrial_motion_planner/PlanningContextLoaderCIRC
+[move_group-2] [INFO] [1792243528.043780645] [moveit.pilz_industrial_motion_planner]: Registered Algorithm [CIRC]
+[move_group-2] [INFO] [1792243528.043793673] [moveit.pilz_industrial_motion_planner]: About to load: pilz_industrial_motion_planner/PlanningContextLoaderLIN
+[move_group-2] [INFO] [1792243528.044469962] [moveit.pilz_industrial_motion_planner]: Registered Algorithm [LIN]
+[move_group-2] [INFO] [1792243528.044478447] [moveit.pilz_industrial_motion_planner]: About to load: pilz_industrial_motion_planner/PlanningContextLoaderPTP
+[move_group-2] [INFO] [1792243528.045084667] [moveit.pilz_industrial_motion_planner]: Registered Algorithm [PTP]
+[move_group-2] [INFO] [1792243528.045097058] [moveit.ros_planning.planning_pipeline]: Using planning interface 'Pilz Industrial Motion Planner'
+[mujoco_node-3] [0m[INFO] [1792243528.104150255] [mujoco_server] [InitModelFromQueue]: Model loaded in 0.132368 seconds[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.104207336] [mujoco_server] [InitModelFromQueue]: Model compiled successfully[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.104406061] [mujoco_server] [EventLoop]: Init for load done. Requesting next load step[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.104421061] [mujoco_server] [EventLoop]: Load request received[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.109928828] [mujoco_server] [PrepareReload]: 	Resetting collision cbs to default[0m
+[mujoco_node-3] [33m[WARN] [1792243528.110391017] [mujoco_server] [GetInitialJointPositions]: Initial joint positions NYI in ROS 2[0m
+[mujoco_node-3] [33m[WARN] [1792243528.110750001] [mujoco_server] [GetInitialJointVelocities]: Initial joint velocities NYI in ROS 2[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.111868499] [mujoco_server] [CompleteEnvSetup]: Resetting noise ...[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.111900065] [mujoco_server] [LoadPlugins]: Loading MujocoRosPlugins ...[0m
+[mujoco_node-3] [0m[INFO] [1792243528.111926746] [mujoco_ros_plugin_loader] [ParsePlugins]: Found 1 plugins to load.[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.111933704] [mujoco_ros_plugin_loader] [ParsePlugins]: Initializing plugin loader ... [0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.111941270] [mujoco_ros_plugin_loader] [RegisterPlugins]: Processing plugin with name mujoco_ros2_control[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.111947855] [mujoco_ros_plugin_loader] [RegisterPlugins]: Checking for 'type' member in plugin config at MujocoPlugins.mujoco_ros2_control.type[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.111958123] [mujoco_ros_plugin_loader] [RegisterPlugins]: Registering plugin of type mujoco_ros2_control::MujocoRos2ControlPlugin[0m
+[move_group-2] [INFO] [1792243528.112549486] [moveit.plugins.moveit_simple_controller_manager]: Added FollowJointTrajectory controller for dual_panda_arm_controller
+[move_group-2] [INFO] [1792243528.112586901] [moveit.plugins.moveit_simple_controller_manager]: Max effort set to 0.0
+[move_group-2] [INFO] [1792243528.116065837] [moveit.plugins.moveit_simple_controller_manager]: Added GripperCommand controller for panda_gripper_1
+[move_group-2] [INFO] [1792243528.116109223] [moveit.plugins.moveit_simple_controller_manager]: Max effort set to 0.0
+[move_group-2] [INFO] [1792243528.119384325] [moveit.plugins.moveit_simple_controller_manager]: Added GripperCommand controller for panda_gripper_2
+[move_group-2] [INFO] [1792243528.119562902] [moveit.plugins.moveit_simple_controller_manager]: Returned 3 controllers in list
+[move_group-2] [INFO] [1792243528.119589821] [moveit.plugins.moveit_simple_controller_manager]: Returned 3 controllers in list
+[move_group-2] [INFO] [1792243528.120403965] [moveit_ros.trajectory_execution_manager]: Trajectory execution is managing controllers
+[move_group-2] [INFO] [1792243528.120422424] [move_group.move_group]: MoveGroup debug mode is ON
+[move_group-2] [INFO] [1792243528.136434042] [move_group.move_group]: 
+[move_group-2] 
+[move_group-2] ********************************************************
+[move_group-2] * MoveGroup using: 
+[move_group-2] *     - ApplyPlanningSceneService
+[move_group-2] *     - ClearOctomapService
+[move_group-2] *     - CartesianPathService
+[move_group-2] *     - ExecuteTrajectoryAction
+[move_group-2] *     - GetPlanningSceneService
+[move_group-2] *     - KinematicsService
+[move_group-2] *     - MoveAction
+[move_group-2] *     - MotionPlanService
+[move_group-2] *     - QueryPlannersService
+[move_group-2] *     - StateValidationService
+[move_group-2] ********************************************************
+[move_group-2] 
+[move_group-2] [INFO] [1792243528.136464506] [moveit_move_group_capabilities_base.move_group_context]: MoveGroup context using planning plugin ompl_interface/OMPLPlanner
+[move_group-2] [INFO] [1792243528.136470495] [moveit_move_group_capabilities_base.move_group_context]: MoveGroup context initialization complete
+[move_group-2] [96mLoading 'move_group/ApplyPlanningSceneService'...
+[move_group-2] [0m[96mLoading 'move_group/ClearOctomapService'...
+[move_group-2] [0m[96mLoading 'move_group/MoveGroupCartesianPathService'...
+[move_group-2] [0m[96mLoading 'move_group/MoveGroupExecuteTrajectoryAction'...
+[move_group-2] [0m[96mLoading 'move_group/MoveGroupGetPlanningSceneService'...
+[move_group-2] [0m[96mLoading 'move_group/MoveGroupKinematicsService'...
+[move_group-2] [0m[96mLoading 'move_group/MoveGroupMoveAction'...
+[move_group-2] [0m[96mLoading 'move_group/MoveGroupPlanService'...
+[move_group-2] [0m[96mLoading 'move_group/MoveGroupQueryPlannersService'...
+[move_group-2] [0m[96mLoading 'move_group/MoveGroupStateValidationService'...
+[move_group-2] [0m[92m
+[move_group-2] You can start planning now!
+[move_group-2] 
+[mujoco_node-3] [0m[INFO] [1792243528.137028191] [MujocoRos2ControlPlugin] [on_configure]: Configuring mujoco_ros2_control plugin[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.137389339] [mujoco_ros_plugin_loader] [RegisterPlugins]: Added mujoco_ros2_control::MujocoRos2ControlPlugin to the list of loaded plugins in namespace 'mujoco_ros2_control'. List now contains 1 plugin(s)[0m
+[mujoco_node-3] [0m[INFO] [1792243528.137552298] [mujoco_ros2_control] [Load]: Namespace: /; Fully qualified name: /mujoco_ros2_control[0m
+[mujoco_node-3] [0m[INFO] [1792243528.137577605] [mujoco_ros2_control] [Load]: loading with given model and data[0m
+[mujoco_node-3] [0m[INFO] [1792243528.137599967] [mujoco_ros2_control] [Load]: robot_description_node name is robot_state_publisher[0m
+[mujoco_node-3] [0m[INFO] [1792243528.137613956] [mujoco_ros2_control] [Load]: robot_description service name is robot_description[0m
+[mujoco_node-3] [0m[INFO] [1792243528.137633762] [mujoco_ros2_control] [Load]: robot_description_node fully qualified name: /robot_state_publisher[0m
+[mujoco_node-3] [0m[INFO] [1792243528.137660426] [mujoco_ros2_control] [Load]: Fully qualified mujoco_ros2_control node name: /mujoco_ros2_control[0m
+[mujoco_node-3] [0m[INFO] [1792243528.141036517] [mujoco_ros2_control] [getURDF]: connected to service. /robot_state_publisher asking for robot_description[0m
+[mujoco_node-3] [0m[INFO] [1792243528.146007921] [mujoco_ros2_control] [getURDF]: Received URDF from param server[0m
+[mujoco_node-3] [0m[INFO] [1792243528.161878517] [mujoco_ros2_control] [Load]: createUnmanagedInstance[0m
+[mujoco_node-3] [0m[INFO] [1792243528.162026825] [FrankaMjHardwareSystem] [initSim]: [contact_probe] solver options: cone=0 noslip_iterations=20 noslip_tolerance=1.000e-06 impratio=1.000 iterations=50 timestep=0.0020[0m
+[mujoco_node-3] [0m[INFO] [1792243528.162096586] [FrankaMjHardwareSystem] [initSim]: [contact_probe] per-contact MuJoCo trace: /home/lidio/franka_ws_1/experiment_results/a1_runs/transport_opt_20261017_r11/contact_probe_contacts.csv[0m
+[mujoco_node-3] [0m[INFO] [1792243528.162115240] [FrankaMjHardwareSystem] [initSim]: [contact_probe] single-primary-pad profile: disabled 16 auxiliary pad geoms, tuned 4 primary pads[0m
+[joint_state_publisher-4] [0m[INFO] [1792243528.168843373] [joint_state_publisher] [__init__]: Waiting for robot_description to be published on the robot_description topic...[0m
+[mujoco_node-3] [0m[INFO] [1792243528.265358569] [FrankaMjHardwareSystem] [initSim]: Gripper found for mj_left. Creating a gripper server.[0m
+[ros2 run controller_manager spawner joint_state_broadcaster --controller-manager-timeout 60 --service-call-timeout 60-6] [0m[INFO] [1792243528.321492590] [spawner_joint_state_broadcaster] [service_caller]: waiting for service /controller_manager/list_controllers to become available...[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331503870] [mj_left_gripper_sim_node] [openTraceIfRequested]: [trace] writing raw finger feedback to /home/lidio/franka_ws_1/experiment_results/a1_runs/transport_opt_20261017_r11/gripper_fingers_mj_left.csv[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331560709] [mj_left_gripper_sim_node] [GripperSimActionServer]: Started gripper sim[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331597344] [FrankaMjHardwareSystem] [initSim]: Force-hold model mj_left supported=1 kp=1200.0 tendon ratio=0.5/0.5[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331609363] [FrankaMjHardwareSystem] [initSim]: [gripper_actuator_model] arm=mj_left dyntype=0 gaintype=0 biastype=1 dynprm0=1 gainprm0=1200 biasprm=(0,-1200,0) gear0=1 ctrlrange=(0,0.08) ctrllimited=1 forcerange=(-150,150) forcelimited=1[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331644779] [FrankaMjHardwareSystem] [initSim]: Gripper contact bodies mj_left: left=11 right=12 rod(obj_rod_01)=25[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331653619] [FrankaMjHardwareSystem] [initSim]:   contact geom id=66 name=<unnamed> role=finger_collision_mesh body_id=11 contype=0 conaffinity=0 size=(0.01441,0.01050,0.03733) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331668978] [FrankaMjHardwareSystem] [initSim]:   contact geom id=67 name=<unnamed> role=finger_collision_mesh body_id=11 contype=0 conaffinity=0 size=(0.00616,0.01068,0.01087) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331680024] [FrankaMjHardwareSystem] [initSim]:   contact geom id=68 name=<unnamed> role=finger_collision_mesh body_id=11 contype=1 conaffinity=1 size=(0.01441,0.01050,0.03733) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331690503] [FrankaMjHardwareSystem] [initSim]:   contact geom id=69 name=<unnamed> role=finger_pad_box body_id=11 contype=1 conaffinity=1 size=(0.01000,0.00600,0.01000) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.02000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331701185] [FrankaMjHardwareSystem] [initSim]:   contact geom id=70 name=<unnamed> role=disabled_aux_pad_box body_id=11 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00300) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331711698] [FrankaMjHardwareSystem] [initSim]:   contact geom id=71 name=<unnamed> role=disabled_aux_pad_box body_id=11 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00300) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331721881] [FrankaMjHardwareSystem] [initSim]:   contact geom id=72 name=<unnamed> role=disabled_aux_pad_box body_id=11 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00350) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331731837] [FrankaMjHardwareSystem] [initSim]:   contact geom id=73 name=<unnamed> role=disabled_aux_pad_box body_id=11 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00350) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331761816] [FrankaMjHardwareSystem] [initSim]:   contact geom id=74 name=<unnamed> role=finger_collision_mesh body_id=12 contype=0 conaffinity=0 size=(0.01441,0.01050,0.03733) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331773991] [FrankaMjHardwareSystem] [initSim]:   contact geom id=75 name=<unnamed> role=finger_collision_mesh body_id=12 contype=0 conaffinity=0 size=(0.00616,0.01068,0.01087) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331784280] [FrankaMjHardwareSystem] [initSim]:   contact geom id=76 name=<unnamed> role=finger_collision_mesh body_id=12 contype=1 conaffinity=1 size=(0.01441,0.01050,0.03733) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331794247] [FrankaMjHardwareSystem] [initSim]:   contact geom id=77 name=<unnamed> role=finger_pad_box body_id=12 contype=1 conaffinity=1 size=(0.01000,0.00600,0.01000) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.02000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331804495] [FrankaMjHardwareSystem] [initSim]:   contact geom id=78 name=<unnamed> role=disabled_aux_pad_box body_id=12 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00300) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331814542] [FrankaMjHardwareSystem] [initSim]:   contact geom id=79 name=<unnamed> role=disabled_aux_pad_box body_id=12 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00300) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331824712] [FrankaMjHardwareSystem] [initSim]:   contact geom id=80 name=<unnamed> role=disabled_aux_pad_box body_id=12 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00350) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331834620] [FrankaMjHardwareSystem] [initSim]:   contact geom id=81 name=<unnamed> role=disabled_aux_pad_box body_id=12 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00350) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331844976] [FrankaMjHardwareSystem] [initSim]:   contact geom id=163 name=obj_rod_01 role=obj_rod_01 body_id=25 contype=1 conaffinity=1 size=(0.02000,0.20000,0.02000) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.00500,1.00000) solimp=(0.99000,0.99900,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.331909745] [FrankaMjHardwareSystem] [initSim]: Gripper found for mj_right. Creating a gripper server.[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_right --controller-manager-timeout 60 --service-call-timeout 60-8] [0m[INFO] [1792243528.341453585] [spawner_force_torque_sensor_broadcaster_right] [service_caller]: waiting for service /controller_manager/list_controllers to become available...[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392106560] [mj_right_gripper_sim_node] [openTraceIfRequested]: [trace] writing raw finger feedback to /home/lidio/franka_ws_1/experiment_results/a1_runs/transport_opt_20261017_r11/gripper_fingers_mj_right.csv[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392144408] [mj_right_gripper_sim_node] [GripperSimActionServer]: Started gripper sim[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392162869] [FrankaMjHardwareSystem] [initSim]: Force-hold model mj_right supported=1 kp=1200.0 tendon ratio=0.5/0.5[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392173958] [FrankaMjHardwareSystem] [initSim]: [gripper_actuator_model] arm=mj_right dyntype=0 gaintype=0 biastype=1 dynprm0=1 gainprm0=1200 biasprm=(0,-1200,0) gear0=1 ctrlrange=(0,0.08) ctrllimited=1 forcerange=(-150,150) forcelimited=1[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392212835] [FrankaMjHardwareSystem] [initSim]: Gripper contact bodies mj_right: left=23 right=24 rod(obj_rod_01)=25[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392227980] [FrankaMjHardwareSystem] [initSim]:   contact geom id=147 name=<unnamed> role=finger_collision_mesh body_id=23 contype=0 conaffinity=0 size=(0.01441,0.01050,0.03733) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392244510] [FrankaMjHardwareSystem] [initSim]:   contact geom id=148 name=<unnamed> role=finger_collision_mesh body_id=23 contype=0 conaffinity=0 size=(0.00616,0.01068,0.01087) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392255773] [FrankaMjHardwareSystem] [initSim]:   contact geom id=149 name=<unnamed> role=finger_collision_mesh body_id=23 contype=1 conaffinity=1 size=(0.01441,0.01050,0.03733) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392266382] [FrankaMjHardwareSystem] [initSim]:   contact geom id=150 name=<unnamed> role=finger_pad_box body_id=23 contype=1 conaffinity=1 size=(0.01000,0.00600,0.01000) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.02000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392277282] [FrankaMjHardwareSystem] [initSim]:   contact geom id=151 name=<unnamed> role=disabled_aux_pad_box body_id=23 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00300) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392288042] [FrankaMjHardwareSystem] [initSim]:   contact geom id=152 name=<unnamed> role=disabled_aux_pad_box body_id=23 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00300) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392298818] [FrankaMjHardwareSystem] [initSim]:   contact geom id=153 name=<unnamed> role=disabled_aux_pad_box body_id=23 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00350) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392309246] [FrankaMjHardwareSystem] [initSim]:   contact geom id=154 name=<unnamed> role=disabled_aux_pad_box body_id=23 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00350) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392319609] [FrankaMjHardwareSystem] [initSim]:   contact geom id=155 name=<unnamed> role=finger_collision_mesh body_id=24 contype=0 conaffinity=0 size=(0.01441,0.01050,0.03733) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392329704] [FrankaMjHardwareSystem] [initSim]:   contact geom id=156 name=<unnamed> role=finger_collision_mesh body_id=24 contype=0 conaffinity=0 size=(0.00616,0.01068,0.01087) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392339386] [FrankaMjHardwareSystem] [initSim]:   contact geom id=157 name=<unnamed> role=finger_collision_mesh body_id=24 contype=1 conaffinity=1 size=(0.01441,0.01050,0.03733) friction=(1.0000,0.0050,0.0001) condim=3 margin=0.00000 solref=(0.02000,1.00000) solimp=(0.90000,0.95000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392358371] [FrankaMjHardwareSystem] [initSim]:   contact geom id=158 name=<unnamed> role=finger_pad_box body_id=24 contype=1 conaffinity=1 size=(0.01000,0.00600,0.01000) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.02000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392370244] [FrankaMjHardwareSystem] [initSim]:   contact geom id=159 name=<unnamed> role=disabled_aux_pad_box body_id=24 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00300) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392380781] [FrankaMjHardwareSystem] [initSim]:   contact geom id=160 name=<unnamed> role=disabled_aux_pad_box body_id=24 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00300) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392390872] [FrankaMjHardwareSystem] [initSim]:   contact geom id=161 name=<unnamed> role=disabled_aux_pad_box body_id=24 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00350) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392400956] [FrankaMjHardwareSystem] [initSim]:   contact geom id=162 name=<unnamed> role=disabled_aux_pad_box body_id=24 contype=0 conaffinity=0 size=(0.00300,0.00200,0.00350) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.01000,1.00000) solimp=(0.95000,0.99000,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392410750] [FrankaMjHardwareSystem] [initSim]:   contact geom id=163 name=obj_rod_01 role=obj_rod_01 body_id=25 contype=1 conaffinity=1 size=(0.02000,0.20000,0.02000) friction=(3.0000,0.5000,0.0050) condim=6 margin=0.00100 solref=(0.00500,1.00000) solimp=(0.99000,0.99900,0.00100,0.50000,2.00000) priority=0 solmix=1.000[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392455515] [FrankaMjHardwareSystem] [initSim]: [contact_probe_filter] active model=0x72226c002cc0 rod_geom=163 finger_mesh_geom_ids=[68,76,149,157] rule=mesh-rod only, previous_callback=none; pad/rod and mesh/environment remain enabled[0m
+[mujoco_node-3] [0m[INFO] [1792243528.392476770] [FrankaMjHardwareSystem] [initSim]: Right grasp weld ready: eq_id=3, right_hand_body=22[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_left --controller-manager-timeout 60 --service-call-timeout 60-7] [0m[INFO] [1792243528.394322697] [spawner_force_torque_sensor_broadcaster_left] [service_caller]: waiting for service /controller_manager/list_controllers to become available...[0m
+[mujoco_node-3] [0m[INFO] [1792243528.400325204] [FrankaMjHardwareSystem] [initSim]: Grasp weld constraint ready: eq_id=2, hand_body=10, rod_body=25[0m
+[mujoco_node-3] [0m[INFO] [1792243528.400345145] [FrankaMjHardwareSystem] [initSim]: Robot successfully initialized![0m
+[mujoco_node-3] [0m[INFO] [1792243528.400422746] [resource_manager] [initialize_hardware]: Initialize hardware 'FrankaMjHardwareSystem' [0m
+[mujoco_node-3] [0m[INFO] [1792243528.400466692] [resource_manager] [initialize_hardware]: Successful initialization of hardware 'FrankaMjHardwareSystem'[0m
+[mujoco_node-3] [0m[INFO] [1792243528.400632375] [resource_manager] [operator()]: 'configure' hardware 'FrankaMjHardwareSystem' [0m
+[mujoco_node-3] [0m[INFO] [1792243528.400645446] [resource_manager] [operator()]: Successful 'configure' of hardware 'FrankaMjHardwareSystem'[0m
+[mujoco_node-3] [0m[INFO] [1792243528.400670626] [resource_manager] [operator()]: 'activate' hardware 'FrankaMjHardwareSystem' [0m
+[mujoco_node-3] [0m[INFO] [1792243528.400677615] [FrankaMjHardwareSystem] [on_activate]: Initialized mj_left gripper: q1=0.0000 q2=0.0000 gap=0.0000 cmd=0.0000 m (seq 1)[0m
+[mujoco_node-3] [0m[INFO] [1792243528.400693256] [FrankaMjHardwareSystem] [on_activate]: Initialized mj_right gripper: q1=0.0000 q2=0.0000 gap=0.0000 cmd=0.0000 m (seq 1)[0m
+[mujoco_node-3] [0m[INFO] [1792243528.400699138] [FrankaMjHardwareSystem] [on_activate]: Started[0m
+[mujoco_node-3] [0m[INFO] [1792243528.400705308] [resource_manager] [operator()]: Successful 'activate' of hardware 'FrankaMjHardwareSystem'[0m
+[mujoco_node-3] [0m[INFO] [1792243528.400714113] [mujoco_ros2_control] [Load]: Loading controller_manager[0m
+[mujoco_node-3] [33m[WARN] [1792243528.417815260] [mujoco_ros2_control] [Load]: /controller_manager/controller_manager[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.418280546] [mujoco_server] [LoadPlugins]: Loading plugin mujoco_ros2_control::MujocoRos2ControlPlugin took 0.280865 seconds[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.418319717] [mujoco_server] [LoadPlugins]: Done loading MujocoRosPlugins[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.418326538] [mujoco_server] [CompleteEnvSetup]: Env setup complete[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.418332161] [mujoco_server] [LoadWithModelAndData]: Delegating model loading to viewers[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.418337283] [mujoco_server] [LoadWithModelAndData]: Issuing (re)initialization of offscreen rendering resources[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.434241358] [mujoco_server] [InitializeRenderResources]: Model has 1 cameras[0m
+[mujoco_node-3] [31m[ERROR] [1792243528.450539388] [mujoco_server] [OffscreenCamera]: Created cam node with name overhead_camera and namespace /mujoco_server/cameras/overhead_camera[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.450603154] [mujoco_server] [OffscreenCamera]: Creating camera frames for cam 'overhead_camera' with parent link world[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.450620509] [mujoco_server] [RegisterStaticTransform]: Registering static transform for frame overhead_camera_link[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.450732001] [mujoco_server] [RegisterStaticTransform]: Registering static transform for frame overhead_camera_optical_frame[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.452797910] [mujoco_server.cameras.overhead_camera.overhead_camera] [advertiseImpl]: getTopicToAdvertise: /mujoco_server/cameras/overhead_camera/rgb/image_raw[0m
+[mujoco_node-3] [0m[INFO] [1792243528.459246830] [mujoco_server.cameras.overhead_camera.overhead_camera] [loadCalibration]: using default calibration URL[0m
+[mujoco_node-3] [0m[INFO] [1792243528.459287515] [mujoco_server.cameras.overhead_camera.overhead_camera] [loadCalibration]: camera calibration URL: file:///home/lidio/.ros/camera_info/overhead_camera.yaml[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.459300545] [mujoco_server.cameras.overhead_camera.overhead_camera] [loadCalibrationFile]: reading camera calibration from /home/lidio/.ros/camera_info/overhead_camera.yaml[0m
+[mujoco_node-3] [31m[ERROR] [1792243528.459352855] [camera_calibration_parsers] [readCalibrationYml]: Unable to open camera calibration file [/home/lidio/.ros/camera_info/overhead_camera.yaml][0m
+[mujoco_node-3] [33m[WARN] [1792243528.459381922] [mujoco_server.cameras.overhead_camera.overhead_camera] [loadCalibrationFile]: Camera calibration file /home/lidio/.ros/camera_info/overhead_camera.yaml not found[0m
+[mujoco_node-3] [33m[WARN] [1792243528.459401290] [offscreen_rendering] [InitializeRenderResources]: Model offscreen resolution too small for configured cameras, updating offscreen resolution to fit cam config ... (720x480)[0m
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] [0m[INFO] [1792243528.580313262] [spawner_dual_panda_arm_controller] [service_caller]: waiting for service /controller_manager/list_controllers to become available...[0m
+[mujoco_node-3] [0m[INFO] [1792243528.585442711] [controller_manager] [load_controller]: Loading controller 'joint_state_broadcaster'[0m
+[ros2 run controller_manager spawner joint_state_broadcaster --controller-manager-timeout 60 --service-call-timeout 60-6] [0m[INFO] [1792243528.593464070] [spawner_joint_state_broadcaster] [main]: [94mLoaded [1mjoint_state_broadcaster[0m[0m
+[mujoco_node-3] [0m[INFO] [1792243528.603256110] [controller_manager] [load_controller]: Loading controller 'dual_panda_arm_controller'[0m
+[mujoco_node-3] [33m[WARN] [1792243528.617112824] [dual_panda_arm_controller] [on_init]: [Deprecated]: "allow_nonzero_velocity_at_trajectory_end" is set to true. The default behavior will change to false.[0m
+[mujoco_node-3] [0m[INFO] [1792243528.617199440] [controller_manager] [configure_controller]: Configuring controller 'joint_state_broadcaster'[0m
+[mujoco_node-3] [0m[INFO] [1792243528.617245524] [joint_state_broadcaster] [on_configure]: 'joints' or 'interfaces' parameter is empty. All available state interfaces will be published[0m
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] [0m[INFO] [1792243528.618225915] [spawner_dual_panda_arm_controller] [main]: [94mLoaded [1mdual_panda_arm_controller[0m[0m
+[mujoco_node-3] [0m[INFO] [1792243528.628718251] [controller_manager] [load_controller]: Loading controller 'force_torque_sensor_broadcaster_right'[0m
+[mujoco_node-3] [0m[INFO] [1792243528.636822536] [controller_manager] [configure_controller]: Configuring controller 'dual_panda_arm_controller'[0m
+[mujoco_node-3] [0m[INFO] [1792243528.637013277] [dual_panda_arm_controller] [on_configure]: No specific joint names are used for command interfaces. Using 'joints' parameter.[0m
+[mujoco_node-3] [0m[INFO] [1792243528.637028022] [dual_panda_arm_controller] [on_configure]: Command interfaces are [position] and state interfaces are [position velocity].[0m
+[mujoco_node-3] [0m[INFO] [1792243528.637046120] [dual_panda_arm_controller] [on_configure]: Using 'splines' interpolation method.[0m
+[mujoco_node-3] [0m[INFO] [1792243528.637578709] [dual_panda_arm_controller] [on_configure]: Controller state will be published at 100.00 Hz.[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_right --controller-manager-timeout 60 --service-call-timeout 60-8] [0m[INFO] [1792243528.637823486] [spawner_force_torque_sensor_broadcaster_right] [main]: [94mLoaded [1mforce_torque_sensor_broadcaster_right[0m[0m
+[mujoco_node-3] [0m[INFO] [1792243528.638962785] [dual_panda_arm_controller] [on_configure]: Action status changes will be monitored at 20.00 Hz.[0m
+[mujoco_node-3] [32m[DEBUG] [1792243528.640045729] [mujoco_server] [EventLoop]: Done loading[0m
+[mujoco_node-3] [0m[INFO] [1792243528.643392430] [FrankaMjHardwareSystem] [write]: MuJoCo internal compliance: disabled | threshold=2.00 K_gain=0.080 D_gain=0.150 min_K=0.10 max_D=2.50[0m
+[ros2 run controller_manager spawner joint_state_broadcaster --controller-manager-timeout 60 --service-call-timeout 60-6] [0m[INFO] [1792243528.653844629] [spawner_joint_state_broadcaster] [main]: [92mConfigured and activated [1mjoint_state_broadcaster[0m[0m
+[mujoco_node-3] [0m[INFO] [1792243528.663386779] [controller_manager] [configure_controller]: Configuring controller 'force_torque_sensor_broadcaster_right'[0m
+[mujoco_node-3] [0m[INFO] [1792243528.666168365] [FrankaMjHardwareSystem] [prepare_command_mode_switch]: Preparing command mode switch[0m
+[mujoco_node-3] [0m[INFO] [1792243528.667631311] [FrankaMjHardwareSystem] [perform_command_mode_switch]: Performing command mode switch[0m
+[mujoco_node-3] [0m[INFO] [1792243528.667688509] [FrankaMjHardwareSystem] [perform_command_mode_switch]: Arm mj_left current mode: joint_position[0m
+[mujoco_node-3] [0m[INFO] [1792243528.667702348] [FrankaMjHardwareSystem] [perform_command_mode_switch]: PD controller activated for mj_left: J1-2 kp=300/kv=40, J3-4 kp=200/kv=25, J5-7 kp=80/kv=10[0m
+[mujoco_node-3] [0m[INFO] [1792243528.667710680] [FrankaMjHardwareSystem] [perform_command_mode_switch]: Arm mj_right current mode: joint_position[0m
+[mujoco_node-3] [0m[INFO] [1792243528.667716305] [FrankaMjHardwareSystem] [perform_command_mode_switch]: PD controller activated for mj_right: J1-2 kp=300/kv=40, J3-4 kp=200/kv=25, J5-7 kp=80/kv=10[0m
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] [0m[INFO] [1792243528.670484690] [spawner_dual_panda_arm_controller] [main]: [92mConfigured and activated [1mdual_panda_arm_controller[0m[0m
+[mujoco_node-3] [0m[INFO] [1792243528.680107384] [controller_manager] [load_controller]: Loading controller 'force_torque_sensor_broadcaster_left'[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_left --controller-manager-timeout 60 --service-call-timeout 60-7] [0m[INFO] [1792243528.688878604] [spawner_force_torque_sensor_broadcaster_left] [main]: [94mLoaded [1mforce_torque_sensor_broadcaster_left[0m[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_right --controller-manager-timeout 60 --service-call-timeout 60-8] [0m[INFO] [1792243528.693554770] [spawner_force_torque_sensor_broadcaster_right] [main]: [92mConfigured and activated [1mforce_torque_sensor_broadcaster_right[0m[0m
+[mujoco_node-3] [0m[INFO] [1792243528.703312826] [controller_manager] [configure_controller]: Configuring controller 'force_torque_sensor_broadcaster_left'[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_left --controller-manager-timeout 60 --service-call-timeout 60-7] [0m[INFO] [1792243528.720690434] [spawner_force_torque_sensor_broadcaster_left] [main]: [92mConfigured and activated [1mforce_torque_sensor_broadcaster_left[0m[0m
+[INFO] [ros2 run controller_manager spawner joint_state_broadcaster --controller-manager-timeout 60 --service-call-timeout 60-6]: process has finished cleanly [pid 411293]
+[INFO] [ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5]: process has finished cleanly [pid 411291]
+[INFO] [ros2 run controller_manager spawner force_torque_sensor_broadcaster_right --controller-manager-timeout 60 --service-call-timeout 60-8]: process has finished cleanly [pid 411299]
+[INFO] [ros2 run controller_manager spawner force_torque_sensor_broadcaster_left --controller-manager-timeout 60 --service-call-timeout 60-7]: process has finished cleanly [pid 411295]
+[mujoco_node-3] [32m[DEBUG] [1792243531.544205913] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.564683430] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.574964419] [mujoco_server] [SetBodyState]: Setting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.575010996] [mujoco_server] [SetBodyState]: 	Setting pose of body 'obj_rod_01' to 0.5, 0, 0.022, 0.996195, 0, 0, 0.0871557[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.575021110] [mujoco_server] [SetBodyState]: 	Setting twist of body 'obj_rod_01' to 0, 0, 0, 0, 0, 0[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.585251060] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.595483170] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.605730797] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.615982913] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.626224574] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.646607165] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.667057756] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.687795187] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.708198843] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.728536316] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.748985735] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.769471742] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.790016717] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.810437838] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.830928320] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.851540028] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.872026474] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.892594873] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.913103943] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.933748708] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.954616668] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.964972902] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243531.985648676] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.006279808] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.027004017] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.047908932] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.069821026] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.091399724] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.112097454] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.125668073] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.146560668] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.167277911] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.188051926] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.209208839] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.229524645] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.249943790] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.270494917] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.291180613] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.311715254] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.333350192] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.354429552] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.364919857] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.385739760] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.411212678] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.431579327] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.451996374] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.472280934] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.492540140] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.513011770] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.533443666] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.553867150] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.574213046] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.594484078] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.604789376] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243532.625437059] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] MuJoCo version 3.2.0
+[move_group-2] [WARN] [1792243540.907749224] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Unable to transform object from frame 'overhead_camera_link' to planning frame'base_link' (Could not find a connection between 'base_link' and 'overhead_camera_link' because they are not part of the same tree.Tf has two or more unconnected trees.)
+[move_group-2] [WARN] [1792243540.907784778] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Unable to transform object from frame 'world' to planning frame'base_link' (Could not find a connection between 'base_link' and 'world' because they are not part of the same tree.Tf has two or more unconnected trees.)
+[move_group-2] [WARN] [1792243540.907791131] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Unable to transform object from frame 'overhead_camera_optical_frame' to planning frame'base_link' (Could not find a connection between 'base_link' and 'overhead_camera_optical_frame' because they are not part of the same tree.Tf has two or more unconnected trees.)
+[mujoco_node-3] [32m[DEBUG] [1792243541.023591432] [mujoco_server] [GetBodyState]: Getting body state requested[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.398241466] [mujoco_server] [EventLoop]: Closing all connected viewers[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.398313166] [mujoco_server] [EventLoop]: Exiting event loop[0m
+[robot_state_publisher-1] [INFO] [1792243543.398330899] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[move_group-2] [INFO] [1792243543.398370771] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[mujoco_node-3] [0m[INFO] [1792243543.398243335] [controller_manager] [operator()]: Shutdown request received....[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398503166] [controller_manager] [shutdown_controllers]: Shutting down all controllers in the controller manager.[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398545898] [controller_manager] [shutdown_controllers]: Deactivating controller 'joint_state_broadcaster'[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.398576788] [mujoco_server] [PhysicsLoop]: Joining offscreen render thread[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398623142] [controller_manager] [shutdown_controllers]: Shutting down controller 'joint_state_broadcaster'[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.398629912] [mujoco_server] [OffscreenRenderLoop]: Exiting offscreen render loop[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398678984] [controller_manager] [shutdown_controllers]: Deactivating controller 'dual_panda_arm_controller'[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.398801194] [mujoco_server] [PhysicsLoop]: Exiting physics loop[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398806707] [controller_manager] [shutdown_controllers]: Shutting down controller 'dual_panda_arm_controller'[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398925306] [controller_manager] [shutdown_controllers]: Deactivating controller 'force_torque_sensor_broadcaster_right'[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398950999] [controller_manager] [shutdown_controllers]: Shutting down controller 'force_torque_sensor_broadcaster_right'[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398971601] [controller_manager] [shutdown_controllers]: Deactivating controller 'force_torque_sensor_broadcaster_left'[0m
+[mujoco_node-3] [0m[INFO] [1792243543.398988114] [controller_manager] [shutdown_controllers]: Shutting down controller 'force_torque_sensor_broadcaster_left'[0m
+[mujoco_node-3] [0m[INFO] [1792243543.399076535] [resource_manager] [operator()]: 'deactivate' hardware 'FrankaMjHardwareSystem' [0m
+[mujoco_node-3] [0m[INFO] [1792243543.399113158] [FrankaMjHardwareSystem] [on_deactivate]: trying to Stop...[0m
+[mujoco_node-3] [0m[INFO] [1792243543.399134024] [FrankaMjHardwareSystem] [on_deactivate]: [contact_probe_filter] filtered mesh-rod candidate pairs=0[0m
+[mujoco_node-3] [0m[INFO] [1792243543.399143923] [FrankaMjHardwareSystem] [on_deactivate]: Stopped[0m
+[mujoco_node-3] [0m[INFO] [1792243543.399158164] [resource_manager] [operator()]: Successful 'deactivate' of hardware 'FrankaMjHardwareSystem'[0m
+[mujoco_node-3] [0m[INFO] [1792243543.399167737] [resource_manager] [operator()]: 'shutdown' hardware 'FrankaMjHardwareSystem' [0m
+[mujoco_node-3] [0m[INFO] [1792243543.399178420] [resource_manager] [operator()]: Successful 'shutdown' of hardware 'FrankaMjHardwareSystem'[0m
+[mujoco_node-3] [0m[INFO] [1792243543.399188690] [controller_manager] [operator()]: Shutting down the controller manager.[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.412433030] [mujoco_server] [WaitForPhysicsJoin]: Physics joined[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.412454778] [mujoco_server] [WaitForEventsJoin]: Waiting for event join[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.412482098] [mujoco_server] [WaitForEventsJoin]: Event joined[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.412486681] [mujoco_server] [main]: Joining executor thread[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.415764225] [mujoco_server] [main]: Joined executor thread[0m
+[mujoco_node-3] [32m[DEBUG] [1792243543.415769935] [mujoco_server] [~MujocoEnv]: Destructor called[0m
+[mujoco_node-3] terminate called after throwing an instance of 'std::runtime_error'
+[mujoco_node-3]   what():  Node needs to be associated with an executor.
+[move_group-2] [INFO] [1792243543.419027042] [moveit.ros_planning_interface.moveit_cpp]: Deleting MoveItCpp
+[joint_state_publisher-4] Traceback (most recent call last):
+[joint_state_publisher-4]   File "/opt/ros/humble/lib/joint_state_publisher/joint_state_publisher", line 33, in <module>
+[joint_state_publisher-4]     sys.exit(load_entry_point('joint-state-publisher==2.4.0', 'console_scripts', 'joint_state_publisher')())
+[joint_state_publisher-4]   File "/opt/ros/humble/lib/python3.10/site-packages/joint_state_publisher/joint_state_publisher.py", line 466, in main
+[joint_state_publisher-4]     rclpy.spin(jsp)
+[joint_state_publisher-4]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/__init__.py", line 229, in spin
+[joint_state_publisher-4]     executor.spin_once()
+[joint_state_publisher-4]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 808, in spin_once
+[joint_state_publisher-4]     self._spin_once_impl(timeout_sec)
+[joint_state_publisher-4]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 797, in _spin_once_impl
+[joint_state_publisher-4]     handler, entity, node = self.wait_for_ready_callbacks(timeout_sec=timeout_sec)
+[joint_state_publisher-4]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 780, in wait_for_ready_callbacks
+[joint_state_publisher-4]     return next(self._cb_iter)
+[joint_state_publisher-4]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 681, in _wait_for_ready_callbacks
+[joint_state_publisher-4]     raise ExternalShutdownException()
+[joint_state_publisher-4] rclpy.executors.ExternalShutdownException
+[INFO] [robot_state_publisher-1]: process has finished cleanly [pid 411283]
+[ERROR] [mujoco_node-3]: process has died [pid 411287, exit code -6, cmd '/home/lidio/franka_ws_1/install/mujoco_ros/lib/mujoco_ros/mujoco_node --admin-hash '' --ros-args --log-level mujoco_server:=debug --log-level mujoco_ros_plugin_loader:=debug --log-level Viewer:=debug --ros-args --params-file /tmp/launch_params_8o33sw9a --params-file /tmp/launch_params_n8edvm0z --params-file /tmp/launch_params__t1dt3qm --params-file /tmp/launch_params_vvcx1v4e --params-file /tmp/launch_params_5io9evdc --params-file /tmp/launch_params_7eu3azvq --params-file /tmp/launch_params_clj6afx7 --params-file /tmp/launch_params_raiofqy1 --params-file /tmp/launch_params_5v2n429n --params-file /tmp/launch_params_vkkmbmhv --params-file /tmp/launch_params_hxqgcqur --params-file /tmp/launch_params_07isqlf_ --params-file /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/config/initial_joint_states.yaml --params-file /home/lidio/franka_ws_1/install/franka_moveit_config/share/franka_moveit_config/config/sim_dual_panda_ros_controllers.yaml'].
+[ERROR] [joint_state_publisher-4]: process has died [pid 411289, exit code 1, cmd '/opt/ros/humble/lib/joint_state_publisher/joint_state_publisher --ros-args -r __node:=joint_state_publisher -r __ns:=/ --params-file /tmp/launch_params_s9tukr83'].
+[move_group-2] [INFO] [1792243543.650611522] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Stopped publishing maintained planning scene.
+[move_group-2] [INFO] [1792243543.651593266] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Stopping world geometry monitor
+[move_group-2] [INFO] [1792243543.651940328] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Stopping planning scene monitor
+[move_group-2] Warning: class_loader.ClassLoader: SEVERE WARNING!!! Attempting to unload library while objects created by this loader exist in the heap! You should delete your objects before attempting to unload the library or destroying the ClassLoader. The library will NOT be unloaded.
+[move_group-2]          at line 127 in ./src/class_loader.cpp
+[move_group-2] Stack trace (most recent call last):
+[move_group-2] #16   Object "", at 0xffffffffffffffff, in 
+[move_group-2] #15   Object "/opt/ros/humble/lib/moveit_ros_move_group/move_group", at 0x58efa0658724, in 
+[move_group-2] #14   Source "../csu/libc-start.c", line 392, in __libc_start_main_impl [0x7ebfdb829e3f]
+[move_group-2] #13   Source "../sysdeps/nptl/libc_start_call_main.h", line 58, in __libc_start_call_main [0x7ebfdb829d8f]
+[move_group-2] #12   Object "/opt/ros/humble/lib/moveit_ros_move_group/move_group", at 0x58efa065765b, in 
+[move_group-2] #11   Object "/opt/ros/humble/lib/moveit_ros_move_group/move_group", at 0x58efa0659709, in 
+[move_group-2] #10   Object "/opt/ros/humble/lib/libmoveit_cpp.so.2.5.9", at 0x7ebfdc414876, in moveit_cpp::MoveItCpp::~MoveItCpp()
+[move_group-2] #9    Object "/opt/ros/humble/lib/libmoveit_cpp.so.2.5.9", at 0x7ebfdc412ba9, in 
+[move_group-2] #8    Object "/opt/ros/humble/lib/libmoveit_trajectory_execution_manager.so.2.5.9", at 0x7ebfdb6d13b5, in trajectory_execution_manager::TrajectoryExecutionManager::~TrajectoryExecutionManager()
+[move_group-2] #7    Object "/opt/ros/humble/lib/libmoveit_trajectory_execution_manager.so.2.5.9", at 0x7ebfdb6e42d9, in 
+[move_group-2] #6    Object "/opt/ros/humble/lib/librclcpp.so", at 0x7ebfdc077b8c, in rclcpp::Node::~Node()
+[move_group-2] #5    Object "/opt/ros/humble/lib/librclcpp.so", at 0x7ebfdc077b2e, in rclcpp::Node::~Node()
+[move_group-2] #4    Object "/opt/ros/humble/lib/librclcpp.so", at 0x7ebfdc052d39, in 
+[move_group-2] #3    Object "/opt/ros/humble/lib/librclcpp.so", at 0x7ebfdc0810b9, in 
+[move_group-2] #2    Object "/opt/ros/humble/lib/librclcpp.so", at 0x7ebfdc081000, in rclcpp::node_interfaces::NodeBase::~NodeBase()
+[move_group-2] #1    Object "/opt/ros/humble/lib/librclcpp.so", at 0x7ebfdc052d39, in 
+[move_group-2] #0    Object "/opt/ros/humble/lib/librclcpp.so", at 0x7ebfdc057b31, in rclcpp::CallbackGroup::~CallbackGroup()
+[move_group-2] Segmentation fault (Address not mapped to object [0x7ebfd01e1798])
+[ERROR] [move_group-2]: process has died [pid 411285, exit code -11, cmd '/opt/ros/humble/lib/moveit_ros_move_group/move_group --ros-args --params-file /tmp/launch_params_6efd9l7n --params-file /tmp/launch_params_ka_cr5ak --params-file /tmp/launch_params_02qo5m9j --params-file /tmp/launch_params_uzrdmc1j --params-file /tmp/launch_params_udoi1zui --params-file /tmp/launch_params_kyth0l3d --params-file /tmp/launch_params_vt4ul_oh --params-file /tmp/launch_params_mrzg7ok1 --params-file /tmp/launch_params_112vss2_ --params-file /tmp/launch_params_vupbmp31 --params-file /tmp/launch_params_22gs6ip8 --params-file /tmp/launch_params_73_nit0p'].
+[move_group-2] [0m

@@ -1,0 +1,1 @@
+t_sec,robot,commanded_gap_m,command_per_finger_m,closing_force_limit_per_finger_n,q1_m,q2_m,total_gap_m,feedback_seq,target_gap_m,left_finger_obj_rod_01,right_finger_obj_rod_01,rod_pad_contact_count,phase,normal_left_n,normal_right_n,tangent_left_n,tangent_right_n,force_per_finger_n,rod_force_x_n,rod_force_y_n,rod_force_z_n,sim_time,weld_left,weld_right,rod_constraint

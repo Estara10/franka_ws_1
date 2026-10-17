@@ -1264,11 +1264,17 @@ bool DualArmController::prepareFromA1Truth()
                                 } else if (ctx_->grasp_model_ == "contact_probe") {
                                     std::string probe_detail;
                                     const bool probe_ok = runContactLoadProbe(
-                                        truth, probe_detail, ctx_->contact_hold_diagnostic_only_);
+                                        truth, probe_detail, ctx_->contact_hold_diagnostic_only_,
+                                        ctx_->contact_plan_compare_);
                                     if (ctx_->contact_hold_diagnostic_only_) {
                                         RCLCPP_INFO(ctx_->get_logger(),
                                             "[CONTACT_HOLD_MECHANISM_RESULT] state=%s detail=%s",
                                             probe_ok ? "PASS" : "FAILED", probe_detail.c_str());
+                                    } else if (ctx_->contact_plan_compare_) {
+                                        RCLCPP_INFO(ctx_->get_logger(),
+                                            "[CONTACT_PROBE_RESULT] state=%s detail=%s",
+                                            probe_ok ? "PLAN_COMPARE_DONE" : "FAILED",
+                                            probe_detail.c_str());
                                     } else {
                                         RCLCPP_INFO(ctx_->get_logger(), "[CONTACT_PROBE_RESULT] state=%s detail=%s",
                                             probe_ok ? "DONE" : "FAILED", probe_detail.c_str());
@@ -1276,6 +1282,9 @@ bool DualArmController::prepareFromA1Truth()
                                     if (ctx_->contact_hold_diagnostic_only_) {
                                         ctx_->setCurrentState(probe_ok ?
                                             TaskState::CONTACT_HOLD_MECHANISM_VALIDATED : TaskState::ERROR);
+                                    } else if (ctx_->contact_plan_compare_) {
+                                        ctx_->setCurrentState(probe_ok ?
+                                            TaskState::PLAN_COMPARE_DONE : TaskState::ERROR);
                                     } else {
                                         ctx_->setCurrentState(probe_ok ? TaskState::DONE : TaskState::ERROR);
                                     }
@@ -1327,6 +1336,20 @@ bool DualArmController::prepareFromA1Truth()
                                 a1v::statusName(full.collision.status));
                     RCLCPP_INFO(ctx_->get_logger(),
                                 "  [P2B] 未启用 p2b_check，跳过联合预抓取路径检查");
+                }
+                if (ctx_->contact_transport_plan_only_) {
+                    // S2: build the transport segment from the reconstructed
+                    // nominal grasp/lift state and compare the baseline path
+                    // with the closed-chain projected path. Planning only.
+                    RCLCPP_INFO(ctx_->get_logger(),
+                                "\n----- [S2] 运输段闭链投影比较（仅规划，不运动）-----");
+                    std::string opt_detail;
+                    const bool opt_ok = runContactLoadProbe(truth, opt_detail, false, false);
+                    RCLCPP_INFO(ctx_->get_logger(), "[TRANSPORT_OPT_RESULT] state=%s detail=%s",
+                                opt_ok ? "PLAN_ONLY_DONE" : "FAILED", opt_detail.c_str());
+                    ctx_->setCurrentState(opt_ok ? TaskState::PLAN_COMPARE_DONE
+                                                 : TaskState::ERROR);
+                    return opt_ok;
                 }
             }
         } else {

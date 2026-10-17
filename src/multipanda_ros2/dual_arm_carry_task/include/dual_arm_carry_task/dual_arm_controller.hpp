@@ -97,7 +97,8 @@ public:
     bool runGraspDescent(const a1t::TruthPayload& truth, std::string& detail);
     bool runGraspContact(const a1t::TruthPayload& truth, std::string& detail);
     bool runContactLoadProbe(const a1t::TruthPayload& truth, std::string& detail,
-                             bool hold_diagnostic_only = false);
+                             bool hold_diagnostic_only = false,
+                             bool plan_compare = false);
     bool runIdealWeldCarry(const a1t::TruthPayload& truth, std::string& detail);
     // A1 P3a-2b: build the Cartesian descent from the ACTUAL reached pre-grasp
     // state, solve it with combined-state IK on the criterion model, and verify

@@ -124,6 +124,9 @@ def launch_setup(context, *args, **kwargs):
             'grasp_contact_close': LaunchConfiguration('grasp_contact_close'),
             'grasp_model': LaunchConfiguration('grasp_model'),
             'contact_hold_diagnostic_only': LaunchConfiguration('contact_hold_diagnostic_only'),
+            'contact_plan_compare': LaunchConfiguration('contact_plan_compare'),
+            'contact_transport_plan_only':
+                LaunchConfiguration('contact_transport_plan_only'),
             'descent_steps': LaunchConfiguration('descent_steps'),
             'descent_max_xy_dev_m': LaunchConfiguration('descent_max_xy_dev_m'),
             'descent_max_angle_dev_deg': LaunchConfiguration('descent_max_angle_dev_deg'),
@@ -463,6 +466,16 @@ def generate_launch_description():
     contact_hold_diagnostic_only_arg = DeclareLaunchArgument(
         'contact_hold_diagnostic_only', default_value='false',
         description='仅用于一次接触保持机制诊断：预抓取/下降/接触闭合后固定机械臂观测1s并释放，绝不抬升')
+    contact_plan_compare_arg = DeclareLaunchArgument(
+        'contact_plan_compare', default_value='false',
+        description='P4/S2 phase 1: 抬升/保持/重建立之后不执行运输，改为对照当前物体空间路径与 '
+                    'MoveIt CHOMP 规划（同一起点与终点），输出 plan_compare.csv；仅在 CHOMP 通过'
+                    '闭链/碰撞/限位检查时条件执行一次 CHOMP 运输。需要 grasp_model=contact_probe')
+    contact_transport_plan_only_arg = DeclareLaunchArgument(
+        'contact_transport_plan_only', default_value='false',
+        description='S2: 用重建的标称抓取/抬升状态生成运输段，比较基线路径与闭链零空间投影路径；'
+                    '只规划、不运动（不闭合夹爪、不下发任何目标），输出 transport_path_compare.csv。'
+                    '需要 grasp_model=contact_probe、prepare_only、a1_truth 与 p2a_check')
     descent_steps_arg = DeclareLaunchArgument(
         'descent_steps', default_value='20',
         description='下降轨迹的分段数（目标点 = 分段数 + 1，含两端）')
@@ -765,6 +778,8 @@ def generate_launch_description():
         grasp_contact_close_arg,
         grasp_model_arg,
         contact_hold_diagnostic_only_arg,
+        contact_plan_compare_arg,
+        contact_transport_plan_only_arg,
         descent_steps_arg,
         descent_max_xy_dev_m_arg,
         descent_max_angle_dev_deg_arg,

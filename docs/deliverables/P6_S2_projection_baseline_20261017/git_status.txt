@@ -1,0 +1,58 @@
+ M docs/CONTACT_HANDOFF_20261016.md
+ M scripts/a1_run_scene.sh
+ M scripts/run_contact_probe_local.sh
+ M src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/carry_task_context.hpp
+ M src/multipanda_ros2/dual_arm_carry_task/include/dual_arm_carry_task/dual_arm_controller.hpp
+ M src/multipanda_ros2/dual_arm_carry_task/launch/dual_arm_carry_task.launch.py
+ M src/multipanda_ros2/dual_arm_carry_task/src/carry_task_state_machine.cpp
+ M src/multipanda_ros2/dual_arm_carry_task/src/contact_load_probe.cpp
+ M src/multipanda_ros2/dual_arm_carry_task/src/dual_arm_controller.cpp
+ M src/multipanda_ros2/franka_hardware/src/sim/franka_mj_hardware_system.cpp
+?? .rtk/
+?? docs/deliverables/CONTACT_BATCH_20261017_result.md
+?? "docs/deliverables/Codex_\344\274\230\345\214\226\346\226\271\345\220\221_\345\222\250\350\257\242\346\217\220\347\244\272\350\257\215.md"
+?? docs/deliverables/P4_S2_plan_compare_result_20261017.md
+?? docs/deliverables/P4_S2b_transport_timing_result_20261017.md
+?? "docs/deliverables/P4_S2b_transport_timing_\346\211\247\350\241\214\345\231\250\346\217\220\347\244\272\350\257\215.md"
+?? "docs/deliverables/P5_S3_baseline_\346\211\247\350\241\214\345\231\250\346\217\220\347\244\272\350\257\215.md"
+?? "docs/deliverables/P5_S3_internal_compliance_AB_\346\211\247\350\241\214\345\231\250\346\217\220\347\244\272\350\257\215.md"
+?? docs/deliverables/P5_S3_internal_compliance_result_20261017.md
+?? "docs/deliverables/P5_retreat_\350\256\260\345\275\225_20261017.md"
+?? docs/deliverables/P6_S2_projection_baseline_20261017/
+?? "docs/deliverables/S2_S3_\344\274\230\345\214\226\344\270\216\346\237\224\351\241\272\345\256\236\346\226\275\350\256\241\345\210\222.md"
+?? experiment_results/reports/comm_latency_20260821_174401_20260821_174439_summary.csv
+?? experiment_results/reports/comm_latency_20260821_174401_20260821_174439_summary.md
+?? experiment_results/reports/comm_latency_20260821_174805_20260821_174840_summary.csv
+?? experiment_results/reports/comm_latency_20260821_174805_20260821_174840_summary.md
+?? experiment_results/reports/comm_latency_20260821_175325_20260821_175402_summary.csv
+?? experiment_results/reports/comm_latency_20260821_175325_20260821_175402_summary.md
+?? experiment_results/reports/comm_latency_20260821_175553_20260821_175631_summary.csv
+?? experiment_results/reports/comm_latency_20260821_175553_20260821_175631_summary.md
+?? experiment_results/reports/comm_latency_20260821_181618_20260821_181721_summary.csv
+?? experiment_results/reports/comm_latency_20260821_181618_20260821_181721_summary.md
+?? experiment_results/reports/comm_latency_20260821_192957_20260821_193048_summary.csv
+?? experiment_results/reports/comm_latency_20260821_192957_20260821_193048_summary.md
+?? experiment_results/reports/comm_latency_20260821_193507_20260821_193554_summary.csv
+?? experiment_results/reports/comm_latency_20260821_193507_20260821_193554_summary.md
+?? experiment_results/reports/comm_latency_20260821_194251_20260821_194340_summary.csv
+?? experiment_results/reports/comm_latency_20260821_194251_20260821_194340_summary.md
+?? experiment_results/reports/comm_latency_20260821_194653_20260821_194738_summary.csv
+?? experiment_results/reports/comm_latency_20260821_194653_20260821_194738_summary.md
+?? experiment_results/reports/task_metrics_20260821_174401_compliant_chomp_20260821_174439_summary.csv
+?? experiment_results/reports/task_metrics_20260821_174401_compliant_chomp_20260821_174439_summary.md
+?? experiment_results/reports/task_metrics_20260821_174805_compliant_chomp_20260821_174840_summary.csv
+?? experiment_results/reports/task_metrics_20260821_174805_compliant_chomp_20260821_174840_summary.md
+?? experiment_results/reports/task_metrics_20260821_175325_compliant_chomp_20260821_175402_summary.csv
+?? experiment_results/reports/task_metrics_20260821_175325_compliant_chomp_20260821_175402_summary.md
+?? experiment_results/reports/task_metrics_20260821_175553_compliant_chomp_20260821_175631_summary.csv
+?? experiment_results/reports/task_metrics_20260821_175553_compliant_chomp_20260821_175631_summary.md
+?? experiment_results/reports/task_metrics_20260821_181618_compliant_chomp_20260821_181721_summary.csv
+?? experiment_results/reports/task_metrics_20260821_181618_compliant_chomp_20260821_181721_summary.md
+?? experiment_results/reports/task_metrics_20260821_192957_compliant_chomp_20260821_193048_summary.csv
+?? experiment_results/reports/task_metrics_20260821_192957_compliant_chomp_20260821_193048_summary.md
+?? experiment_results/reports/task_metrics_20260821_193507_compliant_chomp_20260821_193554_summary.csv
+?? experiment_results/reports/task_metrics_20260821_193507_compliant_chomp_20260821_193554_summary.md
+?? experiment_results/reports/task_metrics_20260821_194251_compliant_chomp_20260821_194340_summary.csv
+?? experiment_results/reports/task_metrics_20260821_194251_compliant_chomp_20260821_194340_summary.md
+?? experiment_results/reports/task_metrics_20260821_194653_compliant_chomp_20260821_194738_summary.csv
+?? experiment_results/reports/task_metrics_20260821_194653_compliant_chomp_20260821_194738_summary.md

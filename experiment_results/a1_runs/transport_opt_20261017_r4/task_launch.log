@@ -1,0 +1,141 @@
+[INFO] [launch]: All log files can be found below /home/lidio/franka_ws_1/launch_logs/transport_opt_20261017_r4/2026-10-17-21-06-01-048496-Estara-397212
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [dual_arm_carry_task_node-1]: process started with pid [397344]
+[dual_arm_carry_task_node-1] [INFO] [1792242366.377796408] [dual_arm_carry_task]: === 双臂协作搬运任务节点初始化 ===
+[dual_arm_carry_task_node-1] [INFO] [1792242366.386771806] [dual_arm_carry_task]: [P3A2C_CONFIG] grasp_contact_close=false (parameter default=false), grasp_descent=false, contact_hold_diagnostic_only=false, contact_plan_compare=false, contact_transport_plan_only=true
+[dual_arm_carry_task_node-1] [INFO] [1792242366.386843476] [dual_arm_carry_task]: [S1_CONFIG] grasp_model=contact_probe (default=none)
+[dual_arm_carry_task_node-1] [INFO] [1792242366.391482962] [dual_arm_carry_task]: A1 truth mode enabled: subscribing to /a1_rod_pose_truth (expected_run_id=transport_opt_20261017_r4)
+[dual_arm_carry_task_node-1] [INFO] [1792242366.394440171] [dual_arm_carry_task]: A1 到位新鲜度: 订阅 /joint_states（序号 + 到达时刻；重复旧样本不计数）
+[dual_arm_carry_task_node-1] [INFO] [1792242366.395790759] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] 配置参数:
+[dual_arm_carry_task_node-1] [INFO] [1792242366.395848846] [dual_arm_carry_task]:   左臂组: mj_left_arm
+[dual_arm_carry_task_node-1] [INFO] [1792242366.395876455] [dual_arm_carry_task]:   右臂组: mj_right_arm
+[dual_arm_carry_task_node-1] [INFO] [1792242366.395899386] [dual_arm_carry_task]:   双臂组: dual_panda
+[dual_arm_carry_task_node-1] [INFO] [1792242366.395920499] [dual_arm_carry_task]:   控制模式: rigid
+[dual_arm_carry_task_node-1] [INFO] [1792242366.395940900] [dual_arm_carry_task]:   旋转阶段: 启用
+[dual_arm_carry_task_node-1] [INFO] [1792242366.395961264] [dual_arm_carry_task]:   杆位姿来源: a1_truth
+[dual_arm_carry_task_node-1] [INFO] [1792242366.395990979] [dual_arm_carry_task]:   准备模式(prepare_only): 启用（本轮 A1 不运动）
+[dual_arm_carry_task_node-1] [INFO] [1792242366.396014811] [dual_arm_carry_task]:   P2a 静态检查(p2a_check): 启用（几何/双臂 IK/组合碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1792242366.396036863] [dual_arm_carry_task]:   P2b 路径检查(p2b_check): 禁用
+[dual_arm_carry_task_node-1] [INFO] [1792242366.396058261] [dual_arm_carry_task]:   预抓取执行(pregrasp_execute): 禁用
+[dual_arm_carry_task_node-1] [INFO] [1792242366.396078761] [dual_arm_carry_task]:   下降到抓取位姿(grasp_descent): 禁用
+[dual_arm_carry_task_node-1] [INFO] [1792242366.401797699] [dual_arm_carry_task]:   A1 真值已冻结: run_id=transport_opt_20261017_r4 frame=world pos=(0.500000, 0.000000, 0.020654)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.396319872] [dual_arm_carry_task]: 初始化 MoveIt 接口...
+[dual_arm_carry_task_node-1] [INFO] [1792242368.401509641] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.006 seconds
+[dual_arm_carry_task_node-1] [INFO] [1792242368.401555107] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1792242368.424903146] [move_group_interface]: Ready to take commands for planning group dual_panda.
+[dual_arm_carry_task_node-1] [INFO] [1792242368.424925227] [dual_arm_carry_task]: ✓ 双臂协同组已加载
+[dual_arm_carry_task_node-1] [INFO] [1792242368.429196601] [move_group_interface]: Ready to take commands for planning group mj_left_arm.
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432761620] [move_group_interface]: Ready to take commands for planning group mj_right_arm.
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432782362] [dual_arm_carry_task]: ✓ 规划管道已全局切换至 Pilz Industrial Motion Planner
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432792737] [dual_arm_carry_task]: ✓ MoveIt 接口初始化完成
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432796179] [dual_arm_carry_task]:   左臂末端: mj_left_link8
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432799627] [dual_arm_carry_task]:   右臂末端: mj_right_link8
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432802815] [dual_arm_carry_task]:   双臂组关节数: 14
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432807231] [dual_arm_carry_task]:   SRDF 禁用碰撞规则数: 121
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432816990] [dual_arm_carry_task]:   [SRDF检查] mj_right_link0<->mj_right_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432820214] [dual_arm_carry_task]:   [SRDF检查] mj_left_link0<->mj_left_link1: ✓ 存在
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432823276] [dual_arm_carry_task]: === 初始化完成，准备执行任务 ===
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432826808] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432829843] [dual_arm_carry_task]:     开始执行双臂协作搬运任务
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432832577] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432845046] [dual_arm_carry_task]: [状态: INIT] 初始化...
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432849732] [dual_arm_carry_task]:   [A1] MoveIt 规划坐标系: base_link
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432855455] [dual_arm_carry_task]:   [A1] 冻结真值: run_id=transport_opt_20261017_r4 frame=world pos=(0.500000, 0.000000, 0.020654) size=(0.040, 0.400, 0.040) mass=0.640000 kg
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432896997] [dual_arm_carry_task]:   [A1] 冻结真值 yaw=10.0000° (长轴为杆局部 Y 轴)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.432902372] [dual_arm_carry_task]:   [A1] 坐标处理: world 与 base_link 数值等价（SRDF 固定 virtual_joint + URDF/MuJoCo 基座位置一致），按显式单位变换处理
+[dual_arm_carry_task_node-1] [INFO] [1792242368.450010930] [dual_arm_carry_task]:   [A1] 读回原始值: object_frame='base_link' primitives=1 pose=(0.500000, 0.000000, 0.020654) quat=(0.000000, 0.000000, 0.087156, 0.996195) dims=(0.0400, 0.4000, 0.0400)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.450074488] [dual_arm_carry_task]:   [A1] 写入请求值: object_frame='base_link' pose=(0.500000, 0.000000, 0.020654) quat=(0.000000, 0.000000, 0.087156, 0.996195)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.450099275] [dual_arm_carry_task]:   [A1] 场景读回核对: Δpos=0.0000 mm, Δangle=0.0000°, Δsize=0.000e+00 m (容差 1.0 mm / 0.5° / 1e-06 m)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456623716] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ----- [P2A] 样本静态有效性检查（不运动）-----
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456683060] [dual_arm_carry_task]:   [P2A][几何] passed (E_OK)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456697546] [dual_arm_carry_task]:     杆 yaw=10.0000° 倾角=0.0000° 中心 z=0.020654 | footprint x=[0.4456, 0.5544] y=[-0.2004, 0.2004]
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456715320] [dual_arm_carry_task]:     配置工作区 x=[0.300, 0.700] y=[-0.300, 0.300]，最小余量 99.565 mm。来源: config/a1_scene_sampling.yaml 采样范围按 15° 最大 footprint 外扩后加 80 mm 余量；MuJoCo 支撑面为无限 plane，非物理桌面边缘
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456730435] [dual_arm_carry_task]:     说明: MuJoCo 支撑面为无限 plane（dual_scene.xml 的 floor geom，无 pos），上界是配置的研究包络，不是物理桌面边缘
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456743098] [dual_arm_carry_task]:   [P2A][目标] 抓取偏移 0.150 m（沿杆长轴，杆半长 0.200 m），末端基准 yaw 45.0°
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456755788] [dual_arm_carry_task]: [CONTACT_PROBE_GEOMETRY] vertical grasp/pregrasp offset=-12.3 mm; pad band lowered to the rod lower half (slip budget)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456767153] [dual_arm_carry_task]:     预抓取 z=0.268 抓取 z=0.118（均为腕部 link8 原点高度，非指尖/TCP）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456778746] [dual_arm_carry_task]:     左(杆 +长轴端) 预抓取=(0.4740, 0.1477, 0.2677) 抓取=(0.4740, 0.1477, 0.1177)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456791441] [dual_arm_carry_task]:     右(杆 -长轴端) 预抓取=(0.5260, -0.1477, 0.2677) 抓取=(0.5260, -0.1477, 0.1177)
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456804716] [dual_arm_carry_task]:     姿态约定核对: 本构造器 q=(0.887010833, 0.461748613, 0.000000000, 0.000000000) 与 tf2 setRPY(π,0,55.0000°) 角度差 0.000e+00 rad
+[dual_arm_carry_task_node-1] [INFO] [1792242368.456823740] [dual_arm_carry_task]:   [P2A][IK] 末端 link: 左=mj_left_link8 右=mj_right_link8（目标位姿即该 link 的原点位姿）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.457251297] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461698552] [dual_arm_carry_task]:   [P2A][IK] 5/5 次尝试同时解出双臂（关节限位剔除 0，残差剔除 0）；已选下降变化最小者
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461735602] [dual_arm_carry_task]:     [pre-grasp] 关节限位余量 0.6358 rad | FK 残差 左=0.0000 mm/0.0000° 右=0.0000 mm/0.0000°
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461743644] [dual_arm_carry_task]:     [pre-grasp] 相对机器人起始位形的最大单关节差 2.0685 rad（仅记录，不作判据：起始位形不是抓取起点，且抓取姿态按设计相差 180° 腕部翻转）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461760192] [dual_arm_carry_task]:     [grasp] 关节限位余量 0.6769 rad | FK 残差 左=0.0000 mm/0.0000° 右=0.0000 mm/0.0000°
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461765685] [dual_arm_carry_task]:     [grasp] 相对机器人起始位形的最大单关节差 2.0435 rad（仅记录，不作判据：起始位形不是抓取起点，且抓取姿态按设计相差 180° 腕部翻转）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461774516] [dual_arm_carry_task]:     [预抓取→抓取] 左臂 最大单关节变化 0.6916 rad（上限 2.0000）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461803127] [dual_arm_carry_task]:     [预抓取→抓取] 右臂 最大单关节变化 0.5188 rad（上限 2.0000）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461815190] [dual_arm_carry_task]:     [grasp] 左臂关节解: mj_left_joint1=-0.156381 mj_left_joint2=0.485332 mj_left_joint3=-0.058596 mj_left_joint4=-2.394922 mj_left_joint5=0.105108 mj_left_joint6=2.878157 mj_left_joint7=-1.269661 
+[dual_arm_carry_task_node-1] [INFO] [1792242368.461829112] [dual_arm_carry_task]:     [grasp] 右臂关节解: mj_right_joint1=-0.052126 mj_right_joint2=0.582607 mj_right_joint3=0.223139 mj_right_joint4=-2.210649 mj_right_joint5=-0.335240 mj_right_joint6=2.762495 mj_right_joint7=-0.511779 
+[dual_arm_carry_task_node-1] [INFO] [1792242368.462378406] [dual_arm_carry_task]:   [P2A][碰撞] 场景来源 /get_planning_scene：世界物体 1 个，aluminum_rod 在场景中: 是
+[dual_arm_carry_task_node-1] [INFO] [1792242368.462716333] [dual_arm_carry_task]:   [P2A][碰撞] 验证场景世界物体: aluminum_rod
+[dual_arm_carry_task_node-1] [INFO] [1792242368.462738172] [dual_arm_carry_task]:   [P2A][支撑面] 已在**验证场景**中补齐 'a1_support_plane': BOX 6.0x6.0x2.000，顶面位于 z=0.000 向下覆盖 2.0 m (frame=base_link)，来源 dual_scene.xml 的 floor geom（无限 plane，此处用有限深板近似；超出 ±3.0 m 或深于 2.0 m 处不覆盖）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.462790772] [dual_arm_carry_task]:     ACM 条目核查: 共 25 个条目；会隐藏双臂互碰的允许项 39 个，会隐藏杆接触的允许项 0 个（已在验证副本中关闭，未改动全局 ACM/SRDF）；示例: mj_left_hand<->mj_right_link4 mj_left_hand<->mj_right_link5 mj_left_link0<->mj_right_link0 mj_left_link0<->mj_right_link1 mj_left_link0<->mj_right_link2 mj_left_link1<->mj_right_link0 mj_left_link1<->mj_right_link1 mj_left_link2<->mj_right_link0 mj_left_link2<->mj_right_link1 mj_left_link2<->mj_right_link2
+[dual_arm_carry_task_node-1] [INFO] [1792242368.462824863] [dual_arm_carry_task]:     [P2A][支撑面] 仅允许固定安装配对 base_link/link0/link1（两臂）与 'a1_support_plane' 接触（这些碰撞体跨越安装平面且不随臂位形变化）；手部与手指**不在**豁免内，其余连杆与地面的接触一律检查
+[dual_arm_carry_task_node-1] [INFO] [1792242368.463140465] [dual_arm_carry_task]:   [P2A][对照 model=urdf_reference] 原始 URDF 六体手掌近似，仅作对照，非本轮判据
+[dual_arm_carry_task_node-1] [INFO] [1792242368.463148661] [dual_arm_carry_task]:     [预抓取 z=0.268] 不允许任何杆接触: 杆接触=0 地面/支撑面=0 双臂互碰=0 自碰撞=0 其他世界物体=0
+[dual_arm_carry_task_node-1] [INFO] [1792242368.463154747] [dual_arm_carry_task]:     [抓取 z=0.118] 仅允许手指-杆接触（hand/其余连杆仍检查）: 杆接触=2 地面/支撑面=2 双臂互碰=0 自碰撞=0 其他世界物体=0 例: a1_support_plane<->mj_left_hand a1_support_plane<->mj_right_hand aluminum_rod<->mj_left_hand aluminum_rod<->mj_right_hand
+[dual_arm_carry_task_node-1] [INFO] [1792242368.463337064] [dual_arm_carry_task]:   [P2A][hand] 模型来源: /home/lidio/franka_ws_1/install/franka_description/share/franka_description/mujoco/franka/assets/hand.stl（600 顶点，二进制 STL，未施加额外缩放）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.463341985] [dual_arm_carry_task]:   [P2A][hand] hand_c 局部 AABB: x[-0.031636, 0.031616] y[-0.103990, 0.100426] z[-0.025925, 0.065962]
+[dual_arm_carry_task_node-1] [INFO] [1792242368.463348186] [dual_arm_carry_task]:   [P2A][hand] 替换为 BOX 中心=(-0.000010, -0.001782, 0.020019) 尺寸=(0.063252, 0.204416, 0.091887)（中心为 (min+max)/2，非 hand 原点；已断言包含全部顶点）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.464546739] [moveit_robot_model.robot_model]: Loading robot model 'dual_panda'...
+[dual_arm_carry_task_node-1] [INFO] [1792242368.465011143] [dual_arm_carry_task]:   [P2A][hand] 状态按同名关节映射后 FK 残差 0.000001 mm / 0.000000°（左臂抓取目标）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.465211554] [dual_arm_carry_task]:   [P2A][判据 model=mujoco_hand_aabb] 手掌替换为 hand_c AABB，其余连杆/手指/场景/ACM 语义不变
+[dual_arm_carry_task_node-1] [INFO] [1792242368.465218877] [dual_arm_carry_task]:     [预抓取 z=0.268] 杆接触=0 地面/支撑面=0 双臂互碰=0 自碰撞=0 其他世界物体=0
+[dual_arm_carry_task_node-1] [INFO] [1792242368.465228041] [dual_arm_carry_task]:     [抓取 z=0.118] 杆接触=0 地面/支撑面=0 双臂互碰=0 自碰撞=0 其他世界物体=0
+[dual_arm_carry_task_node-1] [INFO] [1792242368.465495613] [dual_arm_carry_task]:     [手掌负例-注入] 在与替换后手掌 AABB 同中心同姿态处注入障碍 'a1_hand_obstacle_injected'（验证注入，非实际机器人运动）: 杆接触=0 地面/支撑面=0 双臂互碰=0 自碰撞=0 其他世界物体=5 例: a1_hand_obstacle_injected<->mj_left_hand a1_hand_obstacle_injected<->mj_left_leftfinger a1_hand_obstacle_injected<->mj_left_link7 a1_hand_obstacle_injected<->mj_left_link8 a1_hand_obstacle_injected<->mj_left_rightfinger
+[dual_arm_carry_task_node-1] [INFO] [1792242368.465503057] [dual_arm_carry_task]:     ✓ [手掌负例-注入] 替换后的手掌仍然检出碰撞，替换几何确实参与检查
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466129724] [dual_arm_carry_task]:     [地面负例-注入] 目标 z=-0.050（低于支撑面 0.000，非采样位姿）: 杆接触=6 地面/支撑面=12 双臂互碰=0 自碰撞=0 其他世界物体=0 例: a1_support_plane<->mj_left_hand a1_support_plane<->mj_left_leftfinger a1_support_plane<->mj_left_link6 a1_support_plane<->mj_left_link7 a1_support_plane<->mj_left_link8 a1_support_plane<->mj_left_rightfinger a1_support_plane<->mj_right_hand a1_support_plane<->mj_right_leftfinger a1_support_plane<->mj_right_link6 a1_support_plane<->mj_right_link7
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466140953] [dual_arm_carry_task]:     ✓ [地面负例-注入] 穿地状态被正确拒绝（地面/支撑面接触 12 处）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466147864] [dual_arm_carry_task]:   [P2A] 静态检查汇总: geometry=passed ik=passed collision=passed path_validation=NOT_RUN
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466151650] [dual_arm_carry_task]:   [P2A] 注意: 静态通过仅表示该组合目标本身有效；p2_acceptance=null, path_validation=NOT_RUN，可搬运性由 P2b 判定
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466154899] [dual_arm_carry_task]: [P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466158667] [dual_arm_carry_task]: [P2A_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null static_passed=true
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466230781] [dual_arm_carry_task]:   ✓ [P2A] 静态检查通过（几何/IK/碰撞）
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466235771] [dual_arm_carry_task]: [P2B_RESULT] geometry=passed ik=passed collision=passed path_validation=NOT_RUN p2_acceptance=null
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466240120] [dual_arm_carry_task]:   [P2B] 未启用 p2b_check，跳过联合预抓取路径检查
+[dual_arm_carry_task_node-1] [INFO] [1792242368.466243008] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ----- [S2] 运输段闭链投影比较（仅规划，不运动）-----
+[dual_arm_carry_task_node-1] [INFO] [1792242368.470300849] [dual_arm_carry_task]:   [P3A-1] 控制器状态: [dual_panda_arm_controller=active] [joint_state_broadcaster=active] [force_torque_sensor_broadcaster_right=active] [force_torque_sensor_broadcaster_left=active]
+[dual_arm_carry_task_node-1] [INFO] [1792242368.480650207] [dual_arm_carry_task]: [CONTACT_PROBE_CONFIG] requested_hold_force_per_finger=10.0 N nominal_tendon_actuator_command=-18.0 N (0.90*2F; nominal per-branch generalized force=-9.0 N) runtime_tendon_force_cap=+/-10.0 N; actual actuator_force is in contact_probe_contacts.csv, actual pad normal force is in contact_probe.csv; mode=full-load-probe lift=0.400m hold=2.0s lift_slip_limit=20.0mm(user-authorized)/2deg; grasp_slip_tol=5.0mm; rod_rise_target=45mm; acceptance hold=2.0s; lift_velocity_scale=1.00 lift_acceleration_scale=0.60 weld=OFF; model/friction/mass unchanged
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.480985956] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS] joint=mj_left_joint4 value=0.000000 bounds=[-3.071800,-0.069800]
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481049331] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS] joint=mj_right_joint1 value=4824108893434686328199894158888756228177122030552428387921490190251435368913834062661656306071114593035491272283061387150147198825561600729455426449448628889708535228886290913268962801460959364492284523912449855602795833676791808.000000 bounds=[-2.897300,2.897300]
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481110536] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS] joint=mj_right_joint2 value=72792368533036181078667957145129738723452814200905981949457933792359838253611232013222066632807168954806299524433263994134410577805389055565129493237959683032797662542654592179585024939109936598614016.000000 bounds=[-1.762800,1.762800]
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481164025] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS] joint=mj_right_joint3 value=6967697845492344793763722725351015937317185252410826176781625930046825575623641526294022244637742115920516244389892845190810525295541838882937786832276792974733646304918457683341953137463576923783845984556692802242493931010866216631571094915018064396288.000000 bounds=[-2.897300,2.897300]
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481238196] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS] joint=mj_right_joint4 value=0.000000 bounds=[-3.071800,-0.069800]
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481260944] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS] joint=mj_right_joint5 value=5591219662014170494977031242022457526213066842652474693150336939849231715457062192068827589454758286800154024567377577974417049159582979413046756356678925117154831052481752375939663240513515278460070604761842277793802393056628753200529025424649405595648.000000 bounds=[-2.897300,2.897300]
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481315504] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS] joint=mj_right_joint7 value=2514114268719770128072498326791983769728425102761574655908044307304999110376673329471274142868697611339381719186874387207764912229859143210428214599481331434593655953006629107007488.000000 bounds=[-2.897300,2.897300]
+[dual_arm_carry_task_node-1] [INFO] [1792242368.481355491] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS] criterion_grasp_out_of_bounds=7 dual_bounds_ok=0 live_vars=18 grasp_state=1 grasp_joints=18
+[dual_arm_carry_task_node-1] [INFO] [1792242368.481380534] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_EXTRA] start_j1=0.000018 pregrasp_j1=0.000000 pregrasp_map_j1=0.527695 grasp_j1=0.000000 grasp_fk_left=(0.4740,0.1477,0.1177)
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481401758] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_left_joint1 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481422840] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_left_joint2 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481450847] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_left_joint3 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481473629] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_left_joint4 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481491376] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_left_joint5 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481508054] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_left_joint6 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481524898] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_left_joint7 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481555047] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_right_joint1 grasp_state=4824108893434686328199894158888756228177122030552428387921490190251435368913834062661656306071114593035491272283061387150147198825561600729455426449448628889708535228886290913268962801460959364492284523912449855602795833676791808.000000 grasp_map=4824108893434686328199894158888756228177122030552428387921490190251435368913834062661656306071114593035491272283061387150147198825561600729455426449448628889708535228886290913268962801460959364492284523912449855602795833676791808.000000 live_copy=4824108893434686328199894158888756228177122030552428387921490190251435368913834062661656306071114593035491272283061387150147198825561600729455426449448628889708535228886290913268962801460959364492284523912449855602795833676791808.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481669936] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_right_joint2 grasp_state=72792368533036181078667957145129738723452814200905981949457933792359838253611232013222066632807168954806299524433263994134410577805389055565129493237959683032797662542654592179585024939109936598614016.000000 grasp_map=72792368533036181078667957145129738723452814200905981949457933792359838253611232013222066632807168954806299524433263994134410577805389055565129493237959683032797662542654592179585024939109936598614016.000000 live_copy=72792368533036181078667957145129738723452814200905981949457933792359838253611232013222066632807168954806299524433263994134410577805389055565129493237959683032797662542654592179585024939109936598614016.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481771247] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_right_joint3 grasp_state=6967697845492344793763722725351015937317185252410826176781625930046825575623641526294022244637742115920516244389892845190810525295541838882937786832276792974733646304918457683341953137463576923783845984556692802242493931010866216631571094915018064396288.000000 grasp_map=6967697845492344793763722725351015937317185252410826176781625930046825575623641526294022244637742115920516244389892845190810525295541838882937786832276792974733646304918457683341953137463576923783845984556692802242493931010866216631571094915018064396288.000000 live_copy=6967697845492344793763722725351015937317185252410826176781625930046825575623641526294022244637742115920516244389892845190810525295541838882937786832276792974733646304918457683341953137463576923783845984556692802242493931010866216631571094915018064396288.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481903192] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_right_joint4 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.481926081] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_right_joint5 grasp_state=5591219662014170494977031242022457526213066842652474693150336939849231715457062192068827589454758286800154024567377577974417049159582979413046756356678925117154831052481752375939663240513515278460070604761842277793802393056628753200529025424649405595648.000000 grasp_map=5591219662014170494977031242022457526213066842652474693150336939849231715457062192068827589454758286800154024567377577974417049159582979413046756356678925117154831052481752375939663240513515278460070604761842277793802393056628753200529025424649405595648.000000 live_copy=5591219662014170494977031242022457526213066842652474693150336939849231715457062192068827589454758286800154024567377577974417049159582979413046756356678925117154831052481752375939663240513515278460070604761842277793802393056628753200529025424649405595648.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.482064732] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_right_joint6 grasp_state=0.000000 grasp_map=0.000000 live_copy=0.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.482088246] [dual_arm_carry_task]: [TRANSPORT_OPT_BOUNDS_SRC] mj_right_joint7 grasp_state=2514114268719770128072498326791983769728425102761574655908044307304999110376673329471274142868697611339381719186874387207764912229859143210428214599481331434593655953006629107007488.000000 grasp_map=2514114268719770128072498326791983769728425102761574655908044307304999110376673329471274142868697611339381719186874387207764912229859143210428214599481331434593655953006629107007488.000000 live_copy=2514114268719770128072498326791983769728425102761574655908044307304999110376673329471274142868697611339381719186874387207764912229859143210428214599481331434593655953006629107007488.000000 grasp_has_var=1 live_has_var=1
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.482174859] [dual_arm_carry_task]: [TRANSPORT_OPT_FAILURE] E_TRANSPORT_OPT_GRASP_OUT_OF_BOUNDS
+[dual_arm_carry_task_node-1] [INFO] [1792242368.482297702] [dual_arm_carry_task]: [TRANSPORT_OPT_RESULT] state=FAILED detail=E_TRANSPORT_OPT_GRASP_OUT_OF_BOUNDS
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.682408851] [dual_arm_carry_task]: 
+[dual_arm_carry_task_node-1] ========================================
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.682508491] [dual_arm_carry_task]:     ✗ 任务失败！
+[dual_arm_carry_task_node-1] [INFO] [1792242368.682559971] [dual_arm_carry_task]: 已发布任务失败状态(ERROR)。
+[dual_arm_carry_task_node-1] [ERROR] [1792242368.682578864] [dual_arm_carry_task]: ========================================
+[dual_arm_carry_task_node-1] 
+[dual_arm_carry_task_node-1] [INFO] [1792242368.682599590] [dual_arm_carry_task]: 任务执行完成，节点继续运行...
+[dual_arm_carry_task_node-1] [INFO] [1792242368.682616390] [dual_arm_carry_task]: 按 Ctrl+C 停止节点
+[dual_arm_carry_task_node-1] [INFO] [1792242369.122704692] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [dual_arm_carry_task_node-1]: process has finished cleanly [pid 397344]
