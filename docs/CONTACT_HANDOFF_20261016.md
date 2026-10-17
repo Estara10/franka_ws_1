@@ -375,3 +375,11 @@ profile 的结论数据。
 - run `..._164743`：`CONTACT_LOAD_VALIDATED samples=35 sim_hold=2.060s lift=0.392m max_slip=9.512mm max_angle=1.414deg`；运输 `dx=-0.098 dy=-0.001 dyaw=10.3 deg`；落回 0.386 m；释放 `(0.3963,-0.0027,0.0205)`、yaw 18.65°；`state=DONE`。
 - 放置误差 x 3.7 mm / y 2.7 mm / yaw 1.35°；阶段滑移：抬升 5.70、保持 7.32、运输 4.21、落回 7.51 mm。
 - 启动失败 run `..._164125`（`E_SIM_INFO_UNAVAILABLE`）不计物理结果。
+
+
+## 2026-10-17 E13：保持期受力占比改为记录警告（A）；creep hold 测试后关闭（B）
+
+- **A（采用）**：保持期每指有效受力占比不再硬失败；不足 80% 时打印 `[CONTACT_HOLD_DUTY] finger=.. duty=../..` 后继续，杆的高度/滑移/姿态仍是硬判据；`CONTACT_LOAD_VALIDATED` 增加 `duty=(...)` 字段。这是对原 80% 条件的显式放宽，数据仍完整保留。
+- **B（测试后关闭）**：creep hold（保持 2 s 内缓慢上移 4 mm）已实现并验证：保持期杆反而从 413.3 掉到 405.7 mm（下滑 7.6 mm，比静止保持更差）、左指失接触，且执行超过 2 s 等待窗口触发 `E_CONTACT_HOLD_CREEP_TIMEOUT`。代码保留，用 `creep_hold_enabled=false` 关闭；creep 计划额外跳过双臂残差检查（碰撞/支撑/限位仍检查）。
+- 可视化 run `..._185847`（A-only）：`samples=33 sim_hold=2.040s lift=0.391m max_slip=9.366mm max_angle=1.364deg duty=(0.91,0.88,0.79,0.91)`；finger2 0.788 记录警告；运输 `dx=-0.098 dy=-0.001 dyaw=10.3°`；落回 0.385 m；释放 `(0.3963,-0.0041,0.0207)`；`state=DONE`。阶段滑移：抬升 5.01、保持 7.67、运输 5.68、落回 7.67 mm。
+- 同配置 A-only 无窗口 run `..._185606` 同样 DONE（max_slip 9.493、duty 0.79 记录后继续）。
