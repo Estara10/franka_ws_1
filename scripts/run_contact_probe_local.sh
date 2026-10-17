@@ -7,11 +7,16 @@ WS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${WS_DIR}"
 
 OBSERVE_ON_ERROR=0
+# Display mode: headless for experiments (default), --use-rviz to watch the
+# simulation. Pass exactly one; --headless is the safe default.
+DISPLAY_FLAG="--headless"
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --headless) DISPLAY_FLAG="--headless"; shift ;;
+    --use-rviz) DISPLAY_FLAG="--use-rviz"; shift ;;
     --observe-on-error) OBSERVE_ON_ERROR=1; shift ;;
     -h|--help)
-      echo "usage: run_contact_probe_local.sh [--observe-on-error]"
+      echo "usage: run_contact_probe_local.sh [--headless|--use-rviz] [--observe-on-error]"
       exit 0
       ;;
     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
@@ -102,7 +107,7 @@ RUN_ARGS=(
   --prepare-mode \
   --grasp-model contact_probe \
   --x 0.50 --y 0.0 --yaw-deg 10.0 \
-  --headless \
+  "${DISPLAY_FLAG}" \
   --ready-timeout 120 \
   --task-timeout 300 \
   --hold-sec 360 \
