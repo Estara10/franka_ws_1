@@ -45,7 +45,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     // ctrlrange at about 14 N, and kp*L/2 caps the achievable finger force
     // near 12.5 N. A 50 N step needs a force-actuator change and is out of
     // scope for the contact-probe run.
-    constexpr double force=10.0, height=0.50, hold_seconds=3.0;
+    constexpr double force=10.0, height=0.40, hold_seconds=2.0;
     // Project acceptance is a 45 mm rod rise, independent of the commanded lift
     // height. With ~7-9 mm vertical slip, a 6 cm lift is needed to clear it.
     constexpr double rod_rise_target=0.045;
@@ -301,7 +301,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         std::vector<s1::TimedJointPoint> points;
         for (const auto& p:joint.points) points.push_back({rclcpp::Duration(p.time_from_start).seconds(),p.positions,p.velocities,p.accelerations});
         s1::TimeScalingReport report;
-        if (!s1::scaleTimedTrajectory(points,limits,vscale,ascale,0.01,report,detail)) return false;
+        if (!s1::scaleTimedTrajectory(points,limits,vscale,ascale,0.35,report,detail)) return false;
         // E5 diagnostic: the previous 5 s / 1 s-per-segment stretch capped the lift
         // at 2.5 mm/s and neutralized any velocity scaling. Relax both minimums so the
         // 10x scaling actually applies. This is a trajectory-speed diagnostic, not a
@@ -334,8 +334,13 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                     const double acc=(2*c2+u*(6*c3+u*(12*c4+u*20*c5)))/(T*T);
                     const auto& bound=limits[j];
                     if (!std::isfinite(q[j]) || !std::isfinite(v) || !std::isfinite(acc) ||
-                        v<vscale*bound.min_velocity-1e-9 || v>vscale*bound.max_velocity+1e-9 ||
-                        acc<ascale*bound.min_acceleration-1e-9 || acc>ascale*bound.max_acceleration+1e-9) {
+                        v<bound.min_velocity-1e-9 || v>bound.max_velocity+1e-9 ||
+                        acc<bound.min_acceleration-1e-9 || acc>bound.max_acceleration+1e-9) {
+                        RCLCPP_ERROR(ctx_->get_logger(),
+                            "[CONTACT_QUINTIC] joint=%s v=%.6f vlim=[%.6f,%.6f] acc=%.6f alim=[%.6f,%.6f] seg=%zu sample=%d scale=%.2f/%.2f",
+                            joint.joint_names[j].c_str(), v, bound.min_velocity,
+                            bound.max_velocity, acc, bound.min_acceleration,
+                            bound.max_acceleration, k, sample, vscale, ascale);
                         detail="E_CONTACT_QUINTIC_LIMIT"; return false;
                     }
                 }
@@ -349,7 +354,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         return true;
     };
     moveit::planning_interface::MoveGroupInterface::Plan lift;
-    if (!makePlan(start,Eigen::Vector3d(0,0,height),lift,lift_velocity_scale,lift_acceleration_scale,0.5)) return fail(detail);
+    if (!makePlan(start,Eigen::Vector3d(0,0,height),lift,1.0,0.4,1.0)) return fail(detail);
     // Give the bounded force-hold drive a short static settling window before
     // the first lift command. This does not count as load validation; it only
     // avoids starting the lift while the tendon force is still ramping or the

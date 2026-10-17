@@ -13,11 +13,14 @@
 固定场景 `(0.50, 0, +10°)` 已完整通过一次：
 
 ```text
-预抓取 → 下降 → 闭合（10 N/指，NoSlip=20）→ 抬升 50 cm → 保持 3 s
+预抓取 → 下降 → 闭合（10 N/指，NoSlip=20）→ 抬升 40 cm → 保持 2 s
 → 前进 10 cm + 旋转 +10°（目标 0.40, 0.00, +20°）→ 落回支撑面 → 开爪释放
-[CONTACT_LOAD_VALIDATED] samples=50 sim_hold=3.06s lift=0.491m max_slip=10.8mm
-[CONTACT_PROBE_RESULT] state=DONE（run 161453；最终杆 (0.3983,-0.0044,0.0205), yaw 18.71°）
+[CONTACT_LOAD_VALIDATED] samples=35 sim_hold=2.06s lift=0.392m max_slip=9.51mm
+[CONTACT_PROBE_RESULT] state=DONE（run 164743；最终杆 (0.3963,-0.0027,0.0205), yaw 18.65°）
 ```
+
+抬升段使用 1.0/0.4、最短 1 s；五阶插值检查按关节硬限值校验（缩放因子只作为规划速度
+偏好）。50 cm/3 s 版本保留为 run 161453。
 
 - 运行：`./scripts/run_contact_probe_local.sh --headless`（实验，默认）或 `--use-rviz`（可视化）；
   无窗口 `..._155319`、可视化 `..._155952`、带旋转 `..._161453`；全程 weld/杆固定约束为 0；
