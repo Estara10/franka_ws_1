@@ -41,8 +41,10 @@ class ControllerRosInterface : public virtual PandaControllerBase<Parameters, Po
     startROSComImpl();
   }
   void stopROSCom() {
-    // des_pose_sub_.shutdown();
-    // params_server_.shutdown();
+    // Lifecycle stop must release these handles.  Leaving them alive caused
+    // duplicate callbacks after repeated controller switching/activation.
+    des_pose_sub_.reset();
+    params_server_.reset();
     stopROSComImpl();
   }
  private:
@@ -57,6 +59,7 @@ class ControllerRosInterface : public virtual PandaControllerBase<Parameters, Po
     Pose p;
     if (desiredPoseCallbackImpl(p, this->getCurrentPose(), msg)) {
       this->setDesiredPoseBuffered(p);
+      this->markReferenceReceived();
     } else {
       this->setError(true);
     }

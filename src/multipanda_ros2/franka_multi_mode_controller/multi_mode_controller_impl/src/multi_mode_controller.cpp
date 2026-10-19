@@ -65,8 +65,10 @@ controller_interface::return_type MultiModeController::update(
     const rclcpp::Duration& /*period*/) {
   updateFrankaState();
   std::shared_lock<std::shared_mutex> lock(control_mtx_);
+  bool controller_error = false;
   for (auto& control : active_control_set_){
     control.ptrs.switcher->computeTau(control.ptrs.tau, control.ptrs.control);
+    controller_error = controller_error || control.ptrs.control->hasError();
   }
 
   int k = 0;
@@ -77,6 +79,20 @@ controller_interface::return_type MultiModeController::update(
     }
   }
 
+  if (controller_error) {
+    if (!controller_fault_reported_) {
+      controller_fault_reported_ = true;
+      RCLCPP_ERROR(
+          get_node()->get_logger(),
+          "MultiModeController: active control reported a latched fault; "
+          "last valid command will be retained");
+      return controller_interface::return_type::ERROR;
+    }
+    // The fault remains latched in the inner controller and its torque
+    // command remains under closed-loop control.  Do not make the manager
+    // print the same ERROR once per real-time update cycle.
+    return controller_interface::return_type::OK;
+  }
   return controller_interface::return_type::OK;
 }
 
@@ -397,6 +413,7 @@ bool MultiModeController::setControllersCallback(const SetControllers::Request::
       control.ptrs.switcher->stop(control.ptrs.control);
     }
     active_control_set_ = std::move(*new_control_set.release());
+    controller_fault_reported_ = false;
     for (const auto& control : active_control_set_) {
       control.ptrs.switcher->start(control.ptrs.control);
     }
@@ -420,6 +437,7 @@ bool MultiModeController::getControllersCallback(__attribute_maybe_unused__ GetC
 CallbackReturn MultiModeController::on_activate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
   
+  controller_fault_reported_ = false;
   for(auto& state_interface : state_interfaces_){
     std::cout << state_interface.get_name() << std::endl;
   }
@@ -436,6 +454,15 @@ CallbackReturn MultiModeController::on_activate(
 
 controller_interface::CallbackReturn MultiModeController::on_deactivate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
+  // Stop the currently selected inner controllers before releasing their
+  // model interfaces.  Otherwise a later activation can inherit stale
+  // watchdog/torque state and the ROS subscriptions remain active.
+  {
+    std::unique_lock<std::shared_mutex> lock(control_mtx_);
+    for (const auto& control : active_control_set_) {
+      control.ptrs.switcher->stop(control.ptrs.control);
+    }
+  }
   for(auto& rd : robot_data_){
     rd.deactivate_model();
   }

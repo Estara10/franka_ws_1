@@ -48,25 +48,22 @@ echo "run id : ${RUN_ID}"
 echo "data   : ${RUN_DIR}"
 echo "This starts one simulation instance and sends no gripper or weld command."
 
-# headless does NOT disable RViz (that is a separate flag), and RViz does not
-# always quit on SIGINT, which leaves the whole launch tree hanging.
+# Use a process-group shutdown at the end.  This avoids the MuJoCo launch
+# executor teardown race seen when SIGINT reaches the embedded node after the
+# bridge has already completed.  The run's control result is recorded before
+# this cleanup starts.
 setsid ros2 launch franka_moveit_config sim_dual_moveit.launch.py \
   headless:="${HEADLESS}" use_rviz:="${USE_RVIZ}" \
   > "${RUN_DIR}/sim_dual_moveit.log" 2>&1 &
 SIM_PID=$!
 cleanup() {
-  kill -0 "${SIM_PID}" 2>/dev/null || return 0
-  kill -INT -- "-${SIM_PID}" 2>/dev/null || true
-  for _ in $(seq 1 20); do
-    kill -0 "${SIM_PID}" 2>/dev/null || return 0
-    sleep 0.5
-  done
-  echo "[run] launch did not exit on SIGINT; escalating" >&2
+  kill -0 -- "-${SIM_PID}" 2>/dev/null || return 0
   kill -TERM -- "-${SIM_PID}" 2>/dev/null || true
-  for _ in $(seq 1 10); do
-    kill -0 "${SIM_PID}" 2>/dev/null || return 0
+  for _ in $(seq 1 20); do
+    kill -0 -- "-${SIM_PID}" 2>/dev/null || return 0
     sleep 0.5
   done
+  echo "[run] launch did not exit after process-group SIGTERM; escalating" >&2
   kill -KILL -- "-${SIM_PID}" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -105,6 +102,7 @@ ros2 run dual_arm_carry_task dual_impedance_no_load_bridge --ros-args \
   -p move_seconds:=1.0 \
   -p final_hold_seconds:=3.0 \
   -p rate_hz:=100.0 \
+  -p stop_reference_after_seconds:=${STOP_REFERENCE_AFTER_SECONDS:--1.0} \
   > "${RUN_DIR}/bridge.log" 2>&1
 BRIDGE_RC=$?
 echo "[run] bridge exit=${BRIDGE_RC}"

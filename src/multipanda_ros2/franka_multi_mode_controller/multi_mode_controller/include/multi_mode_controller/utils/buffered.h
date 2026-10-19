@@ -15,6 +15,14 @@ class Buffered {
     std::lock_guard<std::recursive_mutex> lock(buf_mutex_);
     return buf_;
   }
+  // Return the currently active value under the same lock used by update().
+  // The old conversion operator returned a reference after releasing the
+  // lock, which allowed a lifecycle thread to race with the control thread
+  // while an active value was being replaced.
+  T getContent() {
+    std::lock_guard<std::recursive_mutex> lock(buf_mutex_);
+    return content_;
+  }
   void setBuffer(const T& t) {
     std::lock_guard<std::recursive_mutex> lock(buf_mutex_);
     needs_update_ = true;

@@ -124,6 +124,9 @@ def launch_setup(context, *args, **kwargs):
             'grasp_contact_close': LaunchConfiguration('grasp_contact_close'),
             'grasp_model': LaunchConfiguration('grasp_model'),
             'contact_hold_diagnostic_only': LaunchConfiguration('contact_hold_diagnostic_only'),
+            'contact_hover_only': LaunchConfiguration('contact_hover_only'),
+            'contact_hover_height_m': LaunchConfiguration('contact_hover_height_m'),
+            'contact_hover_hold_seconds': LaunchConfiguration('contact_hover_hold_seconds'),
             'contact_plan_compare': LaunchConfiguration('contact_plan_compare'),
             'contact_transport_plan_only':
                 LaunchConfiguration('contact_transport_plan_only'),
@@ -466,6 +469,15 @@ def generate_launch_description():
     contact_hold_diagnostic_only_arg = DeclareLaunchArgument(
         'contact_hold_diagnostic_only', default_value='false',
         description='仅用于一次接触保持机制诊断：预抓取/下降/接触闭合后固定机械臂观测1s并释放，绝不抬升')
+    contact_hover_only_arg = DeclareLaunchArgument(
+        'contact_hover_only', default_value='false',
+        description='无weld悬空保持实验：抓取后抬升、保持、下降回支撑面并释放，不执行运输；需要 grasp_model=contact_probe')
+    contact_hover_height_arg = DeclareLaunchArgument(
+        'contact_hover_height_m', default_value='0.05',
+        description='contact_hover_only 悬空抬升高度（米）')
+    contact_hover_hold_seconds_arg = DeclareLaunchArgument(
+        'contact_hover_hold_seconds', default_value='3.0',
+        description='contact_hover_only 悬空保持时间（秒）')
     contact_plan_compare_arg = DeclareLaunchArgument(
         'contact_plan_compare', default_value='false',
         description='P4/S2 phase 1: 抬升/保持/重建立之后不执行运输，改为对照当前物体空间路径与 '
@@ -778,6 +790,9 @@ def generate_launch_description():
         grasp_contact_close_arg,
         grasp_model_arg,
         contact_hold_diagnostic_only_arg,
+        contact_hover_only_arg,
+        contact_hover_height_arg,
+        contact_hover_hold_seconds_arg,
         contact_plan_compare_arg,
         contact_transport_plan_only_arg,
         descent_steps_arg,

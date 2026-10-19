@@ -299,6 +299,7 @@ bool FrankaMjHardwareSystem::initSim(
             std::copy_n(m_->actuator_forcerange + 2 * gripper_act, 2, actuator_base.forcerange.begin());
             gripper_actuator_config_base_[arm.robot_name_] = actuator_base;
             gripper_direct_force_active_[arm.robot_name_] = false;
+    gripper_force_hold_bias_m_[arm.robot_name_] = 0.0;
             gripper_finger_damping_base_[arm.robot_name_] = {
                 m_->dof_damping[arm.robot_->gripper_joint_qvel_indices_[0]],
                 m_->dof_damping[arm.robot_->gripper_joint_qvel_indices_[1]]};
@@ -943,7 +944,7 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
 }
 
 hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time& /*time*/,
-                                                               const rclcpp::Duration& /*period*/) {
+                                                               const rclcpp::Duration& period) {
 //   std::lock_guard<std::mutex> guard(mj_mutex_);
   // ---------------- ADAPTIVE ADMITTANCE CALCULATION ----------------
   static int loop_cnt = 0;
@@ -1097,6 +1098,14 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
       const auto actuator_base_it = gripper_actuator_config_base_.find(arm.robot_name_);
       const bool direct_force_requested = fb.hold_force_per_finger_n > 0.0 && fb.force_hold_supported;
       const bool direct_force_active = gripper_direct_force_active_[arm.robot_name_];
+      static const bool adaptive_probe_hold = []() {
+        const char* raw = std::getenv("CONTACT_PROBE_ADAPTIVE_FORCE_HOLD");
+        if (raw == nullptr) return false;
+        std::string value(raw);
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value == "1" || value == "true" || value == "on" || value == "yes";
+      }();
       bool suppress_position_command = direct_force_requested || fb.stop_at_current_position;
       bool actuator_force_fault = false;
       if (actuator_base_it != gripper_actuator_config_base_.end()) {
@@ -1114,6 +1123,7 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
           std::copy(base.ctrlrange.begin(), base.ctrlrange.end(), mutable_model->actuator_ctrlrange + 2 * act);
           std::copy(base.forcerange.begin(), base.forcerange.end(), mutable_model->actuator_forcerange + 2 * act);
           gripper_direct_force_active_[arm.robot_name_] = false;
+          gripper_force_hold_bias_m_[arm.robot_name_] = 0.0;
           franka_gripper::publishDirectForceModeActive(
               gripper_states_ptrs_[arm.robot_name_], false);
         };
@@ -1133,6 +1143,7 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
               mutable_model->actuator_forcerange[2 * act] = lower;
               mutable_model->actuator_forcerange[2 * act + 1] = upper;
               gripper_direct_force_active_[arm.robot_name_] = true;
+              gripper_force_hold_bias_m_[arm.robot_name_] = 0.0;
               franka_gripper::publishDirectForceModeActive(
                   gripper_states_ptrs_[arm.robot_name_], true);
               const int tendon = m_->actuator_trnid[2 * act];
@@ -1143,10 +1154,12 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
               const double coefficient_right = tendon_first_wrap >= 0
                   ? m_->wrap_prm[tendon_first_wrap + 1] : std::numeric_limits<double>::quiet_NaN();
               RCLCPP_INFO(getLogger(),
-                  "[contact_probe_drive] arm=%s mode=EXPERIMENTAL_fixed_position_hold ctrl_units=m "
+                  "[contact_probe_drive] arm=%s mode=%s ctrl_units=m "
                   "request_per_finger=%.3f limit=(%.3f,%.3f) kp=%.3f gear0=%.3f "
                   "tendon_coefficients=(%.3f,%.3f); reference_length=%.6f",
-                  arm.robot_name_.c_str(), fb.closing_force_limit_per_finger_n, lower, upper,
+                  arm.robot_name_.c_str(), adaptive_probe_hold ?
+                    "EXPERIMENTAL_adaptive_normal_force_hold" : "EXPERIMENTAL_fixed_position_hold",
+                  fb.closing_force_limit_per_finger_n, lower, upper,
                   base.gainprm[0], base.gear[0], coefficient_left, coefficient_right,
                   fb.hold_reference_tendon_length);
             } else {
@@ -1163,11 +1176,35 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
         }
         const bool hold_is_active = gripper_direct_force_active_[arm.robot_name_];
         if (hold_is_active && direct_force_requested && direct_force_range_valid) {
-          const double position_target = franka_gripper::forceHoldPositionTarget(
+          double position_target = franka_gripper::forceHoldPositionTarget(
               fb.hold_reference_tendon_length, fb.hold_force_per_finger_n,
               base.gainprm[0], franka_gripper::kContactHoldForceCommandFraction,
               base.ctrlrange[0], base.ctrlrange[1]);
           if (std::isfinite(position_target)) {
+            if (adaptive_probe_hold) {
+              const double measured_normal =
+                  0.5 * (std::max(0.0, fb.normal_left_n) +
+                         std::max(0.0, fb.normal_right_n));
+              const double force_error = fb.hold_force_per_finger_n - measured_normal;
+              const double dt = period.seconds() > 0.0 && period.seconds() < 0.1
+                  ? period.seconds() : 0.001;
+              // Position actuator stiffness is kp in tendon metres. A signed
+              // correction proportional to the measured force deficit closes
+              // the fingers; the small bound prevents this diagnostic mode
+              // from becoming an unbounded force/position controller.
+              constexpr double kAdaptiveGain = 0.90;
+              constexpr double kAdaptiveBiasLimitM = 0.004;
+              double& bias = gripper_force_hold_bias_m_[arm.robot_name_];
+              const double kp = std::max(1.0, base.gainprm[0]);
+              const double correction = -kAdaptiveGain * force_error / kp;
+              // First-order smoothing avoids reacting to a single contact
+              // impulse; the correction remains bounded and deterministic.
+              const double alpha = std::clamp(8.0 * dt, 0.0, 1.0);
+              bias = std::clamp(bias + alpha * (correction - bias),
+                                -kAdaptiveBiasLimitM, kAdaptiveBiasLimitM);
+              position_target = std::clamp(position_target + bias,
+                                            base.ctrlrange[0], base.ctrlrange[1]);
+            }
             d_->ctrl[act] = position_target;
           } else {
             const double nominal_actuator_command_n =
@@ -1191,6 +1228,7 @@ hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time
           // Restore every actuator field touched by the temporary mode before
           // interpreting the next shared command as a position in metres.
           restore_actuator();
+          gripper_force_hold_bias_m_[arm.robot_name_] = 0.0;
           RCLCPP_INFO(getLogger(),
               "[contact_probe_drive] arm=%s mode=position restored gain=%g bias1=%g "
               "ctrlrange=(%g,%g) ctrllimited=%d forcerange=(%g,%g) forcelimited=%d",

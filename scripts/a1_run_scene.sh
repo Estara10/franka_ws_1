@@ -67,6 +67,9 @@ GRASP_DESCENT=0
 GRASP_CONTACT_CLOSE=0
 GRASP_MODEL="none"
 CONTACT_HOLD_DIAGNOSTIC_ONLY="${CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY:-0}"
+CONTACT_HOVER_ONLY=0
+CONTACT_HOVER_HEIGHT_M="${CONTACT_PROBE_HOVER_HEIGHT_M:-0.05}"
+CONTACT_HOVER_HOLD_SECONDS="${CONTACT_PROBE_HOVER_HOLD_SECONDS:-3.0}"
 DESCENT_NEGATIVE_FINAL=""
 DESCENT_NEGATIVE_TRUTH=""
 # A1 P3a-2a: gripper interface check -- one empty-load open/close/open cycle.
@@ -126,6 +129,9 @@ usage: a1_run_scene.sh [options]
                         require fresh bilateral finger-to-rod contact; no weld/attach/lift/carry.
   --grasp-model contact_probe
                         Contact-only 5cm lift, 2s hold, lower and release; no weld, no full carry.
+  --contact-hover-only  Contact-only suspended hold: lift, hold, lower and release; no transport.
+  --contact-hover-height M  suspended hold height (default 0.05 m)
+  --contact-hover-hold-sec S suspended hold duration (default 3 s)
   --grasp-model ideal_weld
                         S1: explicit ideal rigid grasp, after A1 verified descent complete
                         lift/transport/rotate/place/release/retreat; friction grip is not validated.
@@ -170,6 +176,9 @@ while [[ $# -gt 0 ]]; do
     --grasp-descent)    GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1; shift ;;
     --grasp-contact-close) GRASP_CONTACT_CLOSE=1; GRASP_DESCENT=1; PREGRASP_EXECUTE=1; P2B_CHECK=1; P2A_CHECK=1; shift ;;
     --grasp-model) GRASP_MODEL="$2"; shift 2 ;;
+    --contact-hover-only) CONTACT_HOVER_ONLY=1; shift ;;
+    --contact-hover-height) CONTACT_HOVER_HEIGHT_M="$2"; shift 2 ;;
+    --contact-hover-hold-sec) CONTACT_HOVER_HOLD_SECONDS="$2"; shift 2 ;;
   --contact-hold-diagnostic-only) CONTACT_HOLD_DIAGNOSTIC_ONLY=1; shift ;;
     --target-x) TASK_TARGET_X="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
     --target-y) TASK_TARGET_Y="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
@@ -197,6 +206,10 @@ if [[ "${GRASP_MODEL}" != "none" && "${GRASP_MODEL}" != "ideal_weld" && "${GRASP
 fi
 if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 && "${GRASP_MODEL}" != "contact_probe" ]]; then
   echo "error: --contact-hold-diagnostic-only requires --grasp-model contact_probe" >&2
+  exit 2
+fi
+if [[ "${CONTACT_HOVER_ONLY}" -eq 1 && "${GRASP_MODEL}" != "contact_probe" ]]; then
+  echo "error: --contact-hover-only requires --grasp-model contact_probe" >&2
   exit 2
 fi
 if [[ "${GRASP_MODEL}" == "ideal_weld" || "${GRASP_MODEL}" == "contact_probe" ]]; then
@@ -341,6 +354,7 @@ record_prepare_status() {
     printf '  "p2_acceptance": %s,\n' "$(p2_acceptance_true && echo true || echo false)"
     printf '  "grasp_model": "%s",\n' "${GRASP_MODEL}"
     printf '  "contact_hold_diagnostic_only": %s,\n' "$([[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]] && echo true || echo false)"
+    printf '  "contact_hover_only": %s,\n' "$([[ "${CONTACT_HOVER_ONLY}" -eq 1 ]] && echo true || echo false)"
     printf '  "contact_probe_result_line": "%s",\n' "$(grep -m1 '\[CONTACT_PROBE_RESULT\]' "${RUN_DIR}/task_launch.log" 2>/dev/null | sed 's/.*\[CONTACT_PROBE_RESULT\]/[CONTACT_PROBE_RESULT]/' | tr -d '"\\')"
     printf '  "grasp_descent_enabled": %s,\n' "$([[ "${GRASP_DESCENT}" -eq 1 ]] && echo true || echo false)"
     printf '  "grasp_contact_close_enabled": %s,\n' "$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)"
@@ -411,18 +425,22 @@ stop_group() {
   else
     echo "[cleanup] ${label} shares this script's process group; signalling the PID only"
   fi
-  kill -0 "${target}" 2>/dev/null || return 0
-  echo "[cleanup] SIGINT to ${label} (${target})"
-  kill -INT "${target}" 2>/dev/null
-  for _ in $(seq 1 40); do kill -0 "${target}" 2>/dev/null || break; sleep 0.25; done
-  if kill -0 "${target}" 2>/dev/null; then
+  kill -0 -- "${target}" 2>/dev/null || return 0
+  # The no-load tests on this workstation verified TERM-first shutdown of the
+  # embedded MuJoCo/controller-manager stack; INT-first hit executor teardown.
+  local first_signal=INT
+  [[ "${label}" == "sim" ]] && first_signal=TERM
+  echo "[cleanup] SIG${first_signal} to ${label} (${target})"
+  kill -"${first_signal}" -- "${target}" 2>/dev/null
+  for _ in $(seq 1 40); do kill -0 -- "${target}" 2>/dev/null || break; sleep 0.25; done
+  if kill -0 -- "${target}" 2>/dev/null; then
     echo "[cleanup] SIGTERM to ${label}"
-    kill -TERM "${target}" 2>/dev/null
-    for _ in $(seq 1 20); do kill -0 "${target}" 2>/dev/null || break; sleep 0.25; done
+    kill -TERM -- "${target}" 2>/dev/null
+    for _ in $(seq 1 20); do kill -0 -- "${target}" 2>/dev/null || break; sleep 0.25; done
   fi
-  if kill -0 "${target}" 2>/dev/null; then
+  if kill -0 -- "${target}" 2>/dev/null; then
     echo "[cleanup] SIGKILL to ${label}"
-    kill -KILL "${target}" 2>/dev/null
+    kill -KILL -- "${target}" 2>/dev/null
   fi
   wait "${pid}" 2>/dev/null
 }
@@ -559,6 +577,7 @@ SIM_LOG="${RUN_DIR}/sim_dual_moveit.log"
 # Keep ideal_weld and all other modes unchanged; allow an explicit opt-out for
 # controlled A/B experiments with CONTACT_PROBE_RIGID=false.
 CONTACT_PROBE_RIGID="${CONTACT_PROBE_RIGID:-true}"
+CONTACT_PROBE_ADAPTIVE_FORCE_HOLD="${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD:-false}"
 TASK_CONTROL_MODE="compliant"
 if [[ "${GRASP_MODEL}" == "contact_probe" && "${CONTACT_PROBE_RIGID}" == "true" ]]; then
   export MJ_INTERNAL_COMPLIANCE_ENABLED=false
@@ -570,6 +589,8 @@ if [[ "${GRASP_MODEL}" == "contact_probe" ]]; then
   export CONTACT_PROBE_CONTACT_TRACE_CSV="${RUN_DIR}/contact_probe_contacts.csv"
   echo "[contact_probe] single-primary-pad contact profile enabled"
   echo "[contact_probe] per-contact geom/force/actuator trace: ${CONTACT_PROBE_CONTACT_TRACE_CSV}"
+  export CONTACT_PROBE_ADAPTIVE_FORCE_HOLD
+  echo "[contact_probe] adaptive normal-force hold: ${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD}"
 else
   # These are process-wide opt-in hooks used by the hardware plugin. Do not
   # let values inherited from the caller's shell affect ideal_weld/other runs.
@@ -735,6 +756,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     P2A_ARGS+=(grasp_contact_close:="$([[ "${GRASP_CONTACT_CLOSE}" -eq 1 ]] && echo true || echo false)")
     P2A_ARGS+=(grasp_model:="${GRASP_MODEL}")
     P2A_ARGS+=(contact_hold_diagnostic_only:="$([[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]] && echo true || echo false)")
+    P2A_ARGS+=(contact_hover_only:="$([[ "${CONTACT_HOVER_ONLY}" -eq 1 ]] && echo true || echo false)" \
+               contact_hover_height_m:="${CONTACT_HOVER_HEIGHT_M}" \
+               contact_hover_hold_seconds:="${CONTACT_HOVER_HOLD_SECONDS}")
     # P4/S2 phase 1: planner comparison. Gated by an explicit environment
     # variable so the ordinary contact-probe path never changes.
     if [[ "${CONTACT_PLAN_COMPARE:-0}" -eq 1 ]]; then

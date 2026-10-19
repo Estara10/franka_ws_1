@@ -59,10 +59,16 @@ ros2 launch dual_arm_carry_task dual_arm_carry_task.launch.py
 | `approach_height` | `0.28` | 接近高度，m |
 | `grasp_height` | `0.13` | 抓取高度，m |
 | `lift_height` | `0.40` | 抬升高度，m |
+| `contact_hover_only` | `false` | 无 weld 短时悬空保持：抬升、保持、下降、释放，不运输 |
+| `contact_hover_height_m` | `0.05` | 悬空保持抬升高度，m |
+| `contact_hover_hold_seconds` | `3.0` | 悬空保持时间，s |
 | `use_vision` | `false` | 实验性模式 B 开关 |
 | `enable_latency_monitor` | `true` | 通信延迟监控 |
 | `enable_task_metrics_monitor` | `true` | 任务指标监控 |
 | `enable_adaptive_compliance_supervisor` | `false` | 外部阻抗参数监督器 |
+
+悬空实验的判据、力数据口径与复现命令见
+[`docs/CONTACT_HOVER_TEST.md`](../../../docs/CONTACT_HOVER_TEST.md)。
 
 节点源码本身的 `control_mode` fallback 为 `compliant_chomp`，但正常通过 launch 启动时会收到
 launch 的 `compliant` 默认值；一键脚本会显式传入交互选择。`enable_rotate` 在两处均默认为

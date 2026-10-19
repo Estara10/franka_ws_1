@@ -22,6 +22,10 @@ class DualCartesianImpedanceController :
 public:
   virtual ~DualCartesianImpedanceController() = default;
 
+protected:
+  bool referenceWatchdogEnabled() const override { return true; }
+  double referenceTimeoutSec() const override { return 0.5; }
+
 private:
   bool desiredPoseCallbackImpl(Pose& p_d,
                                const Pose& p,

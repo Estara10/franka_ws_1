@@ -143,6 +143,7 @@
   <end_effector group="mj_left_hand" name="hand" parent_group="mj_left_arm" parent_link="mj_left_link8"/>
   <disable_collisions link1="mj_left_hand" link2="mj_left_link3" reason="Never"/>
   <disable_collisions link1="mj_left_hand" link2="mj_left_link4" reason="Never"/>
+  <disable_collisions link1="mj_left_hand" link2="mj_left_link5" reason="Never"/>
   <disable_collisions link1="mj_left_hand" link2="mj_left_link6" reason="Never"/>
   <disable_collisions link1="mj_left_hand" link2="mj_left_link7" reason="Adjacent"/>
   <disable_collisions link1="mj_left_hand" link2="mj_left_link8" reason="Adjacent"/>
@@ -191,6 +192,7 @@
   <end_effector group="mj_right_hand" name="hand" parent_group="mj_right_arm" parent_link="mj_right_link8"/>
   <disable_collisions link1="mj_right_hand" link2="mj_right_link3" reason="Never"/>
   <disable_collisions link1="mj_right_hand" link2="mj_right_link4" reason="Never"/>
+  <disable_collisions link1="mj_right_hand" link2="mj_right_link5" reason="Never"/>
   <disable_collisions link1="mj_right_hand" link2="mj_right_link6" reason="Never"/>
   <disable_collisions link1="mj_right_hand" link2="mj_right_link7" reason="Adjacent"/>
   <disable_collisions link1="mj_right_hand" link2="mj_right_link8" reason="Adjacent"/>

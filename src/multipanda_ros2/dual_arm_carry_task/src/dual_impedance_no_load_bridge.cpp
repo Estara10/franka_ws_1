@@ -13,6 +13,7 @@
 // franka state), so it starts where the robot actually is. No gripper, weld or
 // object interaction is commanded.
 
+#include <builtin_interfaces/msg/time.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
@@ -74,6 +75,7 @@ public:
     move_amplitude_ = declare_parameter("move_amplitude_m", 0.005);
     move_seconds_ = declare_parameter("move_seconds", 1.0);
     rate_hz_ = declare_parameter("rate_hz", 100.0);
+    stop_reference_after_seconds_ = declare_parameter("stop_reference_after_seconds", -1.0);
     goal_topic_ = declare_parameter(
         "goal_topic",
         std::string("mj_left_and_mj_right/dual_cartesian_impedance_controller/desired_pose"));
@@ -97,6 +99,11 @@ public:
                 "[NO_LOAD] hold=%.1fs move=%.1fmm/%.1fs holds=%.1fs goal_topic=%s",
                 hold_seconds_, move_amplitude_ * 1000.0, move_seconds_, final_hold_seconds_,
                 goal_topic_.c_str());
+    if (stop_reference_after_seconds_ >= 0.0) {
+      RCLCPP_WARN(get_logger(),
+                  "[NO_LOAD] watchdog debug enabled: stop publishing reference at %.3f s",
+                  stop_reference_after_seconds_);
+    }
   }
 
   bool run()
@@ -134,7 +141,15 @@ public:
       } else if (t >= move_end) {
         offset = move_amplitude_;
       }
-      publishGoal(start, offset, rate);
+      const bool publish_reference = stop_reference_after_seconds_ < 0.0 ||
+          t < stop_reference_after_seconds_;
+      if (publish_reference) {
+        publishGoal(start, offset, rate);
+      } else if (cycle % 100 == 0) {
+        RCLCPP_WARN(get_logger(),
+                    "[NO_LOAD] watchdog debug: reference publishing is stopped at t=%.3f s",
+                    t);
+      }
       if (cycle % 10 == 0) {
         double pe = 0.0, re = 0.0;
         if (measureTracking(offset, pe, re)) {
@@ -148,15 +163,24 @@ public:
       rclcpp::sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(period));
     }
     // Keep the final pose commanded while the switch back is prepared.
-    for (int i = 0; i < 5; ++i) {
-      publishGoal(start, move_amplitude_, 0.0);
-      rclcpp::sleep_for(std::chrono::milliseconds(20));
+    if (stop_reference_after_seconds_ < 0.0) {
+      for (int i = 0; i < 5; ++i) {
+        publishGoal(start, move_amplitude_, 0.0);
+        rclcpp::sleep_for(std::chrono::milliseconds(20));
+      }
     }
     RCLCPP_INFO(get_logger(),
         "[NO_LOAD] impedance sequence complete after %.2f s tracking_max=(%.6f m, %.6f deg) "
         "final_hold_max=(%.6f m)",
         elapsed(), max_tracking_position_, max_tracking_rotation_ * 180.0 / M_PI,
         max_final_hold_position_);
+
+    if (stop_reference_after_seconds_ >= 0.0) {
+      RCLCPP_INFO(get_logger(),
+                  "[NO_LOAD] watchdog debug complete; skipping JTC switch-back so the "
+                  "latched controller state can be inspected");
+      return true;
+    }
 
     if (!switchControllers({jtc_controller_}, {mmc_controller_})) return fail("switch back");
     if (!seedJtcFromCurrentState()) return fail("seed trajectory controller from current state");
@@ -291,8 +315,11 @@ private:
         "mj_left_joint6",  "mj_left_joint7"};
     FollowJointTrajectory::Goal goal;
     goal.trajectory.joint_names = joints;
-    const auto now = this->now();
-    goal.trajectory.header.stamp = now;
+    // A zero stamp means "start immediately" for JointTrajectoryController.
+    // Do not use this node's clock here: this bridge may use system time while
+    // the simulation controller manager uses ROS/sim time, and rclcpp rejects
+    // comparisons between those two time sources.
+    goal.trajectory.header.stamp = builtin_interfaces::msg::Time{};
     for (int k = 0; k < 2; ++k) {
       trajectory_msgs::msg::JointTrajectoryPoint point;
       for (const auto& name : joints) {
@@ -311,6 +338,17 @@ private:
     if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready) return false;
     const auto handle = future.get();
     if (!handle) return false;
+    auto result_future = jtc_client_->async_get_result(handle);
+    if (result_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+      RCLCPP_ERROR(get_logger(), "[NO_LOAD] seeded JTC trajectory result timed out");
+      return false;
+    }
+    const auto result = result_future.get();
+    if (result.code != rclcpp_action::ResultCode::SUCCEEDED) {
+      RCLCPP_ERROR(get_logger(), "[NO_LOAD] seeded JTC trajectory did not succeed (code=%d)",
+                   static_cast<int>(result.code));
+      return false;
+    }
     RCLCPP_INFO(get_logger(), "[NO_LOAD] trajectory controller seeded from the measured joint state");
     return true;
   }
@@ -320,6 +358,7 @@ private:
   double move_amplitude_{0.005};
   double move_seconds_{1.0};
   double rate_hz_{100.0};
+  double stop_reference_after_seconds_{-1.0};
   double wall_timeout_seconds_{60.0};
   std::string goal_topic_;
   std::string robot_states_service_;

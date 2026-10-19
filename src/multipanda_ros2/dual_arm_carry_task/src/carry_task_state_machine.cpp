@@ -114,6 +114,9 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<bool>("grasp_contact_close", false);
         this->declare_parameter<std::string>("grasp_model", "none");
         this->declare_parameter<bool>("contact_hold_diagnostic_only", false);
+        this->declare_parameter<bool>("contact_hover_only", false);
+        this->declare_parameter<double>("contact_hover_height_m", 0.05);
+        this->declare_parameter<double>("contact_hover_hold_seconds", 3.0);
         this->declare_parameter<bool>("contact_plan_compare", false);
         this->declare_parameter<bool>("contact_transport_plan_only", false);
         this->declare_parameter<int>("descent_steps", 20);
@@ -205,16 +208,20 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         grasp_model_ = this->get_parameter("grasp_model").as_string();
         contact_hold_diagnostic_only_ =
             this->get_parameter("contact_hold_diagnostic_only").as_bool();
+        contact_hover_only_ = this->get_parameter("contact_hover_only").as_bool();
+        contact_hover_height_m_ = this->get_parameter("contact_hover_height_m").as_double();
+        contact_hover_hold_seconds_ = this->get_parameter("contact_hover_hold_seconds").as_double();
         contact_plan_compare_ = this->get_parameter("contact_plan_compare").as_bool();
         contact_transport_plan_only_ =
             this->get_parameter("contact_transport_plan_only").as_bool();
         RCLCPP_INFO(this->get_logger(),
                     "[P3A2C_CONFIG] grasp_contact_close=%s (parameter default=false), grasp_descent=%s, "
-                    "contact_hold_diagnostic_only=%s, contact_plan_compare=%s, "
+                    "contact_hold_diagnostic_only=%s, contact_hover_only=%s, contact_plan_compare=%s, "
                     "contact_transport_plan_only=%s",
                     grasp_contact_close_ ? "true" : "false",
                     grasp_descent_ ? "true" : "false",
                     contact_hold_diagnostic_only_ ? "true" : "false",
+                    contact_hover_only_ ? "true" : "false",
                     contact_plan_compare_ ? "true" : "false",
                     contact_transport_plan_only_ ? "true" : "false");
         RCLCPP_INFO(this->get_logger(), "[S1_CONFIG] grasp_model=%s (default=none)", grasp_model_.c_str());
@@ -463,6 +470,23 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             publish_stage(task_stage_pub_, getCurrentState());
             return;
         }
+        if (contact_hover_only_ && grasp_model_ != "contact_probe") {
+            RCLCPP_ERROR(this->get_logger(),
+                         "✗ contact_hover_only requires explicit grasp_model=contact_probe");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (contact_hover_only_ &&
+            (!std::isfinite(contact_hover_height_m_) || contact_hover_height_m_<0.045 ||
+             contact_hover_height_m_>0.10 || !std::isfinite(contact_hover_hold_seconds_) ||
+             contact_hover_hold_seconds_<1.0 || contact_hover_hold_seconds_>10.0)) {
+            RCLCPP_ERROR(this->get_logger(),
+                         "contact hover requires height=0.045..0.10m and hold=1..10s");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
         if (contact_plan_compare_ && grasp_model_ != "contact_probe") {
             RCLCPP_ERROR(this->get_logger(),
                          "✗ contact_plan_compare requires explicit grasp_model=contact_probe");
@@ -470,9 +494,16 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             publish_stage(task_stage_pub_, getCurrentState());
             return;
         }
-        if (contact_plan_compare_ && contact_hold_diagnostic_only_) {
+        if (contact_plan_compare_ && (contact_hold_diagnostic_only_ || contact_hover_only_)) {
             RCLCPP_ERROR(this->get_logger(),
                          "✗ contact_plan_compare and contact_hold_diagnostic_only are mutually exclusive");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (contact_hold_diagnostic_only_ && contact_hover_only_) {
+            RCLCPP_ERROR(this->get_logger(),
+                         "✗ contact_hold_diagnostic_only and contact_hover_only are mutually exclusive");
             setCurrentState(TaskState::ERROR);
             publish_stage(task_stage_pub_, getCurrentState());
             return;
@@ -482,7 +513,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         if (contact_transport_plan_only_ &&
             (grasp_model_ != "contact_probe" || !prepare_only_ ||
              rod_pose_source_ != kRodPoseSourceA1Truth || !p2a_check_ || gripper_selftest_ ||
-             contact_plan_compare_ || contact_hold_diagnostic_only_ || pregrasp_execute_ ||
+             contact_plan_compare_ || contact_hold_diagnostic_only_ || contact_hover_only_ || pregrasp_execute_ ||
              grasp_descent_ || grasp_contact_close_)) {
             RCLCPP_ERROR(this->get_logger(),
                          "✗ contact_transport_plan_only requires grasp_model=contact_probe, A1 truth, "

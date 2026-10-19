@@ -2,6 +2,7 @@
 #include "dual_arm_carry_task/coordinated_path_optimizer.hpp"
 #include "dual_arm_carry_task/time_profile_optimizer.hpp"
 #include "dual_arm_carry_task/gripper_client.hpp"
+#include "dual_arm_carry_task/hover_acceptance.hpp"
 #include "dual_arm_carry_task/s1_time_scaling.hpp"
 #include <moveit/trajectory_processing/iterative_time_parameterization.h>
 #include <moveit/robot_state/conversions.h>
@@ -107,6 +108,12 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     // S2 transport plan-only evaluation builds its sample without touching the
     // gripper or the arms, so the whole grasp sequence below is skipped.
     const bool plan_only = ctx_->contact_transport_plan_only_;
+    if (ctx_->contact_hover_only_ &&
+        (!std::isfinite(ctx_->contact_hover_height_m_) ||
+         ctx_->contact_hover_height_m_ < rod_rise_target || ctx_->contact_hover_height_m_ > 0.10 ||
+         !std::isfinite(ctx_->contact_hover_hold_seconds_) ||
+         ctx_->contact_hover_hold_seconds_ < 1.0 || ctx_->contact_hover_hold_seconds_ > 10.0))
+        return fail("E_CONTACT_HOVER_BAD_PARAMETERS: height=0.045..0.10m hold=1..10s");
     if (!a1_verify_.valid) return fail("E_CONTACT_PRECONDITION");
     if (!plan_only &&
         (!a1_verify_.pregrasp_reached_this_round || !a1_verify_.descent_plan_valid ||
@@ -124,7 +131,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         for (int i=0;i<2;++i) {
             if (!ctx_->latestGripperContact(arms[i],fingers[i])) { detail="E_CONTACT_FEEDBACK_MISSING"; return false; }
             const auto& f=fingers[i];
-            const double force_values[]{f.normal_left_n,f.normal_right_n,f.tangent_left_n,f.tangent_right_n,f.rod_force_z_n,f.hold_force_per_finger_n};
+            const double force_values[]{f.normal_left_n,f.normal_right_n,f.tangent_left_n,
+                f.tangent_right_n,f.rod_force_x_n,f.rod_force_y_n,f.rod_force_z_n,f.hold_force_per_finger_n};
             for (const double v:force_values) if (!std::isfinite(v)) { detail="E_CONTACT_NONFINITE_FORCE"; return false; }
             if (steadySeconds()-f.recv_steady_sec>0.25 || !std::isfinite(f.simulation_time) ||
                 !std::isfinite(f.q1) || !std::isfinite(f.q2)) {
@@ -190,8 +198,11 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         "acceptance hold=%.1fs; lift_velocity_scale=%.2f lift_acceleration_scale=%.2f weld=OFF; "
         "model/friction/mass unchanged",
         force, -2.0*force*0.90, -force*0.90, force,
-        hold_diagnostic_only ? "fixed-arm-mechanism-diagnostic" : "full-load-probe",
-        height, hold_seconds, lift_slip_tol*1000.0, pos_tol*1000.0, rod_rise_target*1000.0,
+        hold_diagnostic_only ? "fixed-arm-mechanism-diagnostic" :
+            (ctx_->contact_hover_only_ ? "rigid-hover-only" : "full-load-probe"),
+        ctx_->contact_hover_only_ ? ctx_->contact_hover_height_m_ : height,
+        ctx_->contact_hover_only_ ? ctx_->contact_hover_hold_seconds_ : hold_seconds,
+        lift_slip_tol*1000.0, pos_tol*1000.0, rod_rise_target*1000.0,
         hold_seconds, lift_velocity_scale, lift_acceleration_scale);
     // S2 transport plan-only evaluation builds its sample without touching the
     // gripper or the arms, so the whole grasp sequence below is skipped.
@@ -1031,7 +1042,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     }
     moveit::planning_interface::MoveGroupInterface::Plan lift;
 
-    if (!makePlan(start,Eigen::Vector3d(0,0,height),lift,"lift",1.0,0.4,1.0)) return fail(detail);
+    if (!ctx_->contact_hover_only_ && !hold_diagnostic_only &&
+        !makePlan(start,Eigen::Vector3d(0,0,height),lift,"lift",1.0,0.4,1.0)) return fail(detail);
     // Give the bounded force-hold drive a short static settling window before
     // the first lift command. This does not count as load validation; it only
     // avoids starting the lift while the tendon force is still ramping or the
@@ -1050,6 +1062,21 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         "[CONTACT_PRE_LIFT_SETTLE] sim_duration=%.3fs force_per_finger=%.1f; load_unverified",
         std::min(fingers[0].simulation_time, fingers[1].simulation_time) - settle_start, force);
     double max_slip=0.0,max_angle=0.0;
+    hover_experiment::HeightMonitor hover_height;
+    const auto original_grasp = object_to_hand;  // never reset for diagnostic metrics
+    std::ofstream hover_csv;
+    if (ctx_->contact_hover_only_) {
+        hover_csv.open("experiment_results/a1_runs/"+run_id+"/hover_diagnostics.csv");
+        if (!hover_csv) return fail("E_CONTACT_HOVER_CSV_OPEN");
+        hover_csv << std::setprecision(10)
+            << "phase,wall_steady_sec,left_sim_time,right_sim_time,feedback_skew_sec,"
+               "rod_rise_m,rod_clearance_m,rod_qx,rod_qy,rod_qz,rod_qw,"
+               "left_original_slip_m,right_original_slip_m,"
+               "left_expected_minus_rod_z_m,right_expected_minus_rod_z_m,"
+               "left_rod_point_dx_hand_m,left_rod_point_dy_hand_m,left_rod_point_dz_hand_m,"
+               "right_rod_point_dx_hand_m,right_rod_point_dy_hand_m,right_rod_point_dz_hand_m,"
+               "lift_confirmed\n";
+    }
     MujocoRodTruth latest;
     auto observe=[&](const char* phase,bool require_height) {
         moveit::core::RobotState actual(live_model);
@@ -1058,11 +1085,21 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         latest=readMujocoRodTruth();
         const double qnorm=std::sqrt(latest.orientation.x*latest.orientation.x+latest.orientation.y*latest.orientation.y+
             latest.orientation.z*latest.orientation.z+latest.orientation.w*latest.orientation.w);
-        if (!latest.ok || std::abs(qnorm-1.0)>1e-3) { detail="E_CONTACT_TRUTH_INVALID: "+latest.detail; return false; }
+        if (!latest.ok || !std::isfinite(latest.position.x) || !std::isfinite(latest.position.y) ||
+            !std::isfinite(latest.position.z) || !std::isfinite(qnorm) || std::abs(qnorm-1.0)>1e-3) {
+            detail="E_CONTACT_TRUTH_INVALID: "+latest.detail; return false;
+        }
         const Transform physical=rodTransform(latest);
+        const double rod_rise=latest.position.z-initial_truth.position.z;
+        const double clearance = latest.position.z - ctx_->p2a_support_z_ - 0.5 *
+            (std::abs(physical.linear()(2,0))*truth.size.x +
+             std::abs(physical.linear()(2,1))*truth.size.y +
+             std::abs(physical.linear()(2,2))*truth.size.z);
+        hover_height.update(rod_rise, std::string(phase)=="HOVER_LIFT");
         double slips[2], angles[2];
         for (int i=0;i<2;++i) {
-            const Transform expected=actual.getGlobalLinkTransform(eefs[i])*object_to_hand[i].inverse();
+            const Transform expected=actual.getGlobalLinkTransform(eefs[i])*
+                (ctx_->contact_hover_only_ ? original_grasp[i] : object_to_hand[i]).inverse();
             slips[i]=(expected.translation()-physical.translation()).norm(); angles[i]=rotationError(expected,physical);
             max_slip=std::max(max_slip,slips[i]); max_angle=std::max(max_angle,angles[i]);
         }
@@ -1085,8 +1122,41 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
            <<left_q.x()<<','<<left_q.y()<<','<<left_q.z()<<','<<left_q.w()<<','
            <<right_pose.translation().x()<<','<<right_pose.translation().y()<<','<<right_pose.translation().z()<<','
            <<right_q.x()<<','<<right_q.y()<<','<<right_q.z()<<','<<right_q.w()<<'\n'; csv.flush();
+        if (!csv) { detail="E_CONTACT_CSV_WRITE"; return false; }
+        if (hover_csv.is_open()) {
+            hover_csv << phase << ',' << steadySeconds() << ',' << fingers[0].simulation_time
+                << ',' << fingers[1].simulation_time << ','
+                << std::abs(fingers[0].simulation_time-fingers[1].simulation_time)
+                << ',' << rod_rise << ',' << clearance << ',' << latest.orientation.x << ','
+                << latest.orientation.y << ',' << latest.orientation.z << ',' << latest.orientation.w;
+            double original_slip[2], z_error[2];
+            Eigen::Vector3d rod_point_in_hand[2];
+            for (int i=0; i<2; ++i) {
+                const auto hand=actual.getGlobalLinkTransform(eefs[i]);
+                const Transform inferred=hand*original_grasp[i].inverse();
+                original_slip[i]=(inferred.translation()-physical.translation()).norm();
+                z_error[i]=inferred.translation().z()-physical.translation().z();
+                // A frozen rod-fixed point, expressed in the current hand frame.
+                // Kinematic proxy, NOT measured local pad slip velocity.
+                rod_point_in_hand[i]=(hand.inverse()*physical*original_grasp[i]).translation();
+            }
+            hover_csv << ',' << original_slip[0] << ',' << original_slip[1]
+                << ',' << z_error[0] << ',' << z_error[1];
+            for (int i=0; i<2; ++i)
+                for (int j=0; j<3; ++j) hover_csv << ',' << rod_point_in_hand[i][j];
+            hover_csv << ',' << (hover_height.lifted ? 1 : 0) << '\n';
+            hover_csv.flush();
+            if (!hover_csv) { detail="E_CONTACT_HOVER_CSV_WRITE"; return false; }
+        }
         if (max_slip>lift_slip_tol || max_angle>angle_tol) { detail="E_CONTACT_SLIP_OR_DROP"; return false; }
-        if (require_height && latest.position.z<initial_truth.position.z+rod_rise_target) { detail="E_CONTACT_ROD_NOT_LIFTED"; return false; }
+        // Keep the full probe's original continuous height requirement.
+        if (require_height && latest.position.z<initial_truth.position.z+rod_rise_target) {
+            detail="E_CONTACT_ROD_NOT_LIFTED"; return false;
+        }
+        if (ctx_->contact_hover_only_ && std::string(phase)=="HOVER_HOLD" &&
+            !hover_height.holdValid(clearance)) {
+            detail="E_CONTACT_HOVER_CLEARANCE_OR_DROP"; return false;
+        }
         return true;
     };
     auto execute=[&](const moveit::planning_interface::MoveGroupInterface::Plan& plan,const char* phase) {
@@ -1159,6 +1229,169 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         }
         return true;
     };
+    auto waitBilateralContact = [&]() {
+        const double timeout = steadySeconds() + 3.0;
+        double bilateral_start = -1.0;
+        std::size_t good_samples = 0;
+        while (rclcpp::ok() && steadySeconds() < timeout) {
+            if (!feedback()) return false;
+            const bool bilateral =
+                fingers[0].left_contact && fingers[0].right_contact &&
+                fingers[1].left_contact && fingers[1].right_contact &&
+                fingers[0].normal_left_n >= 0.25 && fingers[0].normal_right_n >= 0.25 &&
+                fingers[1].normal_left_n >= 0.25 && fingers[1].normal_right_n >= 0.25;
+            const double sim = std::min(fingers[0].simulation_time, fingers[1].simulation_time);
+            if (bilateral) {
+                if (bilateral_start < 0.0) bilateral_start = sim;
+                ++good_samples;
+                if (sim - bilateral_start >= 0.25) {
+                    RCLCPP_INFO(ctx_->get_logger(),
+                        "[CONTACT_BILATERAL_GATE] established=true sim_hold=%.3fs "
+                        "samples=%zu force_per_finger=%.1f",
+                        sim - bilateral_start, good_samples, force);
+                    return true;
+                }
+            } else {
+                bilateral_start = -1.0;
+                good_samples = 0;
+            }
+            std::this_thread::sleep_for(20ms);
+        }
+        RCLCPP_ERROR(ctx_->get_logger(),
+            "[CONTACT_BILATERAL_GATE] established=false timeout=3s "
+            "contacts=(%d,%d;%d,%d) normal=(%.3f,%.3f;%.3f,%.3f)",
+            fingers[0].left_contact ? 1 : 0, fingers[0].right_contact ? 1 : 0,
+            fingers[1].left_contact ? 1 : 0, fingers[1].right_contact ? 1 : 0,
+            fingers[0].normal_left_n, fingers[0].normal_right_n,
+            fingers[1].normal_left_n, fingers[1].normal_right_n);
+        detail = "E_CONTACT_BILATERAL_CONTACT_NOT_ESTABLISHED";
+        return false;
+    };
+    if (ctx_->contact_hover_only_) {
+        if (!(ctx_->contact_hover_height_m_ > 0.0) ||
+            !(ctx_->contact_hover_hold_seconds_ > 0.0))
+            return fail("E_CONTACT_HOVER_BAD_PARAMETERS");
+
+        moveit::core::RobotState hover_start(live_model);
+        if (!measured(hover_start)) return fail(detail);
+        if (!waitBilateralContact()) return fail(detail);
+        moveit::planning_interface::MoveGroupInterface::Plan hover_lift;
+        if (!makePlan(hover_start,
+                      Eigen::Vector3d(0, 0, ctx_->contact_hover_height_m_),
+                      hover_lift, "hover_lift", 1.0, 0.6, 0.5))
+            return fail(detail);
+        if (!execute(hover_lift, "HOVER_LIFT")) return fail(detail);
+        if (!observe("HOVER_LIFT", false)) return fail(detail);
+        if (!hover_height.lifted) return fail("E_CONTACT_ROD_NOT_LIFTED");
+        hover_height.hold_start_rise=hover_height.last_rise;
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[CONTACT_HOVER_LIFT_CONFIRMED] peak_rise=%.3fmm current_rise=%.3fmm; "
+            "HOLD clearance>3mm, drop_from_hold_start<=20mm; slip<=20mm/2deg unchanged",
+            hover_height.peak_rise*1000.0, hover_height.last_rise*1000.0);
+
+        const double hold_start =
+            std::min(fingers[0].simulation_time, fingers[1].simulation_time);
+        const double hold_deadline =
+            steadySeconds() + ctx_->contact_hover_hold_seconds_ + 6.0;
+        std::size_t hover_samples = 0;
+        while (std::min(fingers[0].simulation_time, fingers[1].simulation_time) -
+                   hold_start < ctx_->contact_hover_hold_seconds_) {
+            if (!rclcpp::ok() || steadySeconds() > hold_deadline)
+                return fail("E_CONTACT_HOVER_HOLD_TIMEOUT_OR_SHUTDOWN");
+            if (!observe("HOVER_HOLD", false)) return fail(detail);
+            ++hover_samples;
+            std::this_thread::sleep_for(50ms);
+        }
+        if (hover_samples < 20) return fail("E_CONTACT_HOVER_INSUFFICIENT_SAMPLES");
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[CONTACT_HOVER_RESULT] samples=%zu hold=%.3fs peak_rise=%.3fmm "
+            "final_rise=%.3fmm drop_from_peak=%.3fmm max_slip=%.3fmm "
+            "max_angle=%.3fdeg weld=OFF rod_constraint=OFF; "
+            "absolute rod/hand poses and contact forces are in contact_probe.csv",
+            hover_samples,
+            std::min(fingers[0].simulation_time, fingers[1].simulation_time) - hold_start,
+            hover_height.peak_rise * 1000.0, hover_height.last_rise * 1000.0,
+            (hover_height.peak_rise-hover_height.last_rise) * 1000.0,
+            max_slip * 1000.0, max_angle * 180.0 / M_PI);
+
+        // Lower using the measured rod attitude. This keeps the experiment
+        // independent of the full transport path and avoids mixing transport
+        // slip with the hover result.
+        // Do not build from a still-moving measured state: JTC dispatch rejects
+        // a >2 mrad change between planning and sending the trajectory.
+        {
+            moveit::core::RobotState previous(live_model);
+            if (!measured(previous)) return fail(detail);
+            const double deadline=steadySeconds()+2.0;
+            bool stable=false;
+            while (rclcpp::ok() && steadySeconds()<deadline) {
+                std::this_thread::sleep_for(100ms);
+                if (!observe("HOVER_SETTLE", false)) return fail(detail);
+                moveit::core::RobotState current(live_model);
+                if (!measured(current)) return fail(detail);
+                double max_delta=0.0;
+                for (const auto& name:dual->getVariableNames())
+                    max_delta=std::max(max_delta,std::abs(current.getVariablePosition(name)-
+                                                        previous.getVariablePosition(name)));
+                if (max_delta<0.0005) { stable=true; break; }
+                previous=current;
+            }
+            if (!stable) return fail("E_CONTACT_HOVER_PRE_LOWER_UNSTABLE");
+        }
+        moveit::core::RobotState hover_end(live_model);
+        if (!measured(hover_end)) return fail(detail);
+        const auto hover_truth = readMujocoRodTruth();
+        if (!hover_truth.ok) return fail("E_CONTACT_HOVER_TRUTH");
+        const Transform hover_object = rodTransform(hover_truth);
+        for (int i = 0; i < 2; ++i)
+            object_to_hand[i] =
+                hover_object.inverse() * hover_end.getGlobalLinkTransform(eefs[i]);
+        const double hover_extent = 0.5 *
+            (std::abs(hover_object.linear()(2, 0)) * truth.size.x +
+             std::abs(hover_object.linear()(2, 1)) * truth.size.y +
+             std::abs(hover_object.linear()(2, 2)) * truth.size.z);
+        const double lower_delta = hover_object.translation().z() -
+            (ctx_->p2a_support_z_ + hover_extent);
+        if (!(lower_delta > 0.0) || !std::isfinite(lower_delta))
+            return fail("E_CONTACT_HOVER_BAD_LOWER_DELTA");
+        moveit::planning_interface::MoveGroupInterface::Plan hover_lower;
+        if (!makePlan(hover_end, Eigen::Vector3d(0, 0, -lower_delta),
+                      hover_lower, "hover_lower", 1.0, 0.6, 0.5))
+            return fail(detail);
+        if (!execute(hover_lower, "HOVER_LOWER")) return fail(detail);
+        if (!observe("HOVER_LOWER", false)) return fail(detail);
+        const double lower_extent = 0.5 *
+            (std::abs(rodTransform(latest).linear()(2, 0)) * truth.size.x +
+             std::abs(rodTransform(latest).linear()(2, 1)) * truth.size.y +
+             std::abs(rodTransform(latest).linear()(2, 2)) * truth.size.z);
+        if (std::abs(latest.position.z - lower_extent - ctx_->p2a_support_z_) > 0.003)
+            return fail("E_CONTACT_HOVER_LOWER_NOT_ON_SUPPORT");
+        if (!ctx_->grippers_->controlDualGrippers(0.04))
+            return fail("E_CONTACT_HOVER_RELEASE_OPEN_FAILED");
+        force_hold_may_be_active = false;
+        std::this_thread::sleep_for(500ms);
+        const auto released = readMujocoRodTruth();
+        if (!released.ok || !feedback())
+            return fail("E_CONTACT_HOVER_RELEASE_TRUTH_OR_FEEDBACK");
+        for (const auto& f : fingers)
+            if (f.hold_force_per_finger_n != 0.0 || f.q1 + f.q2 < 0.078)
+                return fail("E_CONTACT_HOVER_RELEASE_FORCE_NOT_CLEARED");
+        if ((rodTransform(released).translation()-rodTransform(latest).translation()).norm()>0.01 ||
+            rotationError(rodTransform(released),rodTransform(latest))>5*M_PI/180)
+            return fail("E_CONTACT_HOVER_RELEASE_POSE_ERROR");
+        geometry_msgs::msg::Vector3 released_size;
+        released_size.x=truth.size.x; released_size.y=truth.size.y; released_size.z=truth.size.z;
+        if (!syncAluminumRodFromTruth(poseMsg(rodTransform(released)), released_size,
+                ctx_->dual_arm_->getPlanningFrame(), detail)) return fail(detail);
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[CONTACT_HOVER_RELEASED] xyz=(%.6f,%.6f,%.6f) open=true "
+            "force_hold=OFF weld=OFF attach=none",
+            released.position.x, released.position.y, released.position.z);
+        detail = "no-weld hover hold complete: lift=" +
+            std::to_string(ctx_->contact_hover_height_m_) + "m hold=" +
+            std::to_string(ctx_->contact_hover_hold_seconds_) + "s; no transport";
+        return true;
+    }
     if (hold_diagnostic_only) {
         constexpr double mechanism_hold_seconds = 1.0;
         std::array<unsigned long long,2> counted_seq{{0,0}};

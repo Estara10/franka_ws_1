@@ -105,6 +105,10 @@ class MultiModeController : public controller_interface::ControllerInterface {
 
   std::vector<Controller> active_control_set_;
   std::shared_mutex control_mtx_;
+  // The inner controller latches its fault and keeps the last valid torque.
+  // Report the transition to controller_manager once; returning ERROR on
+  // every 1 kHz update only creates an unbounded duplicate-error storm.
+  bool controller_fault_reported_{false};
 
   rclcpp::Service<multi_mode_control_msgs::srv::SetControllers>::SharedPtr set_ctrl_srv_;
   rclcpp::Service<multi_mode_control_msgs::srv::GetControllers>::SharedPtr get_ctrl_srv_;

@@ -14,6 +14,7 @@
     <end_effector name="hand" parent_link="${arm_id}_link8" group="${arm_id}_hand" parent_group="${arm_id}_arm"/>
     <disable_collisions link1="${arm_id}_hand" link2="${arm_id}_link3" reason="Never"/>
     <disable_collisions link1="${arm_id}_hand" link2="${arm_id}_link4" reason="Never"/>
+    <disable_collisions link1="${arm_id}_hand" link2="${arm_id}_link5" reason="Never"/>
     <disable_collisions link1="${arm_id}_hand" link2="${arm_id}_link6" reason="Never"/>
     <disable_collisions link1="${arm_id}_hand" link2="${arm_id}_link7" reason="Adjacent"/>
     <disable_collisions link1="${arm_id}_hand" link2="${arm_id}_link8" reason="Adjacent"/>

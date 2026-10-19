@@ -138,6 +138,11 @@ class FrankaMjHardwareSystem : public mujoco_ros2_control::MujocoRos2SystemInter
   };
   std::map<std::string, GripperActuatorConfig> gripper_actuator_config_base_;
   std::map<std::string, bool> gripper_direct_force_active_;
+  // Optional closed-loop tendon-position correction for contact_probe. The
+  // legacy hold is a fixed position target with a force cap; this bias lets an
+  // explicitly enabled probe recover a small loss of measured pad normal force
+  // without changing the nominal force request or model parameters.
+  std::map<std::string, double> gripper_force_hold_bias_m_;
   struct GripperContactBodyIds {
     int left_finger {-1}; int right_finger {-1}; int rod {-1}; int rod_geom {-1}; int hand_link8 {-1};
   };

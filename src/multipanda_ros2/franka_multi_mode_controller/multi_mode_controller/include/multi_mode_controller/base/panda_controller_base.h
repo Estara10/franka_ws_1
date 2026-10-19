@@ -1,5 +1,8 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <mutex>
 
 #include <multi_mode_controller/base/panda_controller_interface.h>
@@ -16,7 +19,7 @@ class PandaControllerBase : public PandaControllerInterface {
     return current_;
   }
   Pose getDesiredPose() {
-    return desired_;
+    return desired_.getContent();
   }
   Pose getDesiredPoseBuffered() {
     return desired_.get();
@@ -28,7 +31,7 @@ class PandaControllerBase : public PandaControllerInterface {
     return offset_;
   }
   Parameters getParameters() {
-    return p_;
+    return p_.getContent();
   }
   Parameters getParametersBuffered() {
     return p_.get();
@@ -37,7 +40,7 @@ class PandaControllerBase : public PandaControllerInterface {
     desired_.setBuffer(p);
   }
   void setError(const bool& error) {
-    error_ = error;
+    error_.store(error, std::memory_order_release);
   }
   void setOffset(const Pose& p) {
     offset_ = p;
@@ -55,20 +58,34 @@ class PandaControllerBase : public PandaControllerInterface {
     return initImpl(robot_data, node, name, resource);
   }
   void start_() override {
-    error_ = false;
+    setError(false);
     move_timeout_ = 3;
     updateCurrentPose();
     resetOffset();
     has_offset_ = false;
     desired_.setBuffer(current_);
     desired_.update();
+    last_reference_ns_.store(nowSteadyNs(), std::memory_order_release);
+    reference_received_.store(false, std::memory_order_release);
+    reference_fault_logged_.store(false, std::memory_order_release);
     startImpl();
   }
   void stop_() override {
-    error_ = false;
+    setError(false);
     move_timeout_ = 3;
     stopImpl();
   }
+  // Called only after a goal has passed the controller-specific validation.
+  // The timestamp is intentionally independent of ROS time so paused or
+  // simulated clocks cannot disable the watchdog.
+  void markReferenceReceived() {
+    last_reference_ns_.store(nowSteadyNs(), std::memory_order_release);
+    reference_received_.store(true, std::memory_order_release);
+  }
+
+  virtual bool referenceWatchdogEnabled() const { return false; }
+  virtual double referenceTimeoutSec() const { return 0.5; }
+  virtual double referenceStartupTimeoutSec() const { return 2.0; }
  private:
   std::recursive_mutex current_pose_mutex_;
   Buffered<Parameters> p_;
@@ -83,11 +100,33 @@ class PandaControllerBase : public PandaControllerInterface {
     ++move_timeout_;
     has_offset_ = hasOffsetImpl();
     if (desired_.updatePending()) {
-      last_desired_ = desired_;
+      last_desired_ = desired_.getContent();
       desired_.update();
       move_timeout_ = 0;
     }
-    computeTauImpl(tau, desired_, p_);
+    const Pose desired_snapshot = desired_.getContent();
+    const Parameters parameters_snapshot = p_.getContent();
+    if (referenceWatchdogEnabled()) {
+      const auto now_ns = nowSteadyNs();
+      const double age = static_cast<double>(now_ns -
+          last_reference_ns_.load(std::memory_order_acquire)) * 1e-9;
+      const double timeout = reference_received_.load(std::memory_order_acquire) ?
+          referenceTimeoutSec() : referenceStartupTimeoutSec();
+      if (age > timeout) {
+        if (!reference_fault_logged_.exchange(true, std::memory_order_acq_rel)) {
+          RCLCPP_ERROR(node_->get_logger(),
+                       "[REFERENCE_WATCHDOG] reference timeout: age=%.3f s timeout=%.3f s; "
+                       "holding last valid target and latching controller fault",
+                       age, timeout);
+        }
+        setError(true);
+      }
+    }
+    // On a watchdog fault, keep applying the last valid target.  The
+    // controller manager observes hasError() and propagates the fault; this
+    // avoids the unsafe alternative of abruptly writing zero torque while a
+    // load may be suspended.
+    computeTauImpl(tau, desired_snapshot, parameters_snapshot);
   }
   virtual void computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
       const Pose& desired, const Parameters& p) = 0;
@@ -112,6 +151,15 @@ class PandaControllerBase : public PandaControllerInterface {
   virtual void resetOffset() {}
   virtual void startImpl() {}
   virtual void stopImpl() {}
+
+  static std::int64_t nowSteadyNs() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
+
+  std::atomic<std::int64_t> last_reference_ns_{0};
+  std::atomic<bool> reference_received_{false};
+  std::atomic<bool> reference_fault_logged_{false};
 };
 
 }

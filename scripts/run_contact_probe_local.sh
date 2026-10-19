@@ -72,10 +72,27 @@ else
   export CONTACT_PROBE_RIGID=true
 fi
 CONTACT_HOLD_DIAGNOSTIC_ONLY="${CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY:-0}"
+CONTACT_HOVER_ONLY="${CONTACT_PROBE_HOVER_ONLY:-0}"
+CONTACT_HOVER_HEIGHT_M="${CONTACT_PROBE_HOVER_HEIGHT_M:-0.05}"
+CONTACT_HOVER_HOLD_SECONDS="${CONTACT_PROBE_HOVER_HOLD_SECONDS:-3.0}"
+CONTACT_PROBE_ADAPTIVE_FORCE_HOLD="${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD:-false}"
 if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" != "0" && "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" != "1" ]]; then
   echo "error: CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY must be 0 or 1" >&2
   exit 2
 fi
+if [[ "${CONTACT_HOVER_ONLY}" != "0" && "${CONTACT_HOVER_ONLY}" != "1" ]]; then
+  echo "error: CONTACT_PROBE_HOVER_ONLY must be 0 or 1" >&2
+  exit 2
+fi
+if [[ "${CONTACT_HOVER_ONLY}" -eq 1 && "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
+  echo "error: hover-only and fixed-arm diagnostic modes are mutually exclusive" >&2
+  exit 2
+fi
+case "${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD}" in
+  true|false|1|0) ;;
+  *) echo "error: CONTACT_PROBE_ADAPTIVE_FORCE_HOLD must be true/false/1/0" >&2; exit 2 ;;
+esac
+export CONTACT_PROBE_ADAPTIVE_FORCE_HOLD
 
 if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
   RUN_ID="${CONTACT_PROBE_RUN_ID:-lidio_contact_probe_compliant_$(date +%Y%m%d_%H%M%S)}"
@@ -98,7 +115,9 @@ if [[ -e "${ROS_LOG_DIR}" ]]; then
 fi
 mkdir -p "${ROS_LOG_DIR}"
 
-if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
+if [[ "${CONTACT_HOVER_ONLY}" -eq 1 ]]; then
+  echo "contact_probe: RIGID suspended hover, lift=${CONTACT_HOVER_HEIGHT_M}m hold=${CONTACT_HOVER_HOLD_SECONDS}s; no transport"
+elif [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
   echo "contact_probe: HOLD-MECHANISM diagnostic only at (0.50, 0.00, +10 deg); no lift"
 else
   echo "contact_probe: full fixed initial pose (0.50, 0.00, +10 deg), current default profile"
@@ -134,6 +153,10 @@ RUN_ARGS=(
 if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
   RUN_ARGS+=(--contact-hold-diagnostic-only)
 fi
+if [[ "${CONTACT_HOVER_ONLY}" -eq 1 ]]; then
+  RUN_ARGS+=(--contact-hover-only --contact-hover-height "${CONTACT_HOVER_HEIGHT_M}"
+             --contact-hover-hold-sec "${CONTACT_HOVER_HOLD_SECONDS}")
+fi
 if [[ "${OBSERVE_ON_ERROR}" -eq 1 ]]; then
   RUN_ARGS+=(--observe-on-error)
 fi
@@ -144,6 +167,12 @@ else
 fi
 
 echo "runner exit=${RUN_STATUS}"
+if [[ "${CONTACT_HOVER_ONLY}" -eq 1 && -d "${RUN_DIR}" ]]; then
+  python3 scripts/analyze_contact_hover.py --run-dir "${RUN_DIR}" \
+    --output "${RUN_DIR}/hover_analysis.json" > "${RUN_DIR}/hover_analysis.txt" 2>&1 || \
+    echo "note: analysis failed; see hover_analysis.txt; original runner exit remains ${RUN_STATUS}"
+  echo "hover diagnostics: hover_diagnostics.csv hover_analysis.json hover_analysis.txt"
+fi
 echo "Return these files from ${RUN_DIR}:"
 echo "  prepare_status.json task_launch.log sim_dual_moveit.log contact_probe.csv"
 echo "  gripper_fingers_mj_left.csv gripper_fingers_mj_right.csv controllers.txt runner.log"

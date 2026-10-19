@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <vector>
 
 // includes for measurements
@@ -22,8 +23,8 @@ struct tau_measurement{
 class PandaControllerInterface {
  public:
   virtual ~PandaControllerInterface() = default;
-  bool hasError() {
-    return error_;
+  bool hasError() const {
+    return error_.load(std::memory_order_acquire);
   }
   bool hasOffset() {
     return hasOffset_();
@@ -120,7 +121,10 @@ class PandaControllerInterface {
   std::vector<tau_measurement> tau_msmt_;
   std::vector<RobotData*> robot_data_;
   rclcpp_lifecycle::LifecycleNode::SharedPtr node_;
-  bool error_;
+  // Callback threads and the controller-manager update thread can both
+  // change/observe this flag.  It is a latched status, not a replacement for
+  // a controller-manager lifecycle transition.
+  std::atomic<bool> error_{false};
   int cycle_count_;
   const int max_count_ = 30000;
   bool logged_ = false;

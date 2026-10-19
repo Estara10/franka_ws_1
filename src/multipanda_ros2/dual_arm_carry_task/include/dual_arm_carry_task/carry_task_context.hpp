@@ -178,6 +178,9 @@ public:
     bool grasp_contact_close_ {false};
     std::string grasp_model_ {"none"};
     bool contact_hold_diagnostic_only_ {false};
+    bool contact_hover_only_ {false};
+    double contact_hover_height_m_ {0.05};
+    double contact_hover_hold_seconds_ {3.0};
     // P4/S2 phase 1: compare the current object-space transport plan with a
     // MoveIt CHOMP plan to the same joint target. Planning only unless the
     // CHOMP plan also passes the closed-chain/collision/limit checks.
