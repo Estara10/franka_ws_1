@@ -15,12 +15,21 @@
 
 ## 当前状态
 
-- **接续开发先读：[2026-10-19 工作汇总与队友交接](docs/HANDOFF_20261019.md)。**
+- **结题研究状态与边界见：[项目指南](docs/PROJECT_GUIDE.md)。**
 - 固定场景无 weld 接触抓取已完成抬升、保持、运输/小角度旋转、释放和退回，仍有滑移。
-- S2 几何投影与时间剖面优化已实现并离线验证，当前收益未达执行对照门槛，两分支结束。
-- S3 外部笛卡尔阻抗已通过空载保持、5 mm 短程及切回验证；控制器侧参考超时、独立审阅
-  与接触承载/扰动对照尚未完成，不能描述为完整柔顺方案。
+- S2 几何投影目标下降约 1.47%；固定几何时间剖面在一致的连续时间口径下 jerk RMS 下降约
+  3.15%。两项均为单个重建离线样本，未显示明确执行收益。
+- S3 无 weld 接触下的 JTC/MMC 悬空保持 A/B 各完成 3 次；每次均完成保持、切回和释放，
+  MMC 杆世界 Z 位移中位数为 −8.48 mm。固定/方向性 MMC 的 +X 短脉冲对照各 3 次，未显示明确优势。
+  结果证明悬空保持链路可运行，不代表 MMC 完整搬运或性能优于 JTC。
 - A1 真值准备、静态与预抓取路径检查已具备；随机场景全过程统计尚未完成。
+
+结题主图：S2 离线指标 `docs/figures/s2_offline_metrics_single_sample_20261020.png`；
+JTC/MMC 悬空位移 `docs/figures/hover_ab_vertical_displacement_20261020.png`；
+固定/方向性脉冲 `experiment_results/reports/hover_directional_perturbation_20261020/mmc_directional_perturbation_comparison.png`。
+指标口径、逐次结果和限制见 [本机 S2/S3 对照记录](docs/CONTACT_HOVER_AB_COMPARISON_20261020.md)
+及 [S2 几何投影结果](docs/deliverables/P6_S2_projection_optimizer_result_20261017.md)、
+[S2 时间剖面结果](docs/deliverables/P6_S2_time_profile_result_20261017.md)。
 
 详细架构、阶段顺序和已知风险见 [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md)。
 

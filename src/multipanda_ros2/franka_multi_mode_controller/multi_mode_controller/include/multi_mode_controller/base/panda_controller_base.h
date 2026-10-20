@@ -39,8 +39,37 @@ class PandaControllerBase : public PandaControllerInterface {
   void setDesiredPoseBuffered(const Pose& p) {
     desired_.setBuffer(p);
   }
-  void setError(const bool& error) {
-    error_.store(error, std::memory_order_release);
+  void setError(const bool& error, const std::string& source = "controller_error") {
+    if (error) {
+      std::lock_guard<std::mutex> lock(fault_metadata_mutex_);
+      if (!error_.load(std::memory_order_relaxed)) {
+        fault_source_ = source;
+        fault_steady_time_ns_.store(static_cast<std::uint64_t>(nowSteadyNs()), std::memory_order_release);
+        fault_sequence_.fetch_add(1, std::memory_order_acq_rel);
+        error_.store(true, std::memory_order_release);
+      }
+    } else {
+      std::lock_guard<std::mutex> lock(fault_metadata_mutex_);
+      error_.store(false, std::memory_order_release);
+      fault_source_.clear();
+      fault_steady_time_ns_.store(0, std::memory_order_release);
+    }
+  }
+  std::string faultSource() const override {
+    std::lock_guard<std::mutex> lock(fault_metadata_mutex_);
+    return hasError() ? fault_source_ : "";
+  }
+  std::uint64_t faultSequence() const override {
+    return hasError() ? fault_sequence_.load(std::memory_order_acquire) : 0;
+  }
+  std::uint64_t faultSteadyTimeNs() const override {
+    return hasError() ? fault_steady_time_ns_.load(std::memory_order_acquire) : 0;
+  }
+  std::uint64_t referenceSequence() const override {
+    return reference_sequence_.load(std::memory_order_acquire);
+  }
+  std::uint64_t referenceSteadyTimeNs() const override {
+    return reference_steady_time_ns_.load(std::memory_order_acquire);
   }
   void setOffset(const Pose& p) {
     offset_ = p;
@@ -67,6 +96,8 @@ class PandaControllerBase : public PandaControllerInterface {
     desired_.update();
     last_reference_ns_.store(nowSteadyNs(), std::memory_order_release);
     reference_received_.store(false, std::memory_order_release);
+    reference_sequence_.store(0, std::memory_order_release);
+    reference_steady_time_ns_.store(0, std::memory_order_release);
     reference_fault_logged_.store(false, std::memory_order_release);
     startImpl();
   }
@@ -79,7 +110,10 @@ class PandaControllerBase : public PandaControllerInterface {
   // The timestamp is intentionally independent of ROS time so paused or
   // simulated clocks cannot disable the watchdog.
   void markReferenceReceived() {
-    last_reference_ns_.store(nowSteadyNs(), std::memory_order_release);
+    const auto received_ns = nowSteadyNs();
+    last_reference_ns_.store(received_ns, std::memory_order_release);
+    reference_steady_time_ns_.store(static_cast<std::uint64_t>(received_ns), std::memory_order_release);
+    reference_sequence_.fetch_add(1, std::memory_order_acq_rel);
     reference_received_.store(true, std::memory_order_release);
   }
 
@@ -119,13 +153,13 @@ class PandaControllerBase : public PandaControllerInterface {
                        "holding last valid target and latching controller fault",
                        age, timeout);
         }
-        setError(true);
+        setError(true, "reference_watchdog");
       }
     }
-    // On a watchdog fault, keep applying the last valid target.  The
-    // controller manager observes hasError() and propagates the fault; this
-    // avoids the unsafe alternative of abruptly writing zero torque while a
-    // load may be suspended.
+    // On a watchdog fault the closed-loop law continues to use the last valid
+    // target. This is not a claim that the resulting torque is a safe hold.
+    // MultiModeController publishes the latched fault through its status
+    // service; orchestration must stop sending references and report failure.
     computeTauImpl(tau, desired_snapshot, parameters_snapshot);
   }
   virtual void computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
@@ -159,7 +193,13 @@ class PandaControllerBase : public PandaControllerInterface {
 
   std::atomic<std::int64_t> last_reference_ns_{0};
   std::atomic<bool> reference_received_{false};
+  std::atomic<std::uint64_t> reference_sequence_{0};
+  std::atomic<std::uint64_t> reference_steady_time_ns_{0};
   std::atomic<bool> reference_fault_logged_{false};
+  std::string fault_source_;
+  mutable std::mutex fault_metadata_mutex_;
+  std::atomic<std::uint64_t> fault_sequence_{0};
+  std::atomic<std::uint64_t> fault_steady_time_ns_{0};
 };
 
 }

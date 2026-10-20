@@ -1,6 +1,7 @@
 #include "dual_arm_carry_task/carry_task_context.hpp"
 #include "dual_arm_carry_task/gripper_client.hpp"
 #include "dual_arm_carry_task/dual_arm_controller.hpp"
+#include "dual_arm_carry_task/mmc_state_validation.hpp"
 
 namespace {
 
@@ -117,6 +118,7 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<bool>("contact_hover_only", false);
         this->declare_parameter<double>("contact_hover_height_m", 0.05);
         this->declare_parameter<double>("contact_hover_hold_seconds", 3.0);
+        this->declare_parameter<std::string>("contact_hover_control_mode", "jtc");
         this->declare_parameter<bool>("contact_plan_compare", false);
         this->declare_parameter<bool>("contact_transport_plan_only", false);
         this->declare_parameter<int>("descent_steps", 20);
@@ -211,17 +213,19 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         contact_hover_only_ = this->get_parameter("contact_hover_only").as_bool();
         contact_hover_height_m_ = this->get_parameter("contact_hover_height_m").as_double();
         contact_hover_hold_seconds_ = this->get_parameter("contact_hover_hold_seconds").as_double();
+        contact_hover_control_mode_ = this->get_parameter("contact_hover_control_mode").as_string();
         contact_plan_compare_ = this->get_parameter("contact_plan_compare").as_bool();
         contact_transport_plan_only_ =
             this->get_parameter("contact_transport_plan_only").as_bool();
         RCLCPP_INFO(this->get_logger(),
                     "[P3A2C_CONFIG] grasp_contact_close=%s (parameter default=false), grasp_descent=%s, "
-                    "contact_hold_diagnostic_only=%s, contact_hover_only=%s, contact_plan_compare=%s, "
+                    "contact_hold_diagnostic_only=%s, contact_hover_only=%s, hover_control_mode=%s, contact_plan_compare=%s, "
                     "contact_transport_plan_only=%s",
                     grasp_contact_close_ ? "true" : "false",
                     grasp_descent_ ? "true" : "false",
                     contact_hold_diagnostic_only_ ? "true" : "false",
                     contact_hover_only_ ? "true" : "false",
+                    contact_hover_control_mode_.c_str(),
                     contact_plan_compare_ ? "true" : "false",
                     contact_transport_plan_only_ ? "true" : "false");
         RCLCPP_INFO(this->get_logger(), "[S1_CONFIG] grasp_model=%s (default=none)", grasp_model_.c_str());
@@ -357,16 +361,28 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
             joint_states_topic_, rclcpp::QoS(10),
             [this](sensor_msgs::msg::JointState::SharedPtr msg) {
                 JointFeedback sample;
-                std::lock_guard<std::mutex> guard(joint_feedback_mutex_);
-                sample.seq = latest_joint_feedback_.seq + 1;
-                sample.recv_steady_sec = std::chrono::duration<double>(
+                const double received_steady_sec = std::chrono::duration<double>(
                     std::chrono::steady_clock::now().time_since_epoch()).count();
                 sample.stamp = msg->header.stamp;
-                sample.stamp_valid = (msg->header.stamp.sec != 0 || msg->header.stamp.nanosec != 0);
                 for (std::size_t i = 0; i < msg->name.size() && i < msg->position.size(); ++i) {
                     sample.positions[msg->name[i]] = msg->position[i];
                 }
-                latest_joint_feedback_ = std::move(sample);
+                const double sample_sim_time = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME).seconds();
+                const double current_sim_time = this->now().seconds();
+                dual_arm_carry_task::MmcStateValidation validation;
+                {
+                    std::lock_guard<std::mutex> guard(joint_feedback_mutex_);
+                    validation = dual_arm_carry_task::acceptJointSampleIfFresh(
+                        std::move(sample), latest_joint_feedback_, sample_sim_time,
+                        current_sim_time, received_steady_sec);
+                }
+                if (!validation.valid) {
+                    RCLCPP_WARN(this->get_logger(),
+                        "[JOINT_FEEDBACK] rejected reason=%s stamp=(%d,%u) stamp_sim=%.9f "
+                        "clock_sim=%.9f; valid cache unchanged",
+                        validation.reason.c_str(), msg->header.stamp.sec,
+                        msg->header.stamp.nanosec, sample_sim_time, current_sim_time);
+                }
             });
         RCLCPP_INFO(this->get_logger(),
                     "A1 到位新鲜度: 订阅 %s（序号 + 到达时刻；重复旧样本不计数）",
@@ -473,6 +489,18 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         if (contact_hover_only_ && grasp_model_ != "contact_probe") {
             RCLCPP_ERROR(this->get_logger(),
                          "✗ contact_hover_only requires explicit grasp_model=contact_probe");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (contact_hover_control_mode_ != "jtc" && contact_hover_control_mode_ != "mmc_hold") {
+            RCLCPP_ERROR(this->get_logger(), "✗ contact_hover_control_mode must be jtc or mmc_hold");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (contact_hover_control_mode_ == "mmc_hold" && !contact_hover_only_) {
+            RCLCPP_ERROR(this->get_logger(), "✗ mmc_hold is available only with contact_hover_only");
             setCurrentState(TaskState::ERROR);
             publish_stage(task_stage_pub_, getCurrentState());
             return;

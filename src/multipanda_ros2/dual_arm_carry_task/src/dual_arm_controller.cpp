@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <array>
+#include <iomanip>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -463,6 +464,12 @@ void DualArmController::initialize()
             
         } catch (const std::exception& e) {
             RCLCPP_ERROR(ctx_->get_logger(), "MoveIt 初始化失败: %s", e.what());
+            ctx_->current_state_ = TaskState::ERROR;
+            return;
+        }
+
+        if (ctx_->contact_hover_control_mode_ == "mmc_hold" && !ensureTaskRobotStatesService()) {
+            RCLCPP_ERROR(ctx_->get_logger(), "[MMC_STARTUP_PREFLIGHT] result=failed reason=state_source_creation_failed");
             ctx_->current_state_ = TaskState::ERROR;
             return;
         }
@@ -1089,6 +1096,15 @@ bool DualArmController::prepareFromA1Truth()
                          "  ✗ [A1] rod_pose_source=a1_truth 需要 prepare_only=true；本轮不开启 A1 运动");
             ctx_->setCurrentState(TaskState::ERROR);
             return false;
+        }
+
+        if (ctx_->contact_hover_control_mode_ == "mmc_hold") {
+            std::string preflight_error;
+            if (!runMmcStartupPreflight(preflight_error)) {
+                RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [A1] %s", preflight_error.c_str());
+                ctx_->setCurrentState(TaskState::ERROR);
+                return false;
+            }
         }
 
         // 2. Coordinate frames. The planning frame is read from MoveIt; the
@@ -2689,13 +2705,413 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
     //    a hand-built interpolation would not be reported as a plan.
     // -----------------------------------------------------------------------
     auto dual = ctx_->dual_arm_;
+    const auto live_model = dual->getRobotModel();
+    moveit::core::RobotStatePtr live_current = dual->getCurrentState();
+    if (!live_current || !live_model) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_LIVE_STATE_UNAVAILABLE";
+        out.path_validation.detail = "MoveIt live model/current state is unavailable";
+        return false;
+    }
+
+    // Preserve a same-state collision comparison for the P2b rejection
+    // diagnostic. This does not alter the planning scene, ACM, or the state
+    // used by MoveGroup; it maps one fresh /joint_states snapshot by name into
+    // the existing live and criterion models.
+    DualArmCarryTask::JointFeedback fresh_feedback;
+    const bool have_fresh_feedback = ctx_->latestJointFeedback(fresh_feedback);
+    const double feedback_now_steady_sec = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const double feedback_age_sec = have_fresh_feedback
+        ? feedback_now_steady_sec - fresh_feedback.recv_steady_sec
+        : std::numeric_limits<double>::infinity();
+    std::string safe_run_id = ctx_->expected_run_id_.empty() ? "p2b_diagnostic" : ctx_->expected_run_id_;
+    for (char& ch : safe_run_id) {
+        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_' && ch != '-') ch = '_';
+    }
+    const std::string diag_dir = "experiment_results/a1_runs/" + safe_run_id + "/";
+    std::ofstream state_csv(diag_dir + "p2b_state_diagnostic.csv", std::ios::out | std::ios::trunc);
+    std::set<std::string> live_var_set(live_current->getVariableNames().begin(),
+                                      live_current->getVariableNames().end());
+    std::set<std::string> criterion_var_set(model->getVariableNames().begin(),
+                                            model->getVariableNames().end());
+    std::vector<std::string> diagnostic_names;
+    for (const auto& name : model->getVariableNames()) diagnostic_names.push_back(name);
+    if (state_csv) {
+        state_csv << "source,feedback_seq,feedback_stamp_ns,feedback_age_sec";
+        for (const auto& name : diagnostic_names) state_csv << ",q_" << name;
+        state_csv << '\n';
+    }
+    auto writeDiagnosticState = [&](const std::string& source,
+                                    const moveit::core::RobotState& state) {
+        if (!state_csv) return;
+        const std::set<std::string> source_variables(
+            state.getRobotModel()->getVariableNames().begin(),
+            state.getRobotModel()->getVariableNames().end());
+        state_csv << source << ',' << (have_fresh_feedback ? fresh_feedback.seq : 0) << ','
+                  << (have_fresh_feedback && fresh_feedback.stamp_valid
+                          ? fresh_feedback.stamp.nanoseconds() : 0) << ','
+                  << (have_fresh_feedback ? feedback_age_sec : -1.0);
+        for (const auto& name : diagnostic_names) {
+            state_csv << ',' << (source_variables.count(name) != 0
+                ? state.getVariablePosition(name) : std::numeric_limits<double>::quiet_NaN());
+        }
+        state_csv << '\n';
+    };
+
+    DualArmCarryTask::GripperContactFeedback left_finger_feedback;
+    DualArmCarryTask::GripperContactFeedback right_finger_feedback;
+    const bool have_left_finger = ctx_->latestGripperContact("mj_left", left_finger_feedback);
+    const bool have_right_finger = ctx_->latestGripperContact("mj_right", right_finger_feedback);
+    const double left_finger_age = have_left_finger
+        ? feedback_now_steady_sec - left_finger_feedback.recv_steady_sec
+        : std::numeric_limits<double>::infinity();
+    const double right_finger_age = have_right_finger
+        ? feedback_now_steady_sec - right_finger_feedback.recv_steady_sec
+        : std::numeric_limits<double>::infinity();
+    constexpr double kP2bMaxFingerAgeSec = 0.50;
+    constexpr double kFingerAcceptedLowerM = a1v::kFingerNumericLowerBoundM;
+    constexpr double kFingerNominalLowerM = a1v::kFingerNominalLowerBoundM;
+    constexpr double kFingerAcceptedUpperM = a1v::kFingerAcceptedUpperBoundM;
+    const double quiet_nan = std::numeric_limits<double>::quiet_NaN();
+    const std::array<double, 4> measured_fingers{{
+        have_left_finger ? left_finger_feedback.q1 : quiet_nan,
+        have_left_finger ? left_finger_feedback.q2 : quiet_nan,
+        have_right_finger ? right_finger_feedback.q1 : quiet_nan,
+        have_right_finger ? right_finger_feedback.q2 : quiet_nan}};
+    const std::array<bool, 4> finger_sample_present{{
+        have_left_finger, have_left_finger, have_right_finger, have_right_finger}};
+    const std::array<double, 4> finger_sample_age{{
+        left_finger_age, left_finger_age, right_finger_age, right_finger_age}};
+    const auto& finger_names = a1v::fingerJointNames();
+    const std::array<std::string, 4> feedback_fields{{
+        "mj_left.finger_q1", "mj_left.finger_q2",
+        "mj_right.finger_q1", "mj_right.finger_q2"}};
+    const std::array<std::string, 4> field_joint_names{{
+        "mj_left_finger_joint1", "mj_left_finger_joint2",
+        "mj_right_finger_joint1", "mj_right_finger_joint2"}};
+    const std::array<double, 2> left_right_sim_dt{{
+        have_left_finger && have_right_finger
+            ? left_finger_feedback.simulation_time - right_finger_feedback.simulation_time
+            : quiet_nan,
+        have_left_finger && have_right_finger
+            ? left_finger_feedback.recv_steady_sec - right_finger_feedback.recv_steady_sec
+            : quiet_nan}};
+    std::array<a1v::FingerInputClass, 4> finger_classes{};
+    std::array<double, 4> model_lower{};
+    std::array<double, 4> model_upper{};
+    std::array<bool, 4> model_bounded{};
+    std::array<double, 4> live_model_lower{};
+    std::array<double, 4> live_model_upper{};
+    std::array<bool, 4> live_model_bounded{};
+    for (std::size_t i = 0; i < finger_names.size(); ++i) {
+        const bool criterion_has_name = criterion_var_set.count(finger_names[i]) != 0;
+        const bool live_has_name = live_var_set.count(finger_names[i]) != 0;
+        const bool order_matches = field_joint_names[i] == finger_names[i];
+        if (criterion_has_name) {
+            const auto& bounds = model->getVariableBounds(finger_names[i]);
+            model_bounded[i] = bounds.position_bounded_;
+            model_lower[i] = bounds.position_bounded_ ? bounds.min_position_ : quiet_nan;
+            model_upper[i] = bounds.position_bounded_ ? bounds.max_position_ : quiet_nan;
+        } else {
+            model_bounded[i] = false;
+            model_lower[i] = quiet_nan;
+            model_upper[i] = quiet_nan;
+        }
+        if (live_has_name) {
+            const auto& bounds = live_model->getVariableBounds(finger_names[i]);
+            live_model_bounded[i] = bounds.position_bounded_;
+            live_model_lower[i] = bounds.position_bounded_ ? bounds.min_position_ : quiet_nan;
+            live_model_upper[i] = bounds.position_bounded_ ? bounds.max_position_ : quiet_nan;
+        } else {
+            live_model_bounded[i] = false;
+            live_model_lower[i] = quiet_nan;
+            live_model_upper[i] = quiet_nan;
+        }
+        const bool sample_present = finger_sample_present[i];
+        const double age = finger_sample_age[i];
+        finger_classes[i] = a1v::classifyP2bFingerInput(
+            measured_fingers[i], sample_present, age, kP2bMaxFingerAgeSec,
+            field_joint_names[i], finger_names[i], kFingerAcceptedLowerM, kFingerAcceptedUpperM);
+        const auto& source = i < 2 ? left_finger_feedback : right_finger_feedback;
+        const std::string expected_arm = i < 2 ? "mj_left" : "mj_right";
+        if (sample_present && source.arm != expected_arm) {
+            finger_classes[i] = a1v::FingerInputClass::MAPPING_MISMATCH;
+        }
+        if (!criterion_has_name || !live_has_name) {
+            finger_classes[i] = a1v::FingerInputClass::MAPPING_MISMATCH;
+        }
+        if (!order_matches) finger_classes[i] = a1v::FingerInputClass::MAPPING_MISMATCH;
+    }
+
+    // Preserve every raw typed value before validation. Missing samples are
+    // written as NA; a received NaN/Inf is written as such and never replaced,
+    // clamped, or absolutized.
+    std::ofstream raw_finger_csv(diag_dir + "p2b_finger_raw_values.csv",
+                                 std::ios::out | std::ios::trunc);
+    if (raw_finger_csv) {
+        a1v::writeP2bFingerRawDiagnosticCsv(raw_finger_csv, measured_fingers,
+                                            finger_sample_present, finger_classes);
+    }
+    std::ofstream finger_csv(diag_dir + "p2b_finger_input_diagnostic.csv",
+                             std::ios::out | std::ios::trunc);
+    if (finger_csv) {
+        finger_csv << "input_index,source_arm,source_arm_matches,feedback_field,joint_name,"
+                      "array_order_matches,sample_present,"
+                      "sample_seq,simulation_time_s,header_stamp_ns,receive_steady_sec,age_sec,"
+                      "message_has_valid_field,source_q_finite,publisher_publish_gate_eligible,"
+                      "raw_value_m,field_finite,nominal_lower_m,accepted_lower_m,accepted_upper_m,"
+                      "criterion_position_bounded,criterion_lower_m,"
+                      "criterion_upper_m,live_position_bounded,live_lower_m,live_upper_m,classification,"
+                      "joint_states_present,joint_states_value_m,"
+                      "left_minus_right_sim_time_s,left_minus_right_receive_steady_s\n";
+        finger_csv << std::setprecision(17);
+        const auto write_number = [&finger_csv](double value, bool present) {
+            if (!present) finger_csv << "NA";
+            else if (std::isnan(value)) finger_csv << "NaN";
+            else if (std::isinf(value)) finger_csv << (value < 0.0 ? "-Inf" : "Inf");
+            else finger_csv << value;
+        };
+        for (std::size_t i = 0; i < finger_names.size(); ++i) {
+            const bool left_side = i < 2;
+            const bool present = finger_sample_present[i];
+            const auto& sample = left_side ? left_finger_feedback : right_finger_feedback;
+            const std::string expected_arm = left_side ? "mj_left" : "mj_right";
+            const bool source_arm_matches = present && sample.arm == expected_arm;
+            const bool raw_finite = present && std::isfinite(measured_fingers[i]);
+            const bool derived_q_finite = present && std::isfinite(sample.q1) &&
+                                          std::isfinite(sample.q2);
+            const bool publisher_gate_eligible = present && sample.seq > 0 && derived_q_finite &&
+                std::isfinite(sample.command_per_finger_m);
+            const auto global = have_fresh_feedback
+                ? fresh_feedback.positions.find(finger_names[i])
+                : std::map<std::string, double>::const_iterator{};
+            const bool global_present = have_fresh_feedback &&
+                                        global != fresh_feedback.positions.end();
+            finger_csv << i << ',' << (present ? sample.arm : "NA") << ','
+                       << (present ? (source_arm_matches ? 1 : 0) : -1) << ','
+                       << feedback_fields[i] << ',' << finger_names[i] << ','
+                       << (field_joint_names[i] == finger_names[i] ? 1 : 0) << ','
+                       << (present ? 1 : 0) << ',';
+            if (present) finger_csv << sample.seq;
+            else finger_csv << "NA";
+            finger_csv << ',';
+            write_number(present ? sample.simulation_time : quiet_nan, present);
+            finger_csv << ',';
+            if (present) finger_csv << sample.stamp_ns;
+            else finger_csv << "NA";
+            finger_csv << ',';
+            write_number(present ? sample.recv_steady_sec : quiet_nan, present);
+            finger_csv << ',';
+            write_number(present ? finger_sample_age[i] : quiet_nan, present);
+            finger_csv << ",0," << (derived_q_finite ? 1 : 0) << ','
+                       << (publisher_gate_eligible ? 1 : 0) << ',';
+            write_number(measured_fingers[i], present);
+            finger_csv << ',' << (raw_finite ? 1 : 0) << ',' << kFingerNominalLowerM << ','
+                       << kFingerAcceptedLowerM << ','
+                       << kFingerAcceptedUpperM << ',' << (model_bounded[i] ? 1 : 0) << ',';
+            write_number(model_lower[i], model_bounded[i]);
+            finger_csv << ',';
+            write_number(model_upper[i], model_bounded[i]);
+            finger_csv << ',' << (live_model_bounded[i] ? 1 : 0) << ',';
+            write_number(live_model_lower[i], live_model_bounded[i]);
+            finger_csv << ',';
+            write_number(live_model_upper[i], live_model_bounded[i]);
+            finger_csv << ',' << a1v::fingerInputClassName(finger_classes[i]) << ','
+                       << (global_present ? 1 : 0) << ',';
+            write_number(global_present ? global->second : quiet_nan, global_present);
+            finger_csv << ',';
+            write_number(left_right_sim_dt[0], have_left_finger && have_right_finger);
+            finger_csv << ',';
+            write_number(left_right_sim_dt[1], have_left_finger && have_right_finger);
+            finger_csv << '\n';
+        }
+        finger_csv.flush();
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[P2B_FINGER_INPUT] diagnostic=%s left_present=%d left_seq=%llu left_sim=%.9f "
+        "left_recv=%.9f left_age=%.6f right_present=%d right_seq=%llu right_sim=%.9f "
+        "right_recv=%.9f right_age=%.6f sim_dt=%.9f receive_dt=%.9f msg_valid_field=absent "
+        "array_order=left.q1,left.q2,right.q1,right.q2; values preserved before validation",
+        ("experiment_results/a1_runs/" + safe_run_id + "/p2b_finger_input_diagnostic.csv").c_str(),
+        have_left_finger ? 1 : 0,
+        static_cast<unsigned long long>(have_left_finger ? left_finger_feedback.seq : 0),
+        have_left_finger ? left_finger_feedback.simulation_time : quiet_nan,
+        have_left_finger ? left_finger_feedback.recv_steady_sec : quiet_nan,
+        have_left_finger ? left_finger_age : quiet_nan,
+        have_right_finger ? 1 : 0,
+        static_cast<unsigned long long>(have_right_finger ? right_finger_feedback.seq : 0),
+        have_right_finger ? right_finger_feedback.simulation_time : quiet_nan,
+        have_right_finger ? right_finger_feedback.recv_steady_sec : quiet_nan,
+        have_right_finger ? right_finger_age : quiet_nan,
+        left_right_sim_dt[0], left_right_sim_dt[1]);
+
+    for (std::size_t i = 0; i < finger_classes.size(); ++i) {
+        if (finger_classes[i] == a1v::FingerInputClass::ACCEPTED_WITH_NUMERIC_TOLERANCE) {
+            RCLCPP_WARN(ctx_->get_logger(),
+                "[P2B_FINGER_RANGE] joint=%s raw=%.17g m accepted_with_numeric_tolerance; "
+                "nominal=[%.9g,%.9g] m accepted_lower=%.9g m; raw value unchanged",
+                finger_names[i].c_str(), measured_fingers[i], kFingerNominalLowerM,
+                kFingerAcceptedUpperM, kFingerAcceptedLowerM);
+        } else if (finger_classes[i] == a1v::FingerInputClass::VALID) {
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[P2B_FINGER_RANGE] joint=%s raw=%.17g m valid_in_nominal_range=[%.9g,%.9g] m",
+                finger_names[i].c_str(), measured_fingers[i], kFingerNominalLowerM,
+                kFingerAcceptedUpperM);
+        }
+    }
+
+    std::map<std::string, double> p2b_start_positions;
+    std::string start_mapping_reason;
+    bool finger_input_valid = true;
+    std::string finger_input_failure;
+    for (std::size_t i = 0; i < finger_classes.size(); ++i) {
+        if (finger_classes[i] != a1v::FingerInputClass::VALID &&
+            finger_classes[i] != a1v::FingerInputClass::ACCEPTED_WITH_NUMERIC_TOLERANCE) {
+            finger_input_valid = false;
+            if (finger_input_failure.empty()) {
+                std::ostringstream detail;
+                detail << finger_names[i] << '=';
+                if (!finger_sample_present[i]) detail << "NA";
+                else detail << std::setprecision(17) << measured_fingers[i];
+                detail << " class=" << a1v::fingerInputClassName(finger_classes[i]);
+                finger_input_failure = detail.str();
+            }
+        }
+    }
+    if (!have_fresh_feedback || !have_left_finger || !have_right_finger ||
+        !finger_input_valid ||
+        !a1v::mapP2bStartPositions(fresh_feedback.positions, measured_fingers,
+                                   feedback_age_sec, {{left_finger_age, right_finger_age}},
+                                   kP2bMaxFingerAgeSec, p2b_start_positions, start_mapping_reason)) {
+        out.path_validation.status = a1v::CheckStatus::FAILED;
+        out.path_validation.reason_code = "E_P2B_START_FEEDBACK_INVALID";
+        out.path_validation.detail = !finger_input_failure.empty()
+            ? "typed finger feedback rejected: " + finger_input_failure
+            : "fresh arm/finger start feedback is incomplete: " +
+                (start_mapping_reason.empty() ? std::string("required feedback source missing")
+                                              : start_mapping_reason);
+        RCLCPP_ERROR(ctx_->get_logger(), "[P2B_STATE_DIAG] %s; raw finger snapshot saved before validation",
+                     out.path_validation.detail.c_str());
+        return false;
+    }
+
+    moveit::core::RobotState p2b_start_criterion(*a1_verify_.start);
+    moveit::core::RobotState p2b_start_live(*live_current);
+    std::size_t mapped_start_count = 0;
+    for (const auto& entry : p2b_start_positions) {
+        if (criterion_var_set.count(entry.first) == 0 || live_var_set.count(entry.first) == 0) {
+            out.path_validation.status = a1v::CheckStatus::FAILED;
+            out.path_validation.reason_code = "E_P2B_START_JOINT_MAPPING_INVALID";
+            out.path_validation.detail = "live/criterion model missing " + entry.first;
+            return false;
+        }
+        p2b_start_criterion.setVariablePosition(entry.first, entry.second);
+        p2b_start_live.setVariablePosition(entry.first, entry.second);
+        ++mapped_start_count;
+    }
+    p2b_start_criterion.update();
+    p2b_start_live.update();
+    moveit::core::RobotState same_state_criterion(p2b_start_criterion);
+    moveit::core::RobotState same_state_live(p2b_start_live);
+    writeDiagnosticState("fresh_joint_feedback_plus_typed_fingers", same_state_criterion);
+    writeDiagnosticState("criterion_recorded_start", *a1_verify_.start);
+    writeDiagnosticState("moveit_live_current_state", *live_current);
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[P2B_STATE_DIAG] joint_states_topic=%s seq=%llu stamp_ns=%lld age=%.6fs "
+        "arm_feedback_names=14/14 measured_start_variables=%zu/18 finger_seq=(%llu,%llu) "
+        "finger_age=(%.6f,%.6f)s criterion_model_vars=%zu live_model_vars=%zu criterion_hand_mesh=%s",
+        ctx_->joint_states_topic_.c_str(),
+        static_cast<unsigned long long>(have_fresh_feedback ? fresh_feedback.seq : 0),
+        static_cast<long long>(have_fresh_feedback && fresh_feedback.stamp_valid
+                                   ? fresh_feedback.stamp.nanoseconds() : 0),
+        have_fresh_feedback ? feedback_age_sec : -1.0, mapped_start_count,
+        static_cast<unsigned long long>(left_finger_feedback.seq),
+        static_cast<unsigned long long>(right_finger_feedback.seq), left_finger_age,
+        right_finger_age, diagnostic_names.size(), live_model->getVariableNames().size(),
+        a1_verify_.mesh_path.c_str());
+    for (const auto& name : diagnostic_names) {
+        const bool feedback_has = have_fresh_feedback && fresh_feedback.positions.count(name) != 0;
+        const bool live_has = live_var_set.count(name) != 0;
+        const double measured = feedback_has ? fresh_feedback.positions.at(name)
+            : std::numeric_limits<double>::quiet_NaN();
+        const double csm = live_has ? live_current->getVariablePosition(name)
+            : std::numeric_limits<double>::quiet_NaN();
+        const double recorded = criterion_var_set.count(name) != 0
+            ? a1_verify_.start->getVariablePosition(name) : std::numeric_limits<double>::quiet_NaN();
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[P2B_STATE_JOINT] name=%s feedback_present=%d feedback=%.9f live_present=%d live=%.9f "
+            "criterion=%.9f feedback_minus_live=%.9f feedback_minus_criterion=%.9f",
+            name.c_str(), feedback_has ? 1 : 0, measured, live_has ? 1 : 0, csm, recorded,
+            measured - csm, measured - recorded);
+    }
+    for (const std::string side : {"mj_left", "mj_right"}) {
+        const auto& finger_feedback = side == "mj_left" ? left_finger_feedback : right_finger_feedback;
+        const double finger_age = side == "mj_left" ? left_finger_age : right_finger_age;
+        const std::array<std::string, 2> finger_joint_names = side == "mj_left"
+            ? std::array<std::string, 2>{{"mj_left_finger_joint1", "mj_left_finger_joint2"}}
+            : std::array<std::string, 2>{{"mj_right_finger_joint1", "mj_right_finger_joint2"}};
+        for (std::size_t fi = 0; fi < finger_joint_names.size(); ++fi) {
+            const auto global = have_fresh_feedback
+                ? fresh_feedback.positions.find(finger_joint_names[fi])
+                : std::map<std::string, double>::const_iterator{};
+            const bool global_present = have_fresh_feedback && global != fresh_feedback.positions.end();
+            const double typed = fi == 0 ? finger_feedback.q1 : finger_feedback.q2;
+            const double joint_state = global_present ? global->second
+                : std::numeric_limits<double>::quiet_NaN();
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[P2B_FINGER_DIAG] source=typed_hardware+joint_states side=%s joint=%s "
+                "typed=%.9f typed_seq=%llu typed_stamp_ns=%lld typed_age=%.6fs "
+                "joint_state_present=%d joint_state=%.9f delta=%.9f",
+                side.c_str(), finger_joint_names[fi].c_str(), typed,
+                static_cast<unsigned long long>(finger_feedback.seq),
+                static_cast<long long>(finger_feedback.stamp_ns), finger_age,
+                global_present ? 1 : 0, joint_state, typed - joint_state);
+        }
+    }
+
+    // Same q/finger values and identical world/ACM, checked against each
+    // model's own collision geometry. Contact details are retained for the
+    // named pairs that caused the old MoveGroup rejection.
+    auto logModelCollision = [&](const char* label,
+                                 const planning_scene::PlanningScene& collision_scene,
+                                 const moveit::core::RobotState& state) {
+        collision_detection::CollisionRequest request;
+        request.contacts = true;
+        request.max_contacts = 100;
+        request.max_contacts_per_pair = 20;
+        collision_detection::CollisionResult result;
+        collision_scene.checkCollision(request, result, state, a1_verify_.base_acm);
+        RCLCPP_INFO(ctx_->get_logger(), "[P2B_STATE_COLLISION] model=%s collision=%d pair_count=%zu",
+                    label, result.collision ? 1 : 0, result.contacts.size());
+        for (const auto& pair : result.contacts) {
+            for (const auto& contact : pair.second) {
+                RCLCPP_INFO(ctx_->get_logger(),
+                    "[P2B_STATE_CONTACT] model=%s pair=%s<->%s pos=(%.7f,%.7f,%.7f) "
+                    "normal=(%.7f,%.7f,%.7f) depth=%.9f",
+                    label, pair.first.first.c_str(), pair.first.second.c_str(),
+                    contact.pos.x(), contact.pos.y(), contact.pos.z(),
+                    contact.normal.x(), contact.normal.y(), contact.normal.z(), contact.depth);
+            }
+        }
+    };
+    logModelCollision("criterion_mujoco_hand_aabb", *scene, same_state_criterion);
+    moveit_msgs::msg::PlanningScene criterion_scene_msg;
+    scene->getPlanningSceneMsg(criterion_scene_msg);
+    auto live_compare_scene = std::make_shared<planning_scene::PlanningScene>(live_model);
+    live_compare_scene->setPlanningSceneMsg(criterion_scene_msg);
+    logModelCollision("live_robot_model_same_world_acm", *live_compare_scene, same_state_live);
+
     // Conservative motion scaling for the plan that may be executed.
     dual->setMaxVelocityScalingFactor(ctx_->pregrasp_vel_scale_);
     dual->setMaxAccelerationScalingFactor(ctx_->pregrasp_acc_scale_);
     dual->setPlanningTime(ctx_->p2b_planning_time_sec_);
     dual->setNumPlanningAttempts(ctx_->p2b_planning_attempts_);
     dual->setPlannerId(ctx_->p2b_planner_id_);
-    dual->setStartStateToCurrentState();
+    dual->setStartState(p2b_start_live);
+
+    // Save the exact name-mapped feedback state passed explicitly to MoveGroup.
+    writeDiagnosticState("movegroup_start_state_requested_by_name_mapped_feedback", p2b_start_live);
 
     moveit::core::RobotState goal(*dual->getCurrentState());
     goal.setVariablePositions(a1_verify_.pregrasp_joints);
@@ -2711,6 +3127,41 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
 
     moveit::planning_interface::MoveGroupInterface::Plan plan;
     const auto plan_code = dual->plan(plan);
+    const auto& diagnostic_traj = plan.trajectory_.joint_trajectory;
+    if (!plan.start_state_.joint_state.name.empty()) {
+        moveit::core::RobotState planner_start(*live_current);
+        std::size_t mapped_start_names = 0;
+        for (std::size_t i = 0; i < plan.start_state_.joint_state.name.size() &&
+             i < plan.start_state_.joint_state.position.size(); ++i) {
+            const auto& name = plan.start_state_.joint_state.name[i];
+            if (live_var_set.count(name) != 0) {
+                planner_start.setVariablePosition(name, plan.start_state_.joint_state.position[i]);
+                ++mapped_start_names;
+            }
+        }
+        planner_start.update();
+        writeDiagnosticState("moveit_plan_returned_start_state", planner_start);
+        RCLCPP_INFO(ctx_->get_logger(), "[P2B_PLAN_START_STATE] returned_names=%zu mapped_names=%zu",
+                    plan.start_state_.joint_state.name.size(), mapped_start_names);
+    }
+    std::ofstream path_csv(diag_dir + "p2b_joint_path.csv", std::ios::out | std::ios::trunc);
+    if (path_csv && !diagnostic_traj.joint_names.empty()) {
+        path_csv << "source,index,time_from_start_sec";
+        for (const auto& name : diagnostic_traj.joint_names) path_csv << ",q_" << name;
+        path_csv << '\n';
+        for (std::size_t pi = 0; pi < diagnostic_traj.points.size(); ++pi) {
+            const auto& point = diagnostic_traj.points[pi];
+            path_csv << "planner_response," << pi << ','
+                     << rclcpp::Duration(point.time_from_start).seconds();
+            for (const double value : point.positions) path_csv << ',' << value;
+            path_csv << '\n';
+        }
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[P2B_PLANNER_DIAG] result=%d start_state_joint_count=%zu trajectory_names=%zu "
+        "trajectory_points=%zu state_csv=%s",
+        plan_code.val, plan.start_state_.joint_state.name.size(), diagnostic_traj.joint_names.size(),
+        diagnostic_traj.points.size(), (diag_dir + "p2b_state_diagnostic.csv").c_str());
     if (plan_code != moveit::core::MoveItErrorCode::SUCCESS) {
         out.path_validation.status = a1v::CheckStatus::FAILED;
         out.path_validation.reason_code = "E_P2B_PLAN_FAILED";
@@ -2802,7 +3253,7 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
 
     // Joint-limit check on every waypoint, in the criterion model.
     for (std::size_t pi = 0; pi < traj.points.size(); ++pi) {
-        moveit::core::RobotState st(*a1_verify_.start);
+        moveit::core::RobotState st(p2b_start_criterion);
         st.setVariablePositions(traj_names, traj.points[pi].positions);
         st.update();
         std::vector<double> q, lo, hi;
@@ -2831,7 +3282,7 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
     // Start consistency: the path must begin where the robot actually is.
     {
         std::set<std::string> start_vars;
-        for (const std::string& v : a1_verify_.start->getVariableNames()) {
+        for (const std::string& v : p2b_start_criterion.getVariableNames()) {
             start_vars.insert(v);
         }
         double worst = 0.0;
@@ -2840,7 +3291,7 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
                 continue;
             }
             worst = std::max(worst, std::fabs(traj.points.front().positions[ji] -
-                                              a1_verify_.start->getVariablePosition(traj_names[ji])));
+                                              p2b_start_criterion.getVariablePosition(traj_names[ji])));
         }
         RCLCPP_INFO(ctx_->get_logger(),
                     "  [P2B] 路径: %zu 航点, %zu 关节 | 起点与记录起始状态最大差 %.6f rad | "
@@ -2857,7 +3308,7 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
 
     // End FK residual against the SAME chosen pre-grasp target.
     auto stateOf = [&](const std::vector<double>& pos) {
-        moveit::core::RobotState st(*a1_verify_.start);
+        moveit::core::RobotState st(p2b_start_criterion);
         st.setVariablePositions(traj_names, pos);
         st.update();
         return st;

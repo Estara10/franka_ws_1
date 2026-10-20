@@ -31,6 +31,7 @@
 #include <std_srvs/srv/trigger.hpp>
 
 #include <franka_hardware/sim/gripper_sim_action_server.hpp>
+#include <franka_hardware/sim/gripper_joint_names.hpp>
 
 namespace franka_gripper {
 GripperSimActionServer::GripperSimActionServer(const rclcpp::NodeOptions& options, std::string robot_name)
@@ -61,7 +62,7 @@ GripperSimActionServer::GripperSimActionServer(const rclcpp::NodeOptions& option
   this->default_epsilon_outer_ = 0.005;
   // cmd_rate不再使用，改用std::this_thread::sleep_for
   // this->cmd_rate_ = std::make_shared<rclcpp::Rate>(1.0/dt);
-  this->joint_names_ = {robot_name + "_finger_joint1", robot_name + "_finger_joint2"};
+  this->joint_names_ = fingerJointNamesForRobot(robot_name_);
   contact_feedback_publisher_ = create_publisher<dual_arm_a1_msgs::msg::GripperContactFeedback>(
       "/gripper_contact_feedback", 20);
   // if (!this->get_parameter("joint_names", this->joint_names_)) {

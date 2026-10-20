@@ -1,6 +1,8 @@
 #include "franka_hardware/sim/robot_sim.hpp"
 #include <cstring>
 #include <Eigen/Dense>
+#include <algorithm>
+#include <cstdint>
 
 namespace franka_hardware{ 
 
@@ -133,6 +135,11 @@ franka::RobotState RobotSim::populateFrankaState(){
   */
   // mjModel* m = franka_hardware_model_->getMjModel();
   mjData* d = franka_hardware_model_->getMjData();
+  // Keep the sample's simulator time attached to the hardware snapshot. The
+  // GetRobotStates bridge uses this to reject a live service response that
+  // merely re-wraps an old cached RobotState.
+  current_state_.time = franka::Duration(
+      static_cast<std::uint64_t>(std::max(0.0, d->time) * 1.0e3));
   double tau_ext_hat_filtered[7] = {0};
   for(int i=0; i<kNumberOfJoints; i++){
     current_state_.q[i] = d->qpos[joint_qpos_indices_[i]];

@@ -1,2 +1,9 @@
 ---
 Controller[] controllers
+bool faulted
+string fault_source
+uint64 fault_sequence
+uint64 fault_steady_time_ns
+uint64 status_steady_time_ns
+uint64 reference_sequence
+uint64 reference_steady_time_ns

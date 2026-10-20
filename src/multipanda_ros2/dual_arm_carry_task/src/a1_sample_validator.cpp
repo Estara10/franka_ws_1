@@ -13,10 +13,12 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <set>
 #include <sstream>
+#include <ostream>
 
 namespace a1v {
 namespace {
@@ -221,15 +223,133 @@ bool mapMeasuredFingerPositions(const std::array<double, 4>& positions,
 {
   const auto& names = fingerJointNames();
   std::map<std::string, double> candidate;
+  bool used_numeric_tolerance = false;
   for (std::size_t i = 0; i < names.size(); ++i) {
-    if (!finite(positions[i]) || positions[i] < 0.0 || positions[i] > 0.0401) {
-      reason = "invalid measured value for " + names[i];
+    if (!finite(positions[i])) {
+      reason = "nonfinite measured value for " + names[i];
+      return false;
+    }
+    if (positions[i] < kFingerNumericLowerBoundM) {
+      reason = "measured value below lower bound for " + names[i];
+      return false;
+    }
+    if (positions[i] < kFingerNominalLowerBoundM) {
+      used_numeric_tolerance = true;
+    }
+    if (positions[i] > kFingerAcceptedUpperBoundM) {
+      reason = "measured value above upper bound for " + names[i];
       return false;
     }
     candidate.emplace(names[i], positions[i]);
   }
   by_joint_name = std::move(candidate);
-  reason = "ok";
+  reason = used_numeric_tolerance ? "ok_with_numeric_tolerance" : "ok_in_nominal_range";
+  return true;
+}
+
+const char* fingerInputClassName(FingerInputClass classification)
+{
+  switch (classification) {
+    case FingerInputClass::MISSING: return "missing";
+    case FingerInputClass::STALE: return "stale";
+    case FingerInputClass::MAPPING_MISMATCH: return "mapping_mismatch";
+    case FingerInputClass::NONFINITE: return "nonfinite";
+    case FingerInputClass::BELOW_LOWER: return "below_lower_bound";
+    case FingerInputClass::ABOVE_UPPER: return "above_upper_bound";
+    case FingerInputClass::VALID: return "valid";
+    case FingerInputClass::ACCEPTED_WITH_NUMERIC_TOLERANCE:
+      return "accepted_with_numeric_tolerance";
+  }
+  return "unknown";
+}
+
+FingerInputClass classifyP2bFingerInput(double raw_value,
+                                        bool sample_present,
+                                        double sample_age_sec,
+                                        double max_age_sec,
+                                        const std::string& actual_joint_name,
+                                        const std::string& expected_joint_name,
+                                        double lower_bound,
+                                        double upper_bound)
+{
+  if (!sample_present) return FingerInputClass::MISSING;
+  if (!finite(sample_age_sec) || sample_age_sec < 0.0 || !finite(max_age_sec) ||
+      max_age_sec <= 0.0 || sample_age_sec > max_age_sec) {
+    return FingerInputClass::STALE;
+  }
+  if (actual_joint_name != expected_joint_name) return FingerInputClass::MAPPING_MISMATCH;
+  if (!finite(raw_value)) return FingerInputClass::NONFINITE;
+  if (raw_value < lower_bound) return FingerInputClass::BELOW_LOWER;
+  if (raw_value > upper_bound) return FingerInputClass::ABOVE_UPPER;
+  if (raw_value < kFingerNominalLowerBoundM) {
+    return FingerInputClass::ACCEPTED_WITH_NUMERIC_TOLERANCE;
+  }
+  return FingerInputClass::VALID;
+}
+
+void writeP2bFingerRawDiagnosticCsv(
+    std::ostream& output,
+    const std::array<double, 4>& raw_values,
+    const std::array<bool, 4>& sample_present,
+    const std::array<FingerInputClass, 4>& classifications)
+{
+  const auto& names = fingerJointNames();
+  output << "input_index,joint_name,sample_present,raw_value_m,classification\n"
+         << std::setprecision(17);
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    output << i << ',' << names[i] << ',' << (sample_present[i] ? 1 : 0) << ',';
+    if (!sample_present[i]) {
+      output << "NA";
+    } else if (std::isnan(raw_values[i])) {
+      output << "NaN";
+    } else if (std::isinf(raw_values[i])) {
+      output << (raw_values[i] < 0.0 ? "-Inf" : "Inf");
+    } else {
+      output << raw_values[i];
+    }
+    output << ',' << fingerInputClassName(classifications[i]) << '\n';
+  }
+  output.flush();
+}
+
+bool mapP2bStartPositions(const std::map<std::string, double>& arm_feedback,
+                         const std::array<double, 4>& finger_positions,
+                         double arm_feedback_age_sec,
+                         const std::array<double, 2>& finger_feedback_age_sec,
+                         double max_age_sec,
+                         std::map<std::string, double>& out,
+                         std::string& reason)
+{
+  if (!finite(max_age_sec) || max_age_sec <= 0.0 || !finite(arm_feedback_age_sec) ||
+      arm_feedback_age_sec < 0.0 || arm_feedback_age_sec > max_age_sec) {
+    reason = "arm joint feedback is missing, invalid, or stale";
+    return false;
+  }
+  for (std::size_t i = 0; i < finger_feedback_age_sec.size(); ++i) {
+    if (!finite(finger_feedback_age_sec[i]) || finger_feedback_age_sec[i] < 0.0 ||
+        finger_feedback_age_sec[i] > max_age_sec) {
+      reason = i == 0 ? "left typed finger feedback is missing, invalid, or stale"
+                      : "right typed finger feedback is missing, invalid, or stale";
+      return false;
+    }
+  }
+
+  std::map<std::string, double> candidate;
+  for (const std::string side : {"mj_left", "mj_right"}) {
+    for (int joint = 1; joint <= 7; ++joint) {
+      const std::string name = side + "_joint" + std::to_string(joint);
+      const auto it = arm_feedback.find(name);
+      if (it == arm_feedback.end() || !finite(it->second)) {
+        reason = "missing or non-finite arm joint feedback for " + name;
+        return false;
+      }
+      candidate.emplace(name, it->second);
+    }
+  }
+  std::map<std::string, double> fingers_by_name;
+  if (!mapMeasuredFingerPositions(finger_positions, fingers_by_name, reason)) return false;
+  candidate.insert(fingers_by_name.begin(), fingers_by_name.end());
+  out = std::move(candidate);
   return true;
 }
 

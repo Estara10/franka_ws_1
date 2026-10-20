@@ -70,6 +70,7 @@ CONTACT_HOLD_DIAGNOSTIC_ONLY="${CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY:-0}"
 CONTACT_HOVER_ONLY=0
 CONTACT_HOVER_HEIGHT_M="${CONTACT_PROBE_HOVER_HEIGHT_M:-0.05}"
 CONTACT_HOVER_HOLD_SECONDS="${CONTACT_PROBE_HOVER_HOLD_SECONDS:-3.0}"
+CONTACT_HOVER_CONTROL_MODE="${CONTACT_HOVER_CONTROL_MODE:-jtc}"
 DESCENT_NEGATIVE_FINAL=""
 DESCENT_NEGATIVE_TRUTH=""
 # A1 P3a-2a: gripper interface check -- one empty-load open/close/open cycle.
@@ -179,7 +180,8 @@ while [[ $# -gt 0 ]]; do
     --contact-hover-only) CONTACT_HOVER_ONLY=1; shift ;;
     --contact-hover-height) CONTACT_HOVER_HEIGHT_M="$2"; shift 2 ;;
     --contact-hover-hold-sec) CONTACT_HOVER_HOLD_SECONDS="$2"; shift 2 ;;
-  --contact-hold-diagnostic-only) CONTACT_HOLD_DIAGNOSTIC_ONLY=1; shift ;;
+    --contact-hover-control-mode) CONTACT_HOVER_CONTROL_MODE="$2"; shift 2 ;;
+    --contact-hold-diagnostic-only) CONTACT_HOLD_DIAGNOSTIC_ONLY=1; shift ;;
     --target-x) TASK_TARGET_X="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
     --target-y) TASK_TARGET_Y="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
     --target-yaw-deg) TASK_TARGET_YAW_DEG="$2"; TASK_TARGET_FIELDS=$((TASK_TARGET_FIELDS + 1)); shift 2 ;;
@@ -239,6 +241,12 @@ fi
 if [[ "${TASK_TARGET_FIELDS}" -ne 0 && "${TASK_TARGET_FIELDS}" -ne 3 ]]; then
   echo "error: --target-x, --target-y and --target-yaw-deg must be supplied together" >&2
   exit 3
+fi
+if [[ "${CONTACT_HOVER_CONTROL_MODE}" != "jtc" && "${CONTACT_HOVER_CONTROL_MODE}" != "mmc_hold" ]]; then
+  echo "error: contact hover control mode must be jtc or mmc_hold" >&2; exit 3
+fi
+if [[ "${CONTACT_HOVER_CONTROL_MODE}" == "mmc_hold" && "${CONTACT_HOVER_ONLY}" -ne 1 ]]; then
+  echo "error: mmc_hold requires --contact-hover-only" >&2; exit 3
 fi
 
 # --- ROS session isolation ---------------------------------------------------
@@ -413,6 +421,8 @@ RUNNER_PID=""
 RUNNER_PGID=""
 TASK_PID=""
 TASK_PGID=""
+FINGER_OBSERVER_PID=""
+FINGER_OBSERVER_PGID=""
 SELF_PGID="$(ps -o pgid= -p $$ | tr -d ' ')"
 cleanup_done=0
 
@@ -449,6 +459,7 @@ cleanup() {
   local rc=$?
   if [[ "${cleanup_done}" -eq 0 ]]; then
     cleanup_done=1
+    stop_group finger_observer "${FINGER_OBSERVER_PGID}" "${FINGER_OBSERVER_PID}"
     stop_group runner "${RUNNER_PGID}" "${RUNNER_PID}"
     stop_group sim "${SIM_PGID}" "${SIM_PID}"
     echo "[cleanup] simulator reaped"
@@ -591,10 +602,24 @@ if [[ "${GRASP_MODEL}" == "contact_probe" ]]; then
   echo "[contact_probe] per-contact geom/force/actuator trace: ${CONTACT_PROBE_CONTACT_TRACE_CSV}"
   export CONTACT_PROBE_ADAPTIVE_FORCE_HOLD
   echo "[contact_probe] adaptive normal-force hold: ${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD}"
+  CONTACT_PROBE_PAYLOAD_FEEDFORWARD="${CONTACT_PROBE_PAYLOAD_FEEDFORWARD:-0}"
+  export CONTACT_PROBE_PAYLOAD_FEEDFORWARD
+  echo "[contact_probe] rod payload feedforward: ${CONTACT_PROBE_PAYLOAD_FEEDFORWARD} (MMC hold only; default 0)"
+  CONTACT_PROBE_ROD_FORCE_DURATION_SEC="${CONTACT_PROBE_ROD_FORCE_DURATION_SEC:-0.2}"
+  export CONTACT_PROBE_ROD_FORCE_DURATION_SEC
+  if [[ "${CONTACT_PROBE_ROD_DISTURBANCE:-0}" == "1" ]]; then
+    export CONTACT_PROBE_ROD_FORCE_ENABLED=true
+    export CONTACT_PROBE_ROD_FORCE_EVENTS_CSV="${RUN_DIR}/rod_force_events.csv"
+    echo "[contact_probe] rod force pulse enabled: world +X 2 N, 1 s after MMC HOLD arm, ${CONTACT_PROBE_ROD_FORCE_DURATION_SEC} sim s"
+  else
+    unset CONTACT_PROBE_ROD_FORCE_ENABLED CONTACT_PROBE_ROD_FORCE_EVENTS_CSV
+  fi
 else
   # These are process-wide opt-in hooks used by the hardware plugin. Do not
   # let values inherited from the caller's shell affect ideal_weld/other runs.
   unset CONTACT_PROBE_SINGLE_PAD CONTACT_PROBE_CONTACT_TRACE_CSV
+  unset CONTACT_PROBE_ROD_FORCE_ENABLED CONTACT_PROBE_ROD_FORCE_EVENTS_CSV
+  unset CONTACT_PROBE_PAYLOAD_FEEDFORWARD CONTACT_PROBE_ROD_FORCE_DURATION_SEC
 fi
 
 # A1 P3a-2a only: have each simulated gripper node append a plain CSV of its own
@@ -653,6 +678,24 @@ fi
 echo "[sim] services available"
 timeout "${HELPER_TIMEOUT}" ros2 service list 2>/dev/null | sort > "${RUN_DIR}/services_seen.txt" || true
 
+if [[ "${CONTACT_HOVER_CONTROL_MODE}" == "mmc_hold" ]]; then
+  echo "[mmc] loading sim_multi_mode_controller inactive; JTC remains the only active arm controller"
+  if ! timeout 40 ros2 run controller_manager spawner sim_multi_mode_controller --inactive \
+      --controller-manager-timeout 30 --service-call-timeout 30 \
+      > "${RUN_DIR}/mmc_spawner.log" 2>&1; then
+    echo "[mmc] inactive load failed; see mmc_spawner.log" >&2
+    record_status "E_MMC_INACTIVE_LOAD" "controller spawner failed before task motion" "startup"
+    exit 2
+  fi
+  timeout "${HELPER_TIMEOUT}" ros2 control list_controllers > "${RUN_DIR}/controllers.txt" 2>&1 || true
+  if ! grep -q 'sim_multi_mode_controller.*inactive' "${RUN_DIR}/controllers.txt" ||
+     ! grep -q 'dual_panda_arm_controller.*active' "${RUN_DIR}/controllers.txt"; then
+    echo "[mmc] expected inactive MMC and active JTC not confirmed" >&2
+    record_status "E_MMC_CONTROLLER_PRESTATE" "JTC/MMC pre-motion state is not mutually exclusive" "startup"
+    exit 2
+  fi
+fi
+
 # Controller inventory is captured by the script (the node does not query it).
 if timeout "${HELPER_TIMEOUT}" ros2 control list_controllers \
     > "${RUN_DIR}/controllers.txt" 2>&1; then
@@ -661,6 +704,56 @@ else
   echo "NOT_RUN: ros2 control list_controllers did not complete within ${HELPER_TIMEOUT}s" \
     >> "${RUN_DIR}/controllers.txt"
   echo "[sim] warning: controller inventory not captured (see controllers.txt)"
+fi
+
+# In the MMC hover run, verify the clock and merged joint-state path with no
+# task or robot command active. The saved JSON records per-source stamps,
+# publisher node identities, joint contents, and their offset from /clock.
+if [[ "${CONTACT_HOVER_CONTROL_MODE}" == "mmc_hold" ]]; then
+  echo "[joint-states] observing raw arm, finger, and merged topics for 2.5 s (no motion)"
+  {
+    for node in /joint_state_publisher /controller_manager /move_group /robot_state_publisher \
+                /mj_left_gripper_sim_node /mj_right_gripper_sim_node; do
+      echo "[$node]"
+      timeout "${HELPER_TIMEOUT}" ros2 param get "$node" use_sim_time 2>&1 || true
+    done
+    timeout "${HELPER_TIMEOUT}" ros2 topic info --verbose /joint_states 2>&1 || true
+    timeout "${HELPER_TIMEOUT}" ros2 topic info --verbose /joint_state_broadcaster/joint_states 2>&1 || true
+    timeout "${HELPER_TIMEOUT}" ros2 topic info --verbose /mj_left_gripper_sim_node/joint_states 2>&1 || true
+    timeout "${HELPER_TIMEOUT}" ros2 topic info --verbose /mj_right_gripper_sim_node/joint_states 2>&1 || true
+  } > "${RUN_DIR}/joint_state_publishers.txt"
+  if ! timeout 12 /usr/bin/python3 "${SCRIPT_DIR}/observe_joint_state_clock.py" \
+      --seconds 2.5 --out "${RUN_DIR}/joint_state_clock_observation.json" \
+      > "${RUN_DIR}/joint_state_clock_observer.log" 2>&1; then
+    echo "[joint-states] clock/source observation failed; refusing task motion"
+    record_status "E_JOINT_STATE_CLOCK_OBSERVATION" \
+      "joint-state topics or simulation timestamps did not pass the no-motion observation" "pre_motion"
+    exit 2
+  fi
+
+  # Keep one bounded-lifetime observer beside the task so the existing open
+  # action captures typed, private-topic and aggregate finger values together.
+  # It is stopped and flushed by this script after task completion/cleanup.
+  FINGER_TRACE_READY="${RUN_DIR}/finger_feedback_observer.ready"
+  setsid /usr/bin/python3 "${SCRIPT_DIR}/observe_joint_state_clock.py" \
+      --continuous-finger-trace \
+      --finger-trace-csv "${RUN_DIR}/finger_feedback_trace.csv" \
+      --ready-file "${FINGER_TRACE_READY}" \
+      > "${RUN_DIR}/finger_feedback_observer.log" 2>&1 &
+  FINGER_OBSERVER_PID=$!
+  FINGER_OBSERVER_PGID="$(ps -o pgid= -p "${FINGER_OBSERVER_PID}" 2>/dev/null | tr -d ' ' || true)"
+  FINGER_TRACE_DEADLINE=$((SECONDS + 8))
+  while (( SECONDS < FINGER_TRACE_DEADLINE )) && [[ ! -f "${FINGER_TRACE_READY}" ]]; do
+    if ! kill -0 "${FINGER_OBSERVER_PID}" 2>/dev/null; then break; fi
+    sleep 0.1
+  done
+  if [[ ! -f "${FINGER_TRACE_READY}" ]]; then
+    echo "[joint-states] finger trace observer did not receive all five sources; refusing task motion"
+    record_status "E_FINGER_TRACE_OBSERVER_NOT_READY" \
+      "typed, private and aggregate finger topic samples were not all observed before task motion" "pre_motion"
+    exit 2
+  fi
+  echo "[joint-states] continuous finger trace ready: ${RUN_DIR}/finger_feedback_trace.csv"
 fi
 
 # --- A1 P1b prepare mode ----------------------------------------------------
@@ -758,7 +851,8 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     P2A_ARGS+=(contact_hold_diagnostic_only:="$([[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]] && echo true || echo false)")
     P2A_ARGS+=(contact_hover_only:="$([[ "${CONTACT_HOVER_ONLY}" -eq 1 ]] && echo true || echo false)" \
                contact_hover_height_m:="${CONTACT_HOVER_HEIGHT_M}" \
-               contact_hover_hold_seconds:="${CONTACT_HOVER_HOLD_SECONDS}")
+               contact_hover_hold_seconds:="${CONTACT_HOVER_HOLD_SECONDS}" \
+               contact_hover_control_mode:="${CONTACT_HOVER_CONTROL_MODE}")
     # P4/S2 phase 1: planner comparison. Gated by an explicit environment
     # variable so the ordinary contact-probe path never changes.
     if [[ "${CONTACT_PLAN_COMPARE:-0}" -eq 1 ]]; then
@@ -965,6 +1059,8 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     fi
 
     stop_group task "${TASK_PGID}" "${TASK_PID}"
+    stop_group finger_observer "${FINGER_OBSERVER_PGID}" "${FINGER_OBSERVER_PID}"
+    FINGER_OBSERVER_PID=""; FINGER_OBSERVER_PGID=""
   fi
 
   stop_group runner "${RUNNER_PGID}" "${RUNNER_PID}"

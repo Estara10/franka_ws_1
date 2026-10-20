@@ -17,6 +17,7 @@
 #include <deque>
 #include <array>
 #include <cstdint>
+#include <iosfwd>
 #include <map>
 #include <string>
 #include <vector>
@@ -76,6 +77,49 @@ bool makeFingerJointSnapshot(const FingerFeedbackSample& left,
 bool mapMeasuredFingerPositions(const std::array<double, 4>& positions,
                                 std::map<std::string, double>& by_joint_name,
                                 std::string& reason);
+
+// Numeric acceptance tolerance applies only to the four measured gripper
+// finger positions. It does not change URDF/MuJoCo limits or arm joint checks.
+constexpr double kFingerNumericLowerBoundM = -1e-6;
+constexpr double kFingerNominalLowerBoundM = 0.0;
+constexpr double kFingerAcceptedUpperBoundM = 0.0401;
+
+enum class FingerInputClass {
+  MISSING,
+  STALE,
+  MAPPING_MISMATCH,
+  NONFINITE,
+  BELOW_LOWER,
+  ABOVE_UPPER,
+  VALID,
+  ACCEPTED_WITH_NUMERIC_TOLERANCE
+};
+
+const char* fingerInputClassName(FingerInputClass classification);
+FingerInputClass classifyP2bFingerInput(double raw_value,
+                                        bool sample_present,
+                                        double sample_age_sec,
+                                        double max_age_sec,
+                                        const std::string& actual_joint_name,
+                                        const std::string& expected_joint_name,
+                                        double lower_bound,
+                                        double upper_bound);
+void writeP2bFingerRawDiagnosticCsv(
+    std::ostream& output,
+    const std::array<double, 4>& raw_values,
+    const std::array<bool, 4>& sample_present,
+    const std::array<FingerInputClass, 4>& classifications);
+
+// Build a complete P2b start snapshot from fresh arm feedback plus the typed
+// hardware finger samples. /joint_states in this simulator omits the four
+// finger variables, so they must never fall back to the RobotState defaults.
+bool mapP2bStartPositions(const std::map<std::string, double>& arm_feedback,
+                          const std::array<double, 4>& finger_positions,
+                          double arm_feedback_age_sec,
+                          const std::array<double, 2>& finger_feedback_age_sec,
+                          double max_age_sec,
+                          std::map<std::string, double>& out,
+                          std::string& reason);
 
 // Finger joints move along hand-local ±Y. Apply the real non-commuting link8
 // and hand rotations: Rz(yaw+45) Rx(pi) Rz(-45), then rotate the local +Y axis.

@@ -465,6 +465,37 @@ bool FrankaMjHardwareSystem::initSim(
     }
     
     weld_eq_id_ = mj_name2id(m_, mjOBJ_EQUALITY, "grasp_weld");
+    rod_force_body_id_ = mj_name2id(m_, mjOBJ_BODY, "obj_rod_01");
+    if (const char* enabled = std::getenv("CONTACT_PROBE_ROD_FORCE_ENABLED")) {
+      rod_force_enabled_ = std::string(enabled) == "true";
+    }
+    if (const char* duration = std::getenv("CONTACT_PROBE_ROD_FORCE_DURATION_SEC")) {
+      const double value = std::atof(duration);
+      if (std::isfinite(value) && value > 0.0 && value <= 5.0) {
+        rod_force_duration_sec_ = value;
+      } else {
+        RCLCPP_WARN(getLogger(),
+                    "[rod_force] ignoring invalid CONTACT_PROBE_ROD_FORCE_DURATION_SEC=%s; using %.3f s",
+                    duration, rod_force_duration_sec_);
+      }
+    }
+    if (rod_force_enabled_) {
+      if (rod_force_body_id_ < 0) {
+        RCLCPP_ERROR(getLogger(), "[rod_force] enabled but obj_rod_01 body is missing");
+        return false;
+      }
+      if (const char* path = std::getenv("CONTACT_PROBE_ROD_FORCE_EVENTS_CSV")) {
+        rod_force_events_.open(path, std::ios::out | std::ios::trunc);
+        if (!rod_force_events_) {
+          RCLCPP_ERROR(getLogger(), "[rod_force] cannot open event CSV: %s", path);
+          return false;
+        }
+        rod_force_events_ << "sim_time,event,force_x_n,force_y_n,force_z_n,torque_x_nm,torque_y_nm,torque_z_nm\n";
+      }
+      RCLCPP_INFO(getLogger(), "[rod_force] one-shot pulse enabled for obj_rod_01: world +X 2 N, "
+                  "1.0 s after MMC HOLD arm request, %.3f s simulation time; off by default",
+                  rod_force_duration_sec_);
+    }
     if (weld_eq_id_ >= 0) {
         hand_body_id_ = mj_name2id(m_, mjOBJ_BODY, "mj_left_hand");
         rod_body_id_ = mj_name2id(m_, mjOBJ_BODY, "obj_rod_01");
@@ -489,6 +520,13 @@ bool FrankaMjHardwareSystem::initSim(
         weld_state_pub_ = weld_node_->create_publisher<std_msgs::msg::Bool>(
             "/grasp_weld_state", rclcpp::QoS(10));
         adaptive_pub_ = weld_node_->create_publisher<std_msgs::msg::Float64MultiArray>("/adaptive_impedance_params", 10);
+        if (rod_force_enabled_) {
+          rod_force_arm_sub_ = weld_node_->create_subscription<std_msgs::msg::Bool>(
+              "/contact_probe/rod_force_arm", 1,
+              [this](const std_msgs::msg::Bool::SharedPtr msg) {
+                rod_force_arm_requested_.store(msg->data, std::memory_order_relaxed);
+              });
+        }
         executor_->add_node(weld_node_);
         
         RCLCPP_INFO(getLogger(), "Grasp weld constraint ready: eq_id=%d, hand_body=%d, rod_body=%d",
@@ -500,6 +538,58 @@ bool FrankaMjHardwareSystem::initSim(
     RCLCPP_INFO(getLogger(), "Robot successfully initialized!");
     return true;
   }
+
+void FrankaMjHardwareSystem::updateRodForcePulse() {
+  if (!rod_force_enabled_ || rod_force_body_id_ < 0 || d_ == nullptr) return;
+  const double sim_time = d_->time;
+  auto record = [this, sim_time](const char* event, double fx) {
+    if (rod_force_events_.is_open()) {
+      rod_force_events_ << std::setprecision(12) << sim_time << ',' << event << ','
+                        << fx << ",0,0,0,0,0\n";
+      rod_force_events_.flush();
+    }
+    RCLCPP_INFO(getLogger(), "[rod_force] sim_time=%.9f event=%s force_world=(%.1f,0,0) N torque=(0,0,0) Nm",
+                sim_time, event, fx);
+  };
+
+  const bool requested = rod_force_arm_requested_.load(std::memory_order_relaxed);
+  if (!requested) {
+    const bool was_pending = rod_force_armed_ || rod_force_applied_;
+    if (rod_force_applied_) {
+      d_->xfrc_applied[6 * rod_force_body_id_] -= 2.0;
+      rod_force_applied_ = false;
+      rod_force_applied_status_.store(false, std::memory_order_relaxed);
+      record("cancel_clear", 0.0);
+    }
+    if (rod_force_armed_) record("cancel", 0.0);
+    rod_force_armed_ = false;
+    rod_force_armed_status_.store(false, std::memory_order_relaxed);
+    if (was_pending) rod_force_consumed_ = true;
+    return;
+  }
+  if (!rod_force_armed_ && !rod_force_consumed_) {
+    rod_force_armed_ = true;
+    rod_force_armed_status_.store(true, std::memory_order_relaxed);
+    rod_force_arm_sim_time_ = sim_time;
+    record("armed", 0.0);
+  }
+  if (rod_force_armed_ && !rod_force_applied_ && sim_time >= rod_force_arm_sim_time_ + 1.0) {
+    d_->xfrc_applied[6 * rod_force_body_id_] += 2.0;
+    rod_force_applied_ = true;
+    rod_force_applied_status_.store(true, std::memory_order_relaxed);
+    rod_force_start_sim_time_ = sim_time;
+    record("pulse_start", 2.0);
+  }
+  if (rod_force_applied_ && sim_time >= rod_force_start_sim_time_ + rod_force_duration_sec_) {
+    d_->xfrc_applied[6 * rod_force_body_id_] -= 2.0;
+    rod_force_applied_ = false;
+    rod_force_applied_status_.store(false, std::memory_order_relaxed);
+    rod_force_armed_ = false;
+    rod_force_armed_status_.store(false, std::memory_order_relaxed);
+    rod_force_consumed_ = true;
+    record("pulse_end", 0.0);
+  }
+}
 CallbackReturn FrankaMjHardwareSystem::on_init(const hardware_interface::HardwareInfo& info) {
   if (hardware_interface::SystemInterface::on_init(info) != CallbackReturn::SUCCESS) {
     return CallbackReturn::ERROR;
@@ -601,6 +691,20 @@ CallbackReturn FrankaMjHardwareSystem::on_activate(
 
 CallbackReturn FrankaMjHardwareSystem::on_deactivate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
+  if (rod_force_enabled_) {
+    rod_force_arm_requested_.store(false, std::memory_order_relaxed);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+    while ((rod_force_applied_status_.load(std::memory_order_relaxed) ||
+            rod_force_armed_status_.load(std::memory_order_relaxed)) &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (rod_force_applied_status_.load(std::memory_order_relaxed) ||
+        rod_force_armed_status_.load(std::memory_order_relaxed)) {
+      RCLCPP_ERROR(getLogger(), "[rod_force] physics thread did not clear the experiment pulse state before deactivation");
+      return CallbackReturn::ERROR;
+    }
+  }
   RCLCPP_INFO(getLogger(), "trying to Stop...");
   bool waiting_for_force_restore = false;
   for (const auto& arm_container_pair : arms_) {
@@ -945,6 +1049,7 @@ hardware_interface::return_type FrankaMjHardwareSystem::read(const rclcpp::Time&
 
 hardware_interface::return_type FrankaMjHardwareSystem::write(const rclcpp::Time& /*time*/,
                                                                const rclcpp::Duration& period) {
+  updateRodForcePulse();
 //   std::lock_guard<std::mutex> guard(mj_mutex_);
   // ---------------- ADAPTIVE ADMITTANCE CALCULATION ----------------
   static int loop_cnt = 0;

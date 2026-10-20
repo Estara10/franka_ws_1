@@ -14,6 +14,8 @@
 #include <thread>
 #include <stdexcept>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -200,6 +202,162 @@ TEST(A1FingerSnapshot, RejectsMissingOldAndContradictoryFeedback)
   EXPECT_FALSE(a1v::makeFingerJointSnapshot(left, right, conflict, 1000000003LL, 4.12,
                                             4.00, 4.20, {{10, 21}}, 0.5, 1e-6,
                                             out, reason));
+}
+
+TEST(A1P2bStartState, MapsFreshArmAndTypedFingerFeedbackWithoutDefaults)
+{
+  std::map<std::string, double> arms;
+  for (const std::string side : {"mj_left", "mj_right"}) {
+    for (int joint = 1; joint <= 7; ++joint) {
+      arms.emplace(side + "_joint" + std::to_string(joint), 0.01 * joint);
+    }
+  }
+  const std::array<double, 4> fingers{{0.011, 0.019, 0.027, 0.033}};
+  std::map<std::string, double> mapped;
+  std::string reason;
+  ASSERT_TRUE(a1v::mapP2bStartPositions(arms, fingers, 0.01, {{0.02, 0.03}}, 0.5,
+                                        mapped, reason)) << reason;
+  ASSERT_EQ(mapped.size(), 18u);
+  EXPECT_DOUBLE_EQ(mapped.at("mj_left_joint4"), 0.04);
+  EXPECT_DOUBLE_EQ(mapped.at("mj_right_joint7"), 0.07);
+  EXPECT_DOUBLE_EQ(mapped.at("mj_left_finger_joint1"), 0.011);
+  EXPECT_DOUBLE_EQ(mapped.at("mj_left_finger_joint2"), 0.019);
+  EXPECT_DOUBLE_EQ(mapped.at("mj_right_finger_joint1"), 0.027);
+  EXPECT_DOUBLE_EQ(mapped.at("mj_right_finger_joint2"), 0.033);
+
+  auto missing_arm = arms;
+  missing_arm.erase("mj_right_joint5");
+  EXPECT_FALSE(a1v::mapP2bStartPositions(missing_arm, fingers, 0.01, {{0.02, 0.03}}, 0.5,
+                                         mapped, reason));
+  EXPECT_NE(reason.find("mj_right_joint5"), std::string::npos);
+  EXPECT_FALSE(a1v::mapP2bStartPositions(arms, fingers, 0.01, {{0.02, 0.51}}, 0.5,
+                                         mapped, reason));
+  EXPECT_NE(reason.find("right typed finger"), std::string::npos);
+}
+
+TEST(A1P2bStartState, AcceptsB05MicroscopicNegativeFingerValuesWithoutChangingThem)
+{
+  std::map<std::string, double> arms;
+  for (const std::string side : {"mj_left", "mj_right"}) {
+    for (int joint = 1; joint <= 7; ++joint) {
+      arms.emplace(side + "_joint" + std::to_string(joint), 0.01 * joint);
+    }
+  }
+  const std::array<double, 4> b05{{
+      -1.5315476842799908e-08, 1.5315476842799905e-08,
+      -1.5315530607144407e-08, 1.5315530607144407e-08}};
+  std::map<std::string, double> mapped;
+  std::string reason;
+  ASSERT_TRUE(a1v::mapP2bStartPositions(arms, b05, 0.01, {{0.02, 0.03}}, 0.5,
+                                        mapped, reason)) << reason;
+  EXPECT_EQ(reason, "ok_with_numeric_tolerance");
+  const auto& names = a1v::fingerJointNames();
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    EXPECT_DOUBLE_EQ(mapped.at(names[i]), b05[i]);
+  }
+
+  std::map<std::string, double> direct;
+  ASSERT_TRUE(a1v::mapMeasuredFingerPositions(b05, direct, reason)) << reason;
+  EXPECT_EQ(reason, "ok_with_numeric_tolerance");
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    EXPECT_DOUBLE_EQ(direct.at(names[i]), b05[i]);
+  }
+}
+
+TEST(A1P2bStartState, FingerNumericToleranceIsLimitedToApprovedLowerBoundary)
+{
+  std::map<std::string, double> mapped;
+  std::string reason;
+  const std::array<double, 4> at_lower{{-1e-6, 0.0, 0.0401, 0.02}};
+  ASSERT_TRUE(a1v::mapMeasuredFingerPositions(at_lower, mapped, reason)) << reason;
+  EXPECT_DOUBLE_EQ(mapped.at("mj_left_finger_joint1"), -1e-6);
+  EXPECT_DOUBLE_EQ(mapped.at("mj_right_finger_joint1"), 0.0401);
+  EXPECT_EQ(reason, "ok_with_numeric_tolerance");
+
+  auto below_lower = at_lower;
+  below_lower[0] = -1.0001e-6;
+  EXPECT_FALSE(a1v::mapMeasuredFingerPositions(below_lower, mapped, reason));
+  EXPECT_NE(reason.find("mj_left_finger_joint1"), std::string::npos);
+
+  auto above_upper = at_lower;
+  above_upper[2] = 0.0401000001;
+  EXPECT_FALSE(a1v::mapMeasuredFingerPositions(above_upper, mapped, reason));
+  EXPECT_NE(reason.find("mj_right_finger_joint1"), std::string::npos);
+}
+
+TEST(A1P2bFingerDiagnostic, ClassifiesMissingStaleAndRawValueFailures)
+{
+  const auto classify = [](double raw, bool present, double age,
+                           const std::string& actual = "mj_left_finger_joint1") {
+    return a1v::classifyP2bFingerInput(raw, present, age, 0.5, actual,
+                                      "mj_left_finger_joint1",
+                                      a1v::kFingerNumericLowerBoundM,
+                                      a1v::kFingerAcceptedUpperBoundM);
+  };
+
+  const double missing_value = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_EQ(classify(missing_value, false, missing_value), a1v::FingerInputClass::MISSING);
+  EXPECT_EQ(classify(0.01, true, 0.5001), a1v::FingerInputClass::STALE);
+  EXPECT_EQ(classify(std::numeric_limits<double>::quiet_NaN(), true, 0.01),
+            a1v::FingerInputClass::NONFINITE);
+  EXPECT_EQ(classify(std::numeric_limits<double>::infinity(), true, 0.01),
+            a1v::FingerInputClass::NONFINITE);
+  EXPECT_EQ(classify(-0.0002, true, 0.01), a1v::FingerInputClass::BELOW_LOWER);
+  EXPECT_EQ(classify(-1e-6, true, 0.01),
+            a1v::FingerInputClass::ACCEPTED_WITH_NUMERIC_TOLERANCE);
+  EXPECT_EQ(classify(-1.5315476842799908e-08, true, 0.01),
+            a1v::FingerInputClass::ACCEPTED_WITH_NUMERIC_TOLERANCE);
+  EXPECT_EQ(classify(0.0, true, 0.01), a1v::FingerInputClass::VALID);
+  EXPECT_EQ(classify(0.0402, true, 0.01), a1v::FingerInputClass::ABOVE_UPPER);
+  EXPECT_EQ(classify(0.01, true, 0.01, "mj_right_finger_joint1"),
+            a1v::FingerInputClass::MAPPING_MISMATCH);
+  EXPECT_EQ(classify(0.0401, true, 0.01), a1v::FingerInputClass::VALID);
+
+  const double raw_out_of_range = 0.0402;
+  const auto rejected = classify(raw_out_of_range, true, 0.01);
+  EXPECT_EQ(rejected, a1v::FingerInputClass::ABOVE_UPPER);
+  EXPECT_DOUBLE_EQ(raw_out_of_range, 0.0402);
+  EXPECT_STREQ(a1v::fingerInputClassName(rejected), "above_upper_bound");
+}
+
+TEST(A1P2bFingerDiagnostic, WritesFailedRawValuesWithoutDefaultingOrClamping)
+{
+  const std::array<double, 4> raw{{
+      std::numeric_limits<double>::quiet_NaN(), -0.000123456789012345,
+      0.04023456789012345, 0.0123456789012345}};
+  const std::array<bool, 4> present{{false, true, true, true}};
+  const std::array<a1v::FingerInputClass, 4> classes{{
+      a1v::FingerInputClass::MISSING, a1v::FingerInputClass::BELOW_LOWER,
+      a1v::FingerInputClass::ABOVE_UPPER, a1v::FingerInputClass::VALID}};
+  std::ostringstream output;
+  a1v::writeP2bFingerRawDiagnosticCsv(output, raw, present, classes);
+  const std::string csv = output.str();
+  EXPECT_NE(csv.find("0,mj_left_finger_joint1,0,NA,missing"), std::string::npos);
+  std::ostringstream expected_negative;
+  expected_negative << std::setprecision(17) << raw[1];
+  std::ostringstream expected_high;
+  expected_high << std::setprecision(17) << raw[2];
+  EXPECT_NE(csv.find("1,mj_left_finger_joint2,1," + expected_negative.str()), std::string::npos);
+  EXPECT_NE(csv.find("2,mj_right_finger_joint1,1," + expected_high.str()), std::string::npos);
+  EXPECT_NE(csv.find("above_upper_bound"), std::string::npos);
+  std::ostringstream expected_valid;
+  expected_valid << std::setprecision(17) << raw[3];
+  EXPECT_NE(csv.find("3,mj_right_finger_joint2,1," + expected_valid.str() + ",valid"),
+            std::string::npos);
+  EXPECT_DOUBLE_EQ(raw[1], -0.000123456789012345);
+  EXPECT_DOUBLE_EQ(raw[2], 0.04023456789012345);
+
+  const std::array<double, 4> nonfinite_raw{{
+      std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0, 0.0}};
+  const std::array<bool, 4> nonfinite_present{{true, false, false, false}};
+  const std::array<a1v::FingerInputClass, 4> nonfinite_classes{{
+      a1v::FingerInputClass::NONFINITE, a1v::FingerInputClass::MISSING,
+      a1v::FingerInputClass::MISSING, a1v::FingerInputClass::MISSING}};
+  std::ostringstream nonfinite_output;
+  a1v::writeP2bFingerRawDiagnosticCsv(nonfinite_output, nonfinite_raw,
+                                      nonfinite_present, nonfinite_classes);
+  EXPECT_NE(nonfinite_output.str().find(
+      "0,mj_left_finger_joint1,1,NaN,nonfinite"), std::string::npos);
 }
 
 TEST(A1FingerAxis, NonCommutingRuntimeRotationChainClosesAcrossRodWidth)

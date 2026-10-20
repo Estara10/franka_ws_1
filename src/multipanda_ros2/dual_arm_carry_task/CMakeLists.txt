@@ -159,6 +159,7 @@ ament_target_dependencies(dual_arm_carry_task_node
   std_srvs
   control_msgs
   franka_msgs
+  multi_mode_control_msgs
   moveit_msgs
   shape_msgs
   tf2_eigen
@@ -283,10 +284,23 @@ if(BUILD_TESTING)
   ament_add_gtest(test_time_profile_optimizer test/test_time_profile_optimizer.cpp)
   target_link_libraries(test_time_profile_optimizer time_profile_optimizer)
 
+  ament_add_gtest(test_payload_feedforward test/test_payload_feedforward.cpp)
+  target_link_libraries(test_payload_feedforward Eigen3::Eigen)
+
   ament_add_gtest(test_gripper_protocol test/test_gripper_protocol.cpp)
   target_link_libraries(test_gripper_protocol gripper_protocol)
 
   ament_add_gtest(test_grasp_contact_acceptance test/test_grasp_contact_acceptance.cpp)
+
+  ament_add_gtest(test_controller_fault_latch test/test_controller_fault_latch.cpp)
+
+  ament_add_gtest(test_bilateral_snapshot_gate test/test_bilateral_snapshot_gate.cpp)
+  ament_add_gtest(test_bridge_process test/test_bridge_process.cpp)
+  ament_add_gtest(test_mmc_state_service test/test_mmc_state_service.cpp)
+  ament_target_dependencies(test_mmc_state_service rclcpp multi_mode_control_msgs franka_msgs)
+  target_link_libraries(test_mmc_state_service Eigen3::Eigen)
+
+  ament_add_gtest(test_mmc_activation_handshake test/test_mmc_activation_handshake.cpp)
 
   # Interface test: the production client driven against a minimal ROS fake
   # action server. Not a helper test.

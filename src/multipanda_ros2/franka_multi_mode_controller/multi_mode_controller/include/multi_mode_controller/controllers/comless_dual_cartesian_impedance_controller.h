@@ -17,6 +17,10 @@ struct PandaCartesianImpedanceControllerPose {
   // Reference twist [v; w] in the same frame as the pose error and the
   // zero Jacobian (the arm base frame). Zero means "hold".
   Eigen::Matrix<double, 6, 1> twist = Eigen::Matrix<double, 6, 1>::Zero();
+  // Explicit payload feedforward force [N] in the same base frame as the
+  // zero Jacobian. It is mapped through J_linear^T and added before the
+  // shared magnitude/rate limits. Zero keeps the original law.
+  Eigen::Vector3d ff_force = Eigen::Vector3d::Zero();
 };
 
 struct PandaCartesianImpedanceControllerParams {

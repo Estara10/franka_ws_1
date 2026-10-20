@@ -97,3 +97,19 @@ TEST(ImpedanceTorqueLimits, InvalidPeriodFallsBackToABoundedStep)
     EXPECT_GE(result.tau[0], 1.0 - 1e-12);
   }
 }
+
+// The controller adds the payload feedforward to the raw impedance torque
+// before this function. Its sum is limited exactly like any other request:
+// the feedforward does not bypass the magnitude or rate limit.
+TEST(ImpedanceTorqueLimits, PayloadFeedforwardSharesTheSameLimiter)
+{
+  Vec7 impedance;
+  impedance << 80.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0;
+  Vec7 payload_ff;
+  payload_ff << 20.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0;
+  const auto result = panda_controllers::applyTorqueLimits(
+      impedance + payload_ff, Vec7::Zero(), 10.0, panda_limits::tau_max, panda_limits::tauD_max);
+  EXPECT_TRUE(result.saturated);
+  EXPECT_DOUBLE_EQ(result.tau[0], 87.0);
+  EXPECT_DOUBLE_EQ(result.tau[4], 12.0);
+}

@@ -8,6 +8,7 @@
 #include <limits>
 
 #include <franka_hardware/sim/gripper_shared_state.hpp>
+#include <franka_hardware/sim/gripper_joint_names.hpp>
 #include <franka_hardware/sim/gripper_command_policy.hpp>
 #include <franka_hardware/sim/contact_probe_contact_filter.hpp>
 
@@ -24,6 +25,13 @@ using franka_gripper::contactSuccessAllowed;
 using franka_gripper::GripperCompletionPolicy;
 using franka_gripper::gripperCommandCompletionPolicy;
 using franka_gripper::explicitGraspCompletionPolicy;
+
+TEST(GripperJointNames, UsesRobotPrefixForBothPublishedFingerJoints) {
+  EXPECT_EQ(franka_gripper::fingerJointNamesForRobot("mj_left"),
+            (std::vector<std::string>{"mj_left_finger_joint1", "mj_left_finger_joint2"}));
+  EXPECT_EQ(franka_gripper::fingerJointNamesForRobot("mj_right"),
+            (std::vector<std::string>{"mj_right_finger_joint1", "mj_right_finger_joint2"}));
+}
 
 GripperFeedback makeFeedback(double q1, double q2, unsigned long long seq);
 GripperFeedback contactFeedback(double q1, double q2, unsigned long long seq,

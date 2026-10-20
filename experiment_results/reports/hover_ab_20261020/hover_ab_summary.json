@@ -1,0 +1,3843 @@
+{
+  "window_sec": 3.0,
+  "window_definition": {
+    "A": "first HOVER_HOLD sample after lift; 3.0 s from that sample",
+    "B": "first mmc_hold_trace sample after the MMC first reference; 3.0 s from that absolute sim time"
+  },
+  "note": "Asynchronous physical samples. Rod and hand deltas are world-frame displacement from the window-entry sample. Legacy task *_slip_m fields are inferred grasp-reference rod-centre residuals, not local pad tangential contact slip. Rod-minus-hand vector change is a relative pose-position change, not direct contact slip.",
+  "runs": [
+    {
+      "group": "A",
+      "run_id": "contact_hover_ab_lidio_20261020_A1_retry2",
+      "window_t0_sim_sec": 27.812,
+      "window_rows": 60,
+      "window_span_sec": 2.977999999999998,
+      "post_lift_switch_sec": 0.0,
+      "entry": {
+        "rod_world_xyz_mm": [
+          498.1307037,
+          0.09269518872,
+          63.806019049999996
+        ],
+        "left_hand_world_xyz_mm": [
+          472.7763686,
+          149.570775,
+          162.03222340000002
+        ],
+        "right_hand_world_xyz_mm": [
+          525.2139079,
+          -150.7573477,
+          161.3759683
+        ],
+        "rod_quat_xyzw": [
+          0.0004657174657,
+          -0.0007661219662,
+          0.08615771591,
+          0.996281107
+        ],
+        "left_hand_quat_xyzw": [
+          0.8862817326,
+          0.4631296881,
+          -0.002199247801,
+          -0.003278057007
+        ],
+        "right_hand_quat_xyzw": [
+          0.887457433,
+          0.4608768542,
+          -0.00343899859,
+          -5.582305097e-05
+        ],
+        "left_grasp_reference_residual_mm": 2.7152090799999997,
+        "right_grasp_reference_residual_mm": 2.7733747930000003
+      },
+      "end": {
+        "left_grasp_reference_residual_mm": 7.888754878,
+        "right_grasp_reference_residual_mm": 7.450811499
+      },
+      "delta": {
+        "rod_xyz_mm": [
+          -2.236714299999998,
+          -0.46266703982,
+          0.7223352300000097
+        ],
+        "left_hand_xyz_mm": [
+          -1.7970184000000167,
+          4.870590000000008,
+          0.8077900999999832
+        ],
+        "right_hand_xyz_mm": [
+          -1.1954999000000077,
+          -5.17181160000002,
+          1.0665665000000046
+        ],
+        "left_grasp_reference_residual_mm": 5.173545798000001,
+        "right_grasp_reference_residual_mm": 4.677436706,
+        "left_rod_hand_xyz_mm": [
+          -0.43969589999998115,
+          -5.333257039819989,
+          -0.08545486999997354
+        ],
+        "right_rod_hand_xyz_mm": [
+          -1.04121439999999,
+          4.7091445601800395,
+          -0.344231269999995
+        ],
+        "left_rod_hand_norm_mm": 5.352033788390444,
+        "right_rod_hand_norm_mm": 4.835148920424934,
+        "rod_attitude_deg": 0.5471622104840799
+      },
+      "window_max": {
+        "left_grasp_reference_residual_mm": 7.888754878,
+        "right_grasp_reference_residual_mm": 7.450811499,
+        "left_angle_deg": 1.3717465889397573,
+        "right_angle_deg": 0.5997012253155088
+      },
+      "all_four_contact_sample_percent": 56.666666666666664,
+      "series": [
+        {
+          "t": 0.0,
+          "rod": 0.0,
+          "left_hand": 0.0,
+          "right_hand": 0.0,
+          "left_grasp_reference_residual_mm": 2.7152090799999997,
+          "right_grasp_reference_residual_mm": 2.7733747930000003,
+          "rod_attitude_deg": 0.0
+        },
+        {
+          "t": 0.03399999999999892,
+          "rod": 1.6193379700000095,
+          "left_hand": 0.9126792999999966,
+          "right_hand": 0.918612799999996,
+          "left_grasp_reference_residual_mm": 2.590744567,
+          "right_grasp_reference_residual_mm": 2.6608417600000003,
+          "rod_attitude_deg": 0.03092139665389405
+        },
+        {
+          "t": 0.09799999999999898,
+          "rod": 2.620442900000006,
+          "left_hand": 1.9757840999999887,
+          "right_hand": 1.9201831999999808,
+          "left_grasp_reference_residual_mm": 2.533680856,
+          "right_grasp_reference_residual_mm": 2.816895144,
+          "rod_attitude_deg": 0.05842472110580566
+        },
+        {
+          "t": 0.13799999999999812,
+          "rod": 3.0547246100000036,
+          "left_hand": 2.218326599999987,
+          "right_hand": 2.185640599999983,
+          "left_grasp_reference_residual_mm": 2.584890917,
+          "right_grasp_reference_residual_mm": 2.778327995,
+          "rod_attitude_deg": 0.11875040433123486
+        },
+        {
+          "t": 0.19599999999999795,
+          "rod": 3.1868436800000093,
+          "left_hand": 2.354487500000002,
+          "right_hand": 2.3357628999999824,
+          "left_grasp_reference_residual_mm": 2.5305935419999996,
+          "right_grasp_reference_residual_mm": 2.8626613770000002,
+          "rod_attitude_deg": 0.18180630779263907
+        },
+        {
+          "t": 0.23799999999999955,
+          "rod": 3.151018030000008,
+          "left_hand": 2.313256999999985,
+          "right_hand": 2.3247351999999832,
+          "left_grasp_reference_residual_mm": 2.6911582650000003,
+          "right_grasp_reference_residual_mm": 2.768903957,
+          "rod_attitude_deg": 0.2502513630505533
+        },
+        {
+          "t": 0.29799999999999827,
+          "rod": 3.0488230300000083,
+          "left_hand": 2.211807600000004,
+          "right_hand": 2.179871100000008,
+          "left_grasp_reference_residual_mm": 2.614911219,
+          "right_grasp_reference_residual_mm": 2.955946319,
+          "rod_attitude_deg": 0.2916413158129291
+        },
+        {
+          "t": 0.3379999999999974,
+          "rod": 2.9311472600000026,
+          "left_hand": 2.094285099999982,
+          "right_hand": 2.0757050999999915,
+          "left_grasp_reference_residual_mm": 2.726050387,
+          "right_grasp_reference_residual_mm": 3.0333654080000003,
+          "rod_attitude_deg": 0.324676335927381
+        },
+        {
+          "t": 0.3979999999999997,
+          "rod": 2.844809170000004,
+          "left_hand": 2.054137799999994,
+          "right_hand": 2.047882400000006,
+          "left_grasp_reference_residual_mm": 2.812842452,
+          "right_grasp_reference_residual_mm": 3.026306855,
+          "rod_attitude_deg": 0.34670621511673044
+        },
+        {
+          "t": 0.4399999999999977,
+          "rod": 2.780257760000002,
+          "left_hand": 2.032263199999995,
+          "right_hand": 2.027371299999997,
+          "left_grasp_reference_residual_mm": 2.894634238,
+          "right_grasp_reference_residual_mm": 2.9889720279999996,
+          "rod_attitude_deg": 0.3782006107869172
+        },
+        {
+          "t": 0.5,
+          "rod": 2.726479470000001,
+          "left_hand": 1.998540199999982,
+          "right_hand": 2.016364699999995,
+          "left_grasp_reference_residual_mm": 2.928686771,
+          "right_grasp_reference_residual_mm": 3.042184739,
+          "rod_attitude_deg": 0.38858664474781823
+        },
+        {
+          "t": 0.5359999999999978,
+          "rod": 2.6946293300000033,
+          "left_hand": 1.9613804999999984,
+          "right_hand": 2.009081100000004,
+          "left_grasp_reference_residual_mm": 3.0506021530000003,
+          "right_grasp_reference_residual_mm": 3.108800683,
+          "rod_attitude_deg": 0.3745076690364376
+        },
+        {
+          "t": 0.5939999999999976,
+          "rod": 2.660562910000011,
+          "left_hand": 1.9423057999999882,
+          "right_hand": 1.9988089999999903,
+          "left_grasp_reference_residual_mm": 3.174599863,
+          "right_grasp_reference_residual_mm": 3.09200622,
+          "rod_attitude_deg": 0.3362149423265243
+        },
+        {
+          "t": 0.6379999999999981,
+          "rod": 2.628570820000009,
+          "left_hand": 1.9045458999999987,
+          "right_hand": 1.966795500000007,
+          "left_grasp_reference_residual_mm": 3.3613363680000004,
+          "right_grasp_reference_residual_mm": 3.2223495289999997,
+          "rod_attitude_deg": 0.2993042059504514
+        },
+        {
+          "t": 0.695999999999998,
+          "rod": 2.5848079700000053,
+          "left_hand": 1.864224400000003,
+          "right_hand": 1.9532743999999824,
+          "left_grasp_reference_residual_mm": 3.513667976,
+          "right_grasp_reference_residual_mm": 3.329690023,
+          "rod_attitude_deg": 0.2785137139733799
+        },
+        {
+          "t": 0.7379999999999995,
+          "rod": 2.5414800099999995,
+          "left_hand": 1.8262609999999957,
+          "right_hand": 1.9260224000000048,
+          "left_grasp_reference_residual_mm": 3.6875810729999996,
+          "right_grasp_reference_residual_mm": 3.4099564669999998,
+          "rod_attitude_deg": 0.24836613534919133
+        },
+        {
+          "t": 0.7979999999999983,
+          "rod": 2.500598860000008,
+          "left_hand": 1.807971699999994,
+          "right_hand": 1.903127099999985,
+          "left_grasp_reference_residual_mm": 3.794348978,
+          "right_grasp_reference_residual_mm": 3.460833675,
+          "rod_attitude_deg": 0.2340631108773903
+        },
+        {
+          "t": 0.8599999999999994,
+          "rod": 2.4315530800000094,
+          "left_hand": 1.7751010999999817,
+          "right_hand": 1.8841162999999883,
+          "left_grasp_reference_residual_mm": 3.9012051,
+          "right_grasp_reference_residual_mm": 3.581185827,
+          "rod_attitude_deg": 0.2973039608487354
+        },
+        {
+          "t": 0.8979999999999997,
+          "rod": 2.3922127900000008,
+          "left_hand": 1.7722495999999976,
+          "right_hand": 1.8598870000000045,
+          "left_grasp_reference_residual_mm": 3.880636208,
+          "right_grasp_reference_residual_mm": 3.6629860670000003,
+          "rod_attitude_deg": 0.35279721849478796
+        },
+        {
+          "t": 0.9579999999999984,
+          "rod": 2.3509812100000054,
+          "left_hand": 1.7118962999999876,
+          "right_hand": 1.832864699999992,
+          "left_grasp_reference_residual_mm": 4.117053458,
+          "right_grasp_reference_residual_mm": 3.8402832399999998,
+          "rod_attitude_deg": 0.3752525265780027
+        },
+        {
+          "t": 0.9979999999999976,
+          "rod": 2.292726600000003,
+          "left_hand": 1.6893882000000027,
+          "right_hand": 1.8139013000000037,
+          "left_grasp_reference_residual_mm": 4.151292046,
+          "right_grasp_reference_residual_mm": 4.0111218420000005,
+          "rod_attitude_deg": 0.39021662405542634
+        },
+        {
+          "t": 1.0559999999999974,
+          "rod": 2.2550602899999994,
+          "left_hand": 1.6729721999999836,
+          "right_hand": 1.808271199999989,
+          "left_grasp_reference_residual_mm": 4.187181904,
+          "right_grasp_reference_residual_mm": 4.036852506,
+          "rod_attitude_deg": 0.39938259673426885
+        },
+        {
+          "t": 1.097999999999999,
+          "rod": 2.210725349999998,
+          "left_hand": 1.6618358999999916,
+          "right_hand": 1.8098967999999882,
+          "left_grasp_reference_residual_mm": 4.184513884,
+          "right_grasp_reference_residual_mm": 4.057954508,
+          "rod_attitude_deg": 0.44945248006431604
+        },
+        {
+          "t": 1.1579999999999977,
+          "rod": 2.1512440099999974,
+          "left_hand": 1.6222501,
+          "right_hand": 1.8105756000000028,
+          "left_grasp_reference_residual_mm": 4.333566961,
+          "right_grasp_reference_residual_mm": 4.146211779000001,
+          "rod_attitude_deg": 0.4957027956851018
+        },
+        {
+          "t": 1.195999999999998,
+          "rod": 2.0194120400000015,
+          "left_hand": 1.624894299999985,
+          "right_hand": 1.8139622999999994,
+          "left_grasp_reference_residual_mm": 4.385605796,
+          "right_grasp_reference_residual_mm": 4.140403254,
+          "rod_attitude_deg": 0.466783307089161
+        },
+        {
+          "t": 1.2579999999999991,
+          "rod": 2.0155165700000004,
+          "left_hand": 1.6063403999999892,
+          "right_hand": 1.8087640999999988,
+          "left_grasp_reference_residual_mm": 4.48209403,
+          "right_grasp_reference_residual_mm": 4.137315585,
+          "rod_attitude_deg": 0.4749539602295995
+        },
+        {
+          "t": 1.2959999999999994,
+          "rod": 1.9629790600000085,
+          "left_hand": 1.5767963999999968,
+          "right_hand": 1.8055317000000015,
+          "left_grasp_reference_residual_mm": 4.568422158,
+          "right_grasp_reference_residual_mm": 4.191364369,
+          "rod_attitude_deg": 0.5069341181655862
+        },
+        {
+          "t": 1.3580000000000005,
+          "rod": 1.9225008600000093,
+          "left_hand": 1.510040199999979,
+          "right_hand": 1.7643573999999995,
+          "left_grasp_reference_residual_mm": 4.771992299,
+          "right_grasp_reference_residual_mm": 4.498525538,
+          "rod_attitude_deg": 0.4460136308784139
+        },
+        {
+          "t": 1.3979999999999997,
+          "rod": 1.8683939400000042,
+          "left_hand": 1.4929689000000024,
+          "right_hand": 1.7532353999999972,
+          "left_grasp_reference_residual_mm": 4.866845712,
+          "right_grasp_reference_residual_mm": 4.467722255,
+          "rod_attitude_deg": 0.3977483497438768
+        },
+        {
+          "t": 1.4599999999999973,
+          "rod": 1.8354899200000023,
+          "left_hand": 1.4546098999999868,
+          "right_hand": 1.7242328999999834,
+          "left_grasp_reference_residual_mm": 5.037512502,
+          "right_grasp_reference_residual_mm": 4.550892398,
+          "rod_attitude_deg": 0.40077571726688827
+        },
+        {
+          "t": 1.4979999999999976,
+          "rod": 1.79952634000001,
+          "left_hand": 1.414198099999986,
+          "right_hand": 1.7299449000000022,
+          "left_grasp_reference_residual_mm": 5.186950114,
+          "right_grasp_reference_residual_mm": 4.614700794,
+          "rod_attitude_deg": 0.37559898769729355
+        },
+        {
+          "t": 1.5579999999999998,
+          "rod": 1.773707440000008,
+          "left_hand": 1.3660565999999985,
+          "right_hand": 1.7003250000000025,
+          "left_grasp_reference_residual_mm": 5.390377341,
+          "right_grasp_reference_residual_mm": 4.775304392000001,
+          "rod_attitude_deg": 0.35600936400128885
+        },
+        {
+          "t": 1.5999999999999979,
+          "rod": 1.7226210100000083,
+          "left_hand": 1.3387551999999858,
+          "right_hand": 1.7036359,
+          "left_grasp_reference_residual_mm": 5.493658192000001,
+          "right_grasp_reference_residual_mm": 4.7631312040000005,
+          "rod_attitude_deg": 0.40175033561219275
+        },
+        {
+          "t": 1.6579999999999977,
+          "rod": 1.6679090900000026,
+          "left_hand": 1.2895765999999809,
+          "right_hand": 1.6780281000000064,
+          "left_grasp_reference_residual_mm": 5.663419284,
+          "right_grasp_reference_residual_mm": 4.897968103,
+          "rod_attitude_deg": 0.434042404165514
+        },
+        {
+          "t": 1.6980000000000004,
+          "rod": 1.639894660000002,
+          "left_hand": 1.2731077999999785,
+          "right_hand": 1.65700869999999,
+          "left_grasp_reference_residual_mm": 5.755038883,
+          "right_grasp_reference_residual_mm": 4.973841908000001,
+          "rod_attitude_deg": 0.4392027587687536
+        },
+        {
+          "t": 1.7579999999999991,
+          "rod": 1.601728270000005,
+          "left_hand": 1.2298003999999807,
+          "right_hand": 1.6241894000000034,
+          "left_grasp_reference_residual_mm": 5.846358516,
+          "right_grasp_reference_residual_mm": 5.100770993,
+          "rod_attitude_deg": 0.4539037753781067
+        },
+        {
+          "t": 1.8179999999999978,
+          "rod": 1.565719970000004,
+          "left_hand": 1.1963710000000016,
+          "right_hand": 1.6115382999999928,
+          "left_grasp_reference_residual_mm": 5.964144365,
+          "right_grasp_reference_residual_mm": 5.1602532189999994,
+          "rod_attitude_deg": 0.46587096409403855
+        },
+        {
+          "t": 1.8580000000000005,
+          "rod": 1.5388815699999974,
+          "left_hand": 1.1980201000000024,
+          "right_hand": 1.6006622999999998,
+          "left_grasp_reference_residual_mm": 6.055796829999999,
+          "right_grasp_reference_residual_mm": 5.1300984199999995,
+          "rod_attitude_deg": 0.48292242818612124
+        },
+        {
+          "t": 1.9179999999999993,
+          "rod": 1.5015570600000054,
+          "left_hand": 1.1912555999999963,
+          "right_hand": 1.579418799999982,
+          "left_grasp_reference_residual_mm": 5.991876555999999,
+          "right_grasp_reference_residual_mm": 5.210677593,
+          "rod_attitude_deg": 0.5121351973278696
+        },
+        {
+          "t": 1.9579999999999984,
+          "rod": 1.4629904700000085,
+          "left_hand": 1.1944141999999935,
+          "right_hand": 1.5657520000000036,
+          "left_grasp_reference_residual_mm": 5.9848916,
+          "right_grasp_reference_residual_mm": 5.2394602589999995,
+          "rod_attitude_deg": 0.5425974068225097
+        },
+        {
+          "t": 2.017999999999997,
+          "rod": 1.4330536600000028,
+          "left_hand": 1.1967631999999784,
+          "right_hand": 1.5578313000000066,
+          "left_grasp_reference_residual_mm": 5.958041663,
+          "right_grasp_reference_residual_mm": 5.283427165,
+          "rod_attitude_deg": 0.5546500051174217
+        },
+        {
+          "t": 2.058,
+          "rod": 1.3987533300000021,
+          "left_hand": 1.1798731999999867,
+          "right_hand": 1.5432665000000012,
+          "left_grasp_reference_residual_mm": 6.027224115,
+          "right_grasp_reference_residual_mm": 5.447541301,
+          "rod_attitude_deg": 0.5072132180833239
+        },
+        {
+          "t": 2.1179999999999986,
+          "rod": 1.3473346600000047,
+          "left_hand": 1.1610827999999906,
+          "right_hand": 1.5144490999999816,
+          "left_grasp_reference_residual_mm": 5.978807339,
+          "right_grasp_reference_residual_mm": 5.576369874,
+          "rod_attitude_deg": 0.5388377035269227
+        },
+        {
+          "t": 2.155999999999999,
+          "rod": 1.3240131499999974,
+          "left_hand": 1.144547400000001,
+          "right_hand": 1.511924899999989,
+          "left_grasp_reference_residual_mm": 6.146959958999999,
+          "right_grasp_reference_residual_mm": 5.569331146,
+          "rod_attitude_deg": 0.5469544433404983
+        },
+        {
+          "t": 2.219999999999999,
+          "rod": 1.2591530800000057,
+          "left_hand": 1.1024611999999878,
+          "right_hand": 1.4649687999999939,
+          "left_grasp_reference_residual_mm": 6.282571205,
+          "right_grasp_reference_residual_mm": 5.771959893,
+          "rod_attitude_deg": 0.5466188509684441
+        },
+        {
+          "t": 2.257999999999999,
+          "rod": 1.2201361999999993,
+          "left_hand": 1.0846112999999824,
+          "right_hand": 1.4347400999999982,
+          "left_grasp_reference_residual_mm": 6.376075848,
+          "right_grasp_reference_residual_mm": 5.8743458330000005,
+          "rod_attitude_deg": 0.4926424016794846
+        },
+        {
+          "t": 2.317999999999998,
+          "rod": 1.1571904900000014,
+          "left_hand": 1.0376554000000038,
+          "right_hand": 1.3960765999999902,
+          "left_grasp_reference_residual_mm": 6.572010615,
+          "right_grasp_reference_residual_mm": 6.09637627,
+          "rod_attitude_deg": 0.49677503567576936
+        },
+        {
+          "t": 2.3580000000000005,
+          "rod": 1.1280413300000096,
+          "left_hand": 1.0093582000000045,
+          "right_hand": 1.3687772000000042,
+          "left_grasp_reference_residual_mm": 6.709900695,
+          "right_grasp_reference_residual_mm": 6.192592572,
+          "rod_attitude_deg": 0.4891608629201067
+        },
+        {
+          "t": 2.4179999999999993,
+          "rod": 1.0888849999999977,
+          "left_hand": 0.9825987000000036,
+          "right_hand": 1.314757899999991,
+          "left_grasp_reference_residual_mm": 6.882194738,
+          "right_grasp_reference_residual_mm": 6.329132343,
+          "rod_attitude_deg": 0.4612943982568576
+        },
+        {
+          "t": 2.4579999999999984,
+          "rod": 1.0532845600000063,
+          "left_hand": 0.9787568999999885,
+          "right_hand": 1.2884643999999945,
+          "left_grasp_reference_residual_mm": 6.928830259,
+          "right_grasp_reference_residual_mm": 6.377942254,
+          "rod_attitude_deg": 0.47631454457037703
+        },
+        {
+          "t": 2.5139999999999993,
+          "rod": 1.015808069999999,
+          "left_hand": 0.9691731999999786,
+          "right_hand": 1.2646423000000073,
+          "left_grasp_reference_residual_mm": 6.9388918859999995,
+          "right_grasp_reference_residual_mm": 6.476338505999999,
+          "rod_attitude_deg": 0.5176413346743297
+        },
+        {
+          "t": 2.558,
+          "rod": 0.9836400000000078,
+          "left_hand": 0.9408682000000002,
+          "right_hand": 1.2440649999999887,
+          "left_grasp_reference_residual_mm": 7.126973989,
+          "right_grasp_reference_residual_mm": 6.650043867,
+          "rod_attitude_deg": 0.5251430945914219
+        },
+        {
+          "t": 2.6179999999999986,
+          "rod": 0.9341659100000066,
+          "left_hand": 0.9213016999999879,
+          "right_hand": 1.248617099999988,
+          "left_grasp_reference_residual_mm": 7.154444362,
+          "right_grasp_reference_residual_mm": 6.7418473599999995,
+          "rod_attitude_deg": 0.5766845669427164
+        },
+        {
+          "t": 2.6779999999999973,
+          "rod": 0.9189934400000016,
+          "left_hand": 0.9046752999999907,
+          "right_hand": 1.2391246000000022,
+          "left_grasp_reference_residual_mm": 7.256850689,
+          "right_grasp_reference_residual_mm": 6.82549738,
+          "rod_attitude_deg": 0.5734513666204625
+        },
+        {
+          "t": 2.719999999999999,
+          "rod": 0.8790493800000104,
+          "left_hand": 0.8968558999999932,
+          "right_hand": 1.2018369000000029,
+          "left_grasp_reference_residual_mm": 7.268997093,
+          "right_grasp_reference_residual_mm": 6.973286083,
+          "rod_attitude_deg": 0.6021628546493685
+        },
+        {
+          "t": 2.7779999999999987,
+          "rod": 0.853317800000003,
+          "left_hand": 0.8849024999999788,
+          "right_hand": 1.1985153999999887,
+          "left_grasp_reference_residual_mm": 7.357039709,
+          "right_grasp_reference_residual_mm": 6.978362764,
+          "rod_attitude_deg": 0.5653792106705964
+        },
+        {
+          "t": 2.814,
+          "rod": 0.8102939300000112,
+          "left_hand": 0.8507053999999847,
+          "right_hand": 1.1586358999999824,
+          "left_grasp_reference_residual_mm": 7.559115385,
+          "right_grasp_reference_residual_mm": 7.187171596000001,
+          "rod_attitude_deg": 0.5239266314493136
+        },
+        {
+          "t": 2.878,
+          "rod": 0.780234589999998,
+          "left_hand": 0.837696299999996,
+          "right_hand": 1.1337792999999985,
+          "left_grasp_reference_residual_mm": 7.655341237,
+          "right_grasp_reference_residual_mm": 7.235139566,
+          "rod_attitude_deg": 0.5152030388587887
+        },
+        {
+          "t": 2.9160000000000004,
+          "rod": 0.7395834599999984,
+          "left_hand": 0.816429399999985,
+          "right_hand": 1.0863473999999929,
+          "left_grasp_reference_residual_mm": 7.79806166,
+          "right_grasp_reference_residual_mm": 7.379386172999999,
+          "rod_attitude_deg": 0.5176576012577643
+        },
+        {
+          "t": 2.977999999999998,
+          "rod": 0.7223352300000097,
+          "left_hand": 0.8077900999999832,
+          "right_hand": 1.0665665000000046,
+          "left_grasp_reference_residual_mm": 7.888754878,
+          "right_grasp_reference_residual_mm": 7.450811499,
+          "rod_attitude_deg": 0.5471622104840799
+        }
+      ],
+      "completed": true,
+      "sample": "A1"
+    },
+    {
+      "group": "A",
+      "run_id": "contact_hover_ab_lidio_20261020_A2",
+      "window_t0_sim_sec": 25.956,
+      "window_rows": 60,
+      "window_span_sec": 2.996000000000002,
+      "post_lift_switch_sec": 0.0,
+      "entry": {
+        "rod_world_xyz_mm": [
+          498.3713059,
+          -0.2820582689,
+          64.49998002
+        ],
+        "left_hand_world_xyz_mm": [
+          472.8573796,
+          149.43288199999998,
+          163.15725270000002
+        ],
+        "right_hand_world_xyz_mm": [
+          525.4177155000001,
+          -150.6391849,
+          162.5804596
+        ],
+        "rod_quat_xyzw": [
+          0.0007165714177,
+          -0.0002479876847,
+          0.08666120438,
+          0.9962375523
+        ],
+        "left_hand_quat_xyzw": [
+          0.8864035992,
+          0.4629005017,
+          -0.001934748917,
+          -0.002835764583
+        ],
+        "right_hand_quat_xyzw": [
+          0.8874501836,
+          0.460892618,
+          -0.003187924436,
+          5.81530496e-05
+        ],
+        "left_grasp_reference_residual_mm": 2.942599066,
+        "right_grasp_reference_residual_mm": 2.723881575
+      },
+      "end": {
+        "left_grasp_reference_residual_mm": 6.7474708329999995,
+        "right_grasp_reference_residual_mm": 7.671445349
+      },
+      "delta": {
+        "rod_xyz_mm": [
+          -2.4392200000000197,
+          0.5569685878,
+          -0.2521398900000027
+        ],
+        "left_hand_xyz_mm": [
+          -1.7748291999999943,
+          4.464015200000004,
+          -0.10011030000001142
+        ],
+        "right_hand_xyz_mm": [
+          -1.4058471000000239,
+          -4.508928299999992,
+          -0.047255100000004324
+        ],
+        "left_grasp_reference_residual_mm": 3.804871767,
+        "right_grasp_reference_residual_mm": 4.947563774,
+        "left_rod_hand_xyz_mm": [
+          -0.6643908000000254,
+          -3.90704661220001,
+          -0.15202958999999128
+        ],
+        "right_rod_hand_xyz_mm": [
+          -1.0333728999999958,
+          5.065896887799987,
+          -0.20488478999999837
+        ],
+        "left_rod_hand_norm_mm": 3.966048582816884,
+        "right_rod_hand_norm_mm": 5.174277592616126,
+        "rod_attitude_deg": 0.510410307670259
+      },
+      "window_max": {
+        "left_grasp_reference_residual_mm": 6.7474708329999995,
+        "right_grasp_reference_residual_mm": 7.671445349,
+        "left_angle_deg": 1.3278224359970388,
+        "right_angle_deg": 0.5584774999251355
+      },
+      "all_four_contact_sample_percent": 60.0,
+      "series": [
+        {
+          "t": 0.0,
+          "rod": 0.0,
+          "left_hand": 0.0,
+          "right_hand": 0.0,
+          "left_grasp_reference_residual_mm": 2.942599066,
+          "right_grasp_reference_residual_mm": 2.723881575,
+          "rod_attitude_deg": 0.0013580348089372904
+        },
+        {
+          "t": 0.05600000000000094,
+          "rod": 1.4484231400000018,
+          "left_hand": 0.5727553000000052,
+          "right_hand": 0.5808650999999942,
+          "left_grasp_reference_residual_mm": 2.635501564,
+          "right_grasp_reference_residual_mm": 2.5768307839999998,
+          "rod_attitude_deg": 0.032229506401637076
+        },
+        {
+          "t": 0.09600000000000009,
+          "rod": 1.996843619999994,
+          "left_hand": 1.1700934999999968,
+          "right_hand": 1.1897166000000015,
+          "left_grasp_reference_residual_mm": 2.732304375,
+          "right_grasp_reference_residual_mm": 2.638836784,
+          "rod_attitude_deg": 0.037855110360062005
+        },
+        {
+          "t": 0.16000000000000014,
+          "rod": 2.2831732899999957,
+          "left_hand": 1.243351700000006,
+          "right_hand": 1.2897040000000026,
+          "left_grasp_reference_residual_mm": 2.781071888,
+          "right_grasp_reference_residual_mm": 2.611664575,
+          "rod_attitude_deg": 0.09327517303229782
+        },
+        {
+          "t": 0.1999999999999993,
+          "rod": 2.296616459999998,
+          "left_hand": 1.2200259999999852,
+          "right_hand": 1.231826200000008,
+          "left_grasp_reference_residual_mm": 2.666040065,
+          "right_grasp_reference_residual_mm": 2.822236286,
+          "rod_attitude_deg": 0.18483015246694995
+        },
+        {
+          "t": 0.26000000000000156,
+          "rod": 2.2040783499999996,
+          "left_hand": 1.1603282000000048,
+          "right_hand": 1.15580039999999,
+          "left_grasp_reference_residual_mm": 2.826877787,
+          "right_grasp_reference_residual_mm": 2.774092723,
+          "rod_attitude_deg": 0.2484783159391159
+        },
+        {
+          "t": 0.2959999999999994,
+          "rod": 2.0733743999999943,
+          "left_hand": 1.0272534999999916,
+          "right_hand": 1.013853799999992,
+          "left_grasp_reference_residual_mm": 2.9297388509999998,
+          "right_grasp_reference_residual_mm": 2.8968991930000003,
+          "rod_attitude_deg": 0.27753815717819674
+        },
+        {
+          "t": 0.35999999999999943,
+          "rod": 2.0064837100000066,
+          "left_hand": 0.9860232999999996,
+          "right_hand": 0.955932100000001,
+          "left_grasp_reference_residual_mm": 2.965175823,
+          "right_grasp_reference_residual_mm": 2.953149199,
+          "rod_attitude_deg": 0.29001626080977005
+        },
+        {
+          "t": 0.40000000000000213,
+          "rod": 1.9331986499999954,
+          "left_hand": 0.915110100000005,
+          "right_hand": 0.9281391999999833,
+          "left_grasp_reference_residual_mm": 3.1458363499999997,
+          "right_grasp_reference_residual_mm": 2.946140115,
+          "rod_attitude_deg": 0.3226486483705225
+        },
+        {
+          "t": 0.45800000000000196,
+          "rod": 1.8824043999999955,
+          "left_hand": 0.9004967999999836,
+          "right_hand": 0.9258987999999913,
+          "left_grasp_reference_residual_mm": 3.2214344749999997,
+          "right_grasp_reference_residual_mm": 2.887503914,
+          "rod_attitude_deg": 0.3217907577422222
+        },
+        {
+          "t": 0.5180000000000007,
+          "rod": 1.8487676900000027,
+          "left_hand": 0.8517349999999924,
+          "right_hand": 0.8838683999999875,
+          "left_grasp_reference_residual_mm": 3.394151818,
+          "right_grasp_reference_residual_mm": 3.100271507,
+          "rod_attitude_deg": 0.2715949878789427
+        },
+        {
+          "t": 0.5599999999999987,
+          "rod": 1.8035724399999982,
+          "left_hand": 0.824667499999987,
+          "right_hand": 0.8608468000000091,
+          "left_grasp_reference_residual_mm": 3.520243482,
+          "right_grasp_reference_residual_mm": 3.1695831759999997,
+          "rod_attitude_deg": 0.23658169432026613
+        },
+        {
+          "t": 0.6180000000000021,
+          "rod": 1.7560731200000068,
+          "left_hand": 0.7779374999999922,
+          "right_hand": 0.8273191999999818,
+          "left_grasp_reference_residual_mm": 3.697635794,
+          "right_grasp_reference_residual_mm": 3.252471661,
+          "rod_attitude_deg": 0.2195401267085353
+        },
+        {
+          "t": 0.6600000000000001,
+          "rod": 1.7153471999999947,
+          "left_hand": 0.7570349999999892,
+          "right_hand": 0.816039699999993,
+          "left_grasp_reference_residual_mm": 3.801028683,
+          "right_grasp_reference_residual_mm": 3.2972503239999997,
+          "rod_attitude_deg": 0.20403411953259218
+        },
+        {
+          "t": 0.7199999999999989,
+          "rod": 1.6887285899999938,
+          "left_hand": 0.7341438000000033,
+          "right_hand": 0.7870442999999838,
+          "left_grasp_reference_residual_mm": 3.912874892,
+          "right_grasp_reference_residual_mm": 3.449642086,
+          "rod_attitude_deg": 0.22886099524715298
+        },
+        {
+          "t": 0.7600000000000016,
+          "rod": 1.6411099799999995,
+          "left_hand": 0.7305662999999851,
+          "right_hand": 0.7640978999999826,
+          "left_grasp_reference_residual_mm": 3.904825901,
+          "right_grasp_reference_residual_mm": 3.5293346,
+          "rod_attitude_deg": 0.2511483843611865
+        },
+        {
+          "t": 0.8200000000000003,
+          "rod": 1.610799489999995,
+          "left_hand": 0.6986521999999828,
+          "right_hand": 0.7481686999999959,
+          "left_grasp_reference_residual_mm": 3.952682245,
+          "right_grasp_reference_residual_mm": 3.626610784,
+          "rod_attitude_deg": 0.3104376728671442
+        },
+        {
+          "t": 0.8599999999999994,
+          "rod": 1.5659971199999956,
+          "left_hand": 0.675384499999987,
+          "right_hand": 0.734351199999983,
+          "left_grasp_reference_residual_mm": 4.110624206000001,
+          "right_grasp_reference_residual_mm": 3.681250666,
+          "rod_attitude_deg": 0.2607611879840703
+        },
+        {
+          "t": 0.9200000000000017,
+          "rod": 1.5258028699999953,
+          "left_hand": 0.6213683999999886,
+          "right_hand": 0.6665854000000027,
+          "left_grasp_reference_residual_mm": 4.330094356,
+          "right_grasp_reference_residual_mm": 3.867565085,
+          "rod_attitude_deg": 0.24750941336302368
+        },
+        {
+          "t": 0.9600000000000009,
+          "rod": 1.484760340000002,
+          "left_hand": 0.5963277999999905,
+          "right_hand": 0.6461279999999958,
+          "left_grasp_reference_residual_mm": 4.396171299,
+          "right_grasp_reference_residual_mm": 3.9559713789999997,
+          "rod_attitude_deg": 0.2500386181385884
+        },
+        {
+          "t": 1.0180000000000007,
+          "rod": 1.4220655500000041,
+          "left_hand": 0.5420525000000009,
+          "right_hand": 0.6304109999999974,
+          "left_grasp_reference_residual_mm": 4.545028155000001,
+          "right_grasp_reference_residual_mm": 4.096451577,
+          "rod_attitude_deg": 0.30900606344236353
+        },
+        {
+          "t": 1.0599999999999987,
+          "rod": 1.3639144200000008,
+          "left_hand": 0.5187799999999965,
+          "right_hand": 0.6169477999999895,
+          "left_grasp_reference_residual_mm": 4.686191464999999,
+          "right_grasp_reference_residual_mm": 4.184044916,
+          "rod_attitude_deg": 0.3633343817157376
+        },
+        {
+          "t": 1.120000000000001,
+          "rod": 1.117491799999995,
+          "left_hand": 0.5088175999999889,
+          "right_hand": 0.6228766999999968,
+          "left_grasp_reference_residual_mm": 4.724275778,
+          "right_grasp_reference_residual_mm": 4.2522062720000005,
+          "rod_attitude_deg": 0.37734606007156274
+        },
+        {
+          "t": 1.1600000000000001,
+          "rod": 1.0705664400000037,
+          "left_hand": 0.5006585000000008,
+          "right_hand": 0.62447169999999,
+          "left_grasp_reference_residual_mm": 4.708203406,
+          "right_grasp_reference_residual_mm": 4.264749672,
+          "rod_attitude_deg": 0.42149346771752655
+        },
+        {
+          "t": 1.2199999999999989,
+          "rod": 1.0248811100000004,
+          "left_hand": 0.48579329999998144,
+          "right_hand": 0.624286400000007,
+          "left_grasp_reference_residual_mm": 4.779586245,
+          "right_grasp_reference_residual_mm": 4.252182297,
+          "rod_attitude_deg": 0.4278960646089606
+        },
+        {
+          "t": 1.2800000000000011,
+          "rod": 1.0018427299999937,
+          "left_hand": 0.45352299999998347,
+          "right_hand": 0.5793872999999838,
+          "left_grasp_reference_residual_mm": 4.893088716,
+          "right_grasp_reference_residual_mm": 4.413355937,
+          "rod_attitude_deg": 0.3744426494117703
+        },
+        {
+          "t": 1.3200000000000003,
+          "rod": 0.9331428900000022,
+          "left_hand": 0.4279711000000075,
+          "right_hand": 0.5637270999999944,
+          "left_grasp_reference_residual_mm": 5.068826152,
+          "right_grasp_reference_residual_mm": 4.384599356,
+          "rod_attitude_deg": 0.41416531921220745
+        },
+        {
+          "t": 1.379999999999999,
+          "rod": 0.8992325999999939,
+          "left_hand": 0.3650017999999866,
+          "right_hand": 0.5210910000000013,
+          "left_grasp_reference_residual_mm": 5.257720621,
+          "right_grasp_reference_residual_mm": 4.616006583,
+          "rod_attitude_deg": 0.38029045979806064
+        },
+        {
+          "t": 1.4200000000000017,
+          "rod": 0.8351295599999947,
+          "left_hand": 0.3414909999999993,
+          "right_hand": 0.4950452999999966,
+          "left_grasp_reference_residual_mm": 5.3590983340000005,
+          "right_grasp_reference_residual_mm": 4.709207179,
+          "rod_attitude_deg": 0.339384835664044
+        },
+        {
+          "t": 1.4800000000000004,
+          "rod": 0.7802461099999936,
+          "left_hand": 0.28376909999999755,
+          "right_hand": 0.464669599999995,
+          "left_grasp_reference_residual_mm": 5.541160469,
+          "right_grasp_reference_residual_mm": 4.91036728,
+          "rod_attitude_deg": 0.39361551940758915
+        },
+        {
+          "t": 1.5199999999999996,
+          "rod": 0.7467183599999955,
+          "left_hand": 0.264172300000004,
+          "right_hand": 0.4323683999999939,
+          "left_grasp_reference_residual_mm": 5.533312514,
+          "right_grasp_reference_residual_mm": 5.0496416470000005,
+          "rod_attitude_deg": 0.3856607244087
+        },
+        {
+          "t": 1.5800000000000018,
+          "rod": 0.701523270000004,
+          "left_hand": 0.21684350000000796,
+          "right_hand": 0.40562599999999227,
+          "left_grasp_reference_residual_mm": 5.766004532,
+          "right_grasp_reference_residual_mm": 5.1552612909999995,
+          "rod_attitude_deg": 0.3965218627760182
+        },
+        {
+          "t": 1.620000000000001,
+          "rod": 0.6524771599999979,
+          "left_hand": 0.1964130000000064,
+          "right_hand": 0.3855821999999842,
+          "left_grasp_reference_residual_mm": 5.830548342,
+          "right_grasp_reference_residual_mm": 5.280582044,
+          "rod_attitude_deg": 0.44094452922078464
+        },
+        {
+          "t": 1.6799999999999997,
+          "rod": 0.6098577900000013,
+          "left_hand": 0.18747419999998183,
+          "right_hand": 0.36078679999998475,
+          "left_grasp_reference_residual_mm": 5.858531693000001,
+          "right_grasp_reference_residual_mm": 5.381520667999999,
+          "rod_attitude_deg": 0.46938686733361096
+        },
+        {
+          "t": 1.718,
+          "rod": 0.5767527699999941,
+          "left_hand": 0.17881670000000072,
+          "right_hand": 0.3564393999999915,
+          "left_grasp_reference_residual_mm": 5.806833875000001,
+          "right_grasp_reference_residual_mm": 5.439688804999999,
+          "rod_attitude_deg": 0.491546503961994
+        },
+        {
+          "t": 1.7780000000000022,
+          "rod": 0.5409017999999932,
+          "left_hand": 0.17621679999998974,
+          "right_hand": 0.3299156999999886,
+          "left_grasp_reference_residual_mm": 5.814432138,
+          "right_grasp_reference_residual_mm": 5.514366268000001,
+          "rod_attitude_deg": 0.5134644470476198
+        },
+        {
+          "t": 1.8200000000000003,
+          "rod": 0.5153179299999949,
+          "left_hand": 0.17594949999999443,
+          "right_hand": 0.3234337999999948,
+          "left_grasp_reference_residual_mm": 5.780526476,
+          "right_grasp_reference_residual_mm": 5.558018746999999,
+          "rod_attitude_deg": 0.5101072336117519
+        },
+        {
+          "t": 1.879999999999999,
+          "rod": 0.4863865100000059,
+          "left_hand": 0.17142509999998334,
+          "right_hand": 0.3148978999999996,
+          "left_grasp_reference_residual_mm": 5.8437477620000005,
+          "right_grasp_reference_residual_mm": 5.598713879,
+          "rod_attitude_deg": 0.5166940591279872
+        },
+        {
+          "t": 1.9179999999999993,
+          "rod": 0.45207557000000176,
+          "left_hand": 0.16121969999999264,
+          "right_hand": 0.2972618999999843,
+          "left_grasp_reference_residual_mm": 5.849718268999999,
+          "right_grasp_reference_residual_mm": 5.754397622,
+          "rod_attitude_deg": 0.4610852393975083
+        },
+        {
+          "t": 1.9800000000000004,
+          "rod": 0.40116345000000553,
+          "left_hand": 0.13355839999998342,
+          "right_hand": 0.28541430000000867,
+          "left_grasp_reference_residual_mm": 5.906840668,
+          "right_grasp_reference_residual_mm": 5.915038666999999,
+          "rod_attitude_deg": 0.5027171983685821
+        },
+        {
+          "t": 2.0139999999999993,
+          "rod": 0.37389189000000544,
+          "left_hand": 0.13403200000000615,
+          "right_hand": 0.2826210999999912,
+          "left_grasp_reference_residual_mm": 5.893874557,
+          "right_grasp_reference_residual_mm": 5.930613802,
+          "rod_attitude_deg": 0.5223365719704187
+        },
+        {
+          "t": 2.080000000000002,
+          "rod": 0.3400630899999951,
+          "left_hand": 0.1291519999999935,
+          "right_hand": 0.26096770000000324,
+          "left_grasp_reference_residual_mm": 5.868936661,
+          "right_grasp_reference_residual_mm": 5.996191211999999,
+          "rod_attitude_deg": 0.537384624378138
+        },
+        {
+          "t": 2.1380000000000017,
+          "rod": 0.3176857600000055,
+          "left_hand": 0.12737379999999687,
+          "right_hand": 0.24544409999999184,
+          "left_grasp_reference_residual_mm": 5.855377003,
+          "right_grasp_reference_residual_mm": 6.084376348999999,
+          "rod_attitude_deg": 0.5394947684188518
+        },
+        {
+          "t": 2.1799999999999997,
+          "rod": 0.28699312999999615,
+          "left_hand": 0.1287204999999847,
+          "right_hand": 0.24358699999998956,
+          "left_grasp_reference_residual_mm": 5.835245426,
+          "right_grasp_reference_residual_mm": 6.096264911,
+          "rod_attitude_deg": 0.5494776295629141
+        },
+        {
+          "t": 2.2379999999999995,
+          "rod": 0.2593433699999981,
+          "left_hand": 0.12125879999999589,
+          "right_hand": 0.2288434999999922,
+          "left_grasp_reference_residual_mm": 5.884018619,
+          "right_grasp_reference_residual_mm": 6.2231071479999995,
+          "rod_attitude_deg": 0.4961056634970154
+        },
+        {
+          "t": 2.2780000000000022,
+          "rod": 0.20216924999999497,
+          "left_hand": 0.08923259999998878,
+          "right_hand": 0.21400599999998882,
+          "left_grasp_reference_residual_mm": 5.972653261,
+          "right_grasp_reference_residual_mm": 6.3962970409999995,
+          "rod_attitude_deg": 0.5395258063111525
+        },
+        {
+          "t": 2.34,
+          "rod": 0.17957460999999675,
+          "left_hand": 0.08979809999998256,
+          "right_hand": 0.20516179999999218,
+          "left_grasp_reference_residual_mm": 5.961883285,
+          "right_grasp_reference_residual_mm": 6.455666944,
+          "rod_attitude_deg": 0.5382745153154158
+        },
+        {
+          "t": 2.379999999999999,
+          "rod": 0.15699991999999774,
+          "left_hand": 0.08563329999999869,
+          "right_hand": 0.19290159999998946,
+          "left_grasp_reference_residual_mm": 5.930898568,
+          "right_grasp_reference_residual_mm": 6.500594554,
+          "rod_attitude_deg": 0.5478805052494842
+        },
+        {
+          "t": 2.4400000000000013,
+          "rod": 0.12225886000000186,
+          "left_hand": 0.08563910000000674,
+          "right_hand": 0.16888959999999953,
+          "left_grasp_reference_residual_mm": 5.936594707,
+          "right_grasp_reference_residual_mm": 6.588334368,
+          "rod_attitude_deg": 0.5670841687517392
+        },
+        {
+          "t": 2.4780000000000015,
+          "rod": 0.0984363399999938,
+          "left_hand": 0.08474719999998492,
+          "right_hand": 0.16818929999998233,
+          "left_grasp_reference_residual_mm": 5.8958221250000005,
+          "right_grasp_reference_residual_mm": 6.620272254,
+          "rod_attitude_deg": 0.5657676217618912
+        },
+        {
+          "t": 2.5380000000000003,
+          "rod": 0.07830271000000555,
+          "left_hand": 0.07190339999998963,
+          "right_hand": 0.15449829999999998,
+          "left_grasp_reference_residual_mm": 6.024420406,
+          "right_grasp_reference_residual_mm": 6.7199173750000005,
+          "rod_attitude_deg": 0.5650606176588603
+        },
+        {
+          "t": 2.580000000000002,
+          "rod": 0.0458734399999966,
+          "left_hand": 0.05564480000000427,
+          "right_hand": 0.14240999999998172,
+          "left_grasp_reference_residual_mm": 6.004066272,
+          "right_grasp_reference_residual_mm": 6.840214275999999,
+          "rod_attitude_deg": 0.5186031772812022
+        },
+        {
+          "t": 2.6400000000000006,
+          "rod": 0.0008328400000062741,
+          "left_hand": 0.032539299999995164,
+          "right_hand": 0.14020200000000593,
+          "left_grasp_reference_residual_mm": 6.106129790000001,
+          "right_grasp_reference_residual_mm": 6.962618775999999,
+          "rod_attitude_deg": 0.5527430708721284
+        },
+        {
+          "t": 2.6980000000000004,
+          "rod": -0.027450900000003386,
+          "left_hand": 0.030329599999989743,
+          "right_hand": 0.13586329999998314,
+          "left_grasp_reference_residual_mm": 6.165178601999999,
+          "right_grasp_reference_residual_mm": 6.946470270000001,
+          "rod_attitude_deg": 0.5049503191670572
+        },
+        {
+          "t": 2.7379999999999995,
+          "rod": -0.057464169999993375,
+          "left_hand": -0.0018296000000028734,
+          "right_hand": 0.09378639999998994,
+          "left_grasp_reference_residual_mm": 6.301100925,
+          "right_grasp_reference_residual_mm": 7.094027242999999,
+          "rod_attitude_deg": 0.5044674526281363
+        },
+        {
+          "t": 2.798000000000002,
+          "rod": -0.10338053000000236,
+          "left_hand": -0.014892099999996855,
+          "right_hand": 0.06611840000000924,
+          "left_grasp_reference_residual_mm": 6.36310944,
+          "right_grasp_reference_residual_mm": 7.2202930510000005,
+          "rod_attitude_deg": 0.5251049946014207
+        },
+        {
+          "t": 2.836000000000002,
+          "rod": -0.15039250999999976,
+          "left_hand": -0.05410950000001025,
+          "right_hand": 0.023027600000002924,
+          "left_grasp_reference_residual_mm": 6.509094262,
+          "right_grasp_reference_residual_mm": 7.439904476,
+          "rod_attitude_deg": 0.5168315546874502
+        },
+        {
+          "t": 2.896000000000001,
+          "rod": -0.1820142299999994,
+          "left_hand": -0.07247439999999439,
+          "right_hand": 0.018692900000005785,
+          "left_grasp_reference_residual_mm": 6.616399948,
+          "right_grasp_reference_residual_mm": 7.408660007,
+          "rod_attitude_deg": 0.5422407238735857
+        },
+        {
+          "t": 2.932000000000002,
+          "rod": -0.21901481000000111,
+          "left_hand": -0.0834342000000099,
+          "right_hand": -0.02308970000000632,
+          "left_grasp_reference_residual_mm": 6.670136965,
+          "right_grasp_reference_residual_mm": 7.632381917,
+          "rod_attitude_deg": 0.4963553384914645
+        },
+        {
+          "t": 2.996000000000002,
+          "rod": -0.2521398900000027,
+          "left_hand": -0.10011030000001142,
+          "right_hand": -0.047255100000004324,
+          "left_grasp_reference_residual_mm": 6.7474708329999995,
+          "right_grasp_reference_residual_mm": 7.671445349,
+          "rod_attitude_deg": 0.510410307670259
+        }
+      ],
+      "completed": true,
+      "sample": "A2"
+    },
+    {
+      "group": "A",
+      "run_id": "contact_hover_ab_lidio_20261020_A3",
+      "window_t0_sim_sec": 25.95,
+      "window_rows": 60,
+      "window_span_sec": 2.992000000000001,
+      "post_lift_switch_sec": 0.0,
+      "entry": {
+        "rod_world_xyz_mm": [
+          498.417538,
+          -0.07883030668,
+          66.35281759
+        ],
+        "left_hand_world_xyz_mm": [
+          472.9467884,
+          149.3320774,
+          163.7880966
+        ],
+        "right_hand_world_xyz_mm": [
+          525.2707831,
+          -150.5101534,
+          162.9077088
+        ],
+        "rod_quat_xyzw": [
+          0.0005267985274,
+          0.000914563596,
+          0.0860015045,
+          0.9962944481
+        ],
+        "left_hand_quat_xyzw": [
+          0.8864873668,
+          0.4627417522,
+          -0.001739122521,
+          -0.002682287325
+        ],
+        "right_hand_quat_xyzw": [
+          0.8873664494,
+          0.4610530888,
+          -0.003290307107,
+          -8.744302275e-05
+        ],
+        "left_grasp_reference_residual_mm": 2.515554471,
+        "right_grasp_reference_residual_mm": 2.393955557
+      },
+      "end": {
+        "left_grasp_reference_residual_mm": 8.140374212,
+        "right_grasp_reference_residual_mm": 6.573505472
+      },
+      "delta": {
+        "rod_xyz_mm": [
+          -2.2097112999999724,
+          -0.61622438982,
+          -1.4900003700000082
+        ],
+        "left_hand_xyz_mm": [
+          -1.7597818999999792,
+          4.9267641999999885,
+          -0.7906529999999745
+        ],
+        "right_hand_xyz_mm": [
+          -1.1989574999999864,
+          -4.7735790999999805,
+          -0.28976859999998994
+        ],
+        "left_grasp_reference_residual_mm": 5.624819741,
+        "right_grasp_reference_residual_mm": 4.179549915000001,
+        "left_rod_hand_xyz_mm": [
+          -0.44992939999999315,
+          -5.542988589819997,
+          -0.6993473700000336
+        ],
+        "right_rod_hand_xyz_mm": [
+          -1.010753799999986,
+          4.157354710179972,
+          -1.200231770000018
+        ],
+        "left_rod_hand_norm_mm": 5.6050196891523045,
+        "right_rod_hand_norm_mm": 4.4436221410227255,
+        "rod_attitude_deg": 0.39992458970019507
+      },
+      "window_max": {
+        "left_grasp_reference_residual_mm": 8.140374212,
+        "right_grasp_reference_residual_mm": 6.573505472,
+        "left_angle_deg": 1.37811281811245,
+        "right_angle_deg": 0.5732081610715194
+      },
+      "all_four_contact_sample_percent": 53.333333333333336,
+      "series": [
+        {
+          "t": 0.0,
+          "rod": 0.0,
+          "left_hand": 0.0,
+          "right_hand": 0.0,
+          "left_grasp_reference_residual_mm": 2.515554471,
+          "right_grasp_reference_residual_mm": 2.393955557,
+          "rod_attitude_deg": 0.0
+        },
+        {
+          "t": 0.054000000000002046,
+          "rod": 0.7074673599999914,
+          "left_hand": 0.621120100000011,
+          "right_hand": 0.6238668999999919,
+          "left_grasp_reference_residual_mm": 2.583584726,
+          "right_grasp_reference_residual_mm": 2.541489239,
+          "rod_attitude_deg": 0.030224308040338647
+        },
+        {
+          "t": 0.10999999999999943,
+          "rod": 0.8437937800000045,
+          "left_hand": 0.729956599999998,
+          "right_hand": 0.7644497000000028,
+          "left_grasp_reference_residual_mm": 2.688152787,
+          "right_grasp_reference_residual_mm": 2.599000909,
+          "rod_attitude_deg": 0.05372991097392903
+        },
+        {
+          "t": 0.1479999999999997,
+          "rod": 0.8239838999999916,
+          "left_hand": 0.6999864000000189,
+          "right_hand": 0.7314229000000005,
+          "left_grasp_reference_residual_mm": 2.769037849,
+          "right_grasp_reference_residual_mm": 2.5838439469999996,
+          "rod_attitude_deg": 0.03235129345031911
+        },
+        {
+          "t": 0.21199999999999974,
+          "rod": 0.7078020199999951,
+          "left_hand": 0.5316725000000244,
+          "right_hand": 0.6035809000000114,
+          "left_grasp_reference_residual_mm": 3.043333443,
+          "right_grasp_reference_residual_mm": 2.6867260500000003,
+          "rod_attitude_deg": 0.1189680029913422
+        },
+        {
+          "t": 0.272000000000002,
+          "rod": 0.6038344799999956,
+          "left_hand": 0.4637612000000235,
+          "right_hand": 0.5519898999999939,
+          "left_grasp_reference_residual_mm": 3.07403914,
+          "right_grasp_reference_residual_mm": 2.711775676,
+          "rod_attitude_deg": 0.0946674751523182
+        },
+        {
+          "t": 0.31200000000000117,
+          "rod": 0.5299979600000004,
+          "left_hand": 0.3972662000000238,
+          "right_hand": 0.4730951999999955,
+          "left_grasp_reference_residual_mm": 3.228080762,
+          "right_grasp_reference_residual_mm": 2.7887518190000002,
+          "rod_attitude_deg": 0.09001178940133153
+        },
+        {
+          "t": 0.370000000000001,
+          "rod": 0.48130827999999515,
+          "left_hand": 0.37792580000001186,
+          "right_hand": 0.4436676000000028,
+          "left_grasp_reference_residual_mm": 3.3193442170000003,
+          "right_grasp_reference_residual_mm": 2.81850469,
+          "rod_attitude_deg": 0.08666947519749865
+        },
+        {
+          "t": 0.41199999999999903,
+          "rod": 0.4467081500000025,
+          "left_hand": 0.3249965000000077,
+          "right_hand": 0.4087955000000032,
+          "left_grasp_reference_residual_mm": 3.50174501,
+          "right_grasp_reference_residual_mm": 2.9945864220000002,
+          "rod_attitude_deg": 0.038938216979444704
+        },
+        {
+          "t": 0.4740000000000002,
+          "rod": 0.4087500700000052,
+          "left_hand": 0.2950565000000016,
+          "right_hand": 0.38396479999999733,
+          "left_grasp_reference_residual_mm": 3.663602582,
+          "right_grasp_reference_residual_mm": 3.087577977,
+          "rod_attitude_deg": 0.03407437969937602
+        },
+        {
+          "t": 0.5139999999999993,
+          "rod": 0.3481257399999965,
+          "left_hand": 0.2369362000000097,
+          "right_hand": 0.34834629999999644,
+          "left_grasp_reference_residual_mm": 3.918590237,
+          "right_grasp_reference_residual_mm": 3.230234899,
+          "rod_attitude_deg": 0.03293173935609433
+        },
+        {
+          "t": 0.5719999999999992,
+          "rod": 0.2981342299999967,
+          "left_hand": 0.23637840000001464,
+          "right_hand": 0.3229557999999966,
+          "left_grasp_reference_residual_mm": 3.849229668,
+          "right_grasp_reference_residual_mm": 3.357103741,
+          "rod_attitude_deg": 0.06187580720767987
+        },
+        {
+          "t": 0.6140000000000008,
+          "rod": 0.2598480799999997,
+          "left_hand": 0.22443250000001025,
+          "right_hand": 0.3108562000000148,
+          "left_grasp_reference_residual_mm": 3.8640012240000003,
+          "right_grasp_reference_residual_mm": 3.415696074,
+          "rod_attitude_deg": 0.12391234075464856
+        },
+        {
+          "t": 0.6739999999999995,
+          "rod": 0.22500604000000313,
+          "left_hand": 0.22105090000001937,
+          "right_hand": 0.2951335000000166,
+          "left_grasp_reference_residual_mm": 3.820829984,
+          "right_grasp_reference_residual_mm": 3.5340235030000002,
+          "rod_attitude_deg": 0.1663010100713777
+        },
+        {
+          "t": 0.7059999999999995,
+          "rod": 0.19989969000000496,
+          "left_hand": 0.20229870000001982,
+          "right_hand": 0.2659973999999954,
+          "left_grasp_reference_residual_mm": 4.00849996,
+          "right_grasp_reference_residual_mm": 3.567572476,
+          "rod_attitude_deg": 0.18968113125744748
+        },
+        {
+          "t": 0.7740000000000009,
+          "rod": 0.163370420000003,
+          "left_hand": 0.18379770000001572,
+          "right_hand": 0.256545299999994,
+          "left_grasp_reference_residual_mm": 4.0542812370000005,
+          "right_grasp_reference_residual_mm": 3.624965787,
+          "rod_attitude_deg": 0.21541634335489343
+        },
+        {
+          "t": 0.8120000000000012,
+          "rod": 0.1339392200000039,
+          "left_hand": 0.16776749999999896,
+          "right_hand": 0.2305737000000141,
+          "left_grasp_reference_residual_mm": 4.118626882,
+          "right_grasp_reference_residual_mm": 3.7183328490000003,
+          "rod_attitude_deg": 0.24479050740870872
+        },
+        {
+          "t": 0.8719999999999999,
+          "rod": 0.10138904999999754,
+          "left_hand": 0.14824190000001236,
+          "right_hand": 0.2238006000000181,
+          "left_grasp_reference_residual_mm": 4.149676083,
+          "right_grasp_reference_residual_mm": 3.7536053110000003,
+          "rod_attitude_deg": 0.25853214301618516
+        },
+        {
+          "t": 0.9100000000000001,
+          "rod": 0.07136317999999198,
+          "left_hand": 0.12347480000002298,
+          "right_hand": 0.20066860000000908,
+          "left_grasp_reference_residual_mm": 4.168878557,
+          "right_grasp_reference_residual_mm": 3.891757213,
+          "rod_attitude_deg": 0.2763408167985794
+        },
+        {
+          "t": 0.9720000000000013,
+          "rod": 0.029657709999991733,
+          "left_hand": 0.11818490000001236,
+          "right_hand": 0.19394030000000062,
+          "left_grasp_reference_residual_mm": 4.227072805,
+          "right_grasp_reference_residual_mm": 3.847277093,
+          "rod_attitude_deg": 0.3008699269336507
+        },
+        {
+          "t": 1.0139999999999993,
+          "rod": -0.0068906899999970905,
+          "left_hand": 0.09352300000001201,
+          "right_hand": 0.18366710000000674,
+          "left_grasp_reference_residual_mm": 4.310363908999999,
+          "right_grasp_reference_residual_mm": 3.8639058569999998,
+          "rod_attitude_deg": 0.3131996268686272
+        },
+        {
+          "t": 1.0740000000000016,
+          "rod": -0.04080596000000103,
+          "left_hand": 0.08305440000000441,
+          "right_hand": 0.16948350000001167,
+          "left_grasp_reference_residual_mm": 4.334431845,
+          "right_grasp_reference_residual_mm": 3.941677474,
+          "rod_attitude_deg": 0.3264024298810482
+        },
+        {
+          "t": 1.1120000000000019,
+          "rod": -0.06840095000000546,
+          "left_hand": 0.05456110000001679,
+          "right_hand": 0.14106540000000112,
+          "left_grasp_reference_residual_mm": 4.5030480079999995,
+          "right_grasp_reference_residual_mm": 3.992684172,
+          "rod_attitude_deg": 0.3223779267814269
+        },
+        {
+          "t": 1.1720000000000006,
+          "rod": -0.10809741000000761,
+          "left_hand": 0.017685700000019677,
+          "right_hand": 0.13717430000001474,
+          "left_grasp_reference_residual_mm": 4.511340117,
+          "right_grasp_reference_residual_mm": 4.101738801,
+          "rod_attitude_deg": 0.3202032829215686
+        },
+        {
+          "t": 1.2319999999999993,
+          "rod": -0.1344786200000031,
+          "left_hand": 0.0035382000000139247,
+          "right_hand": 0.12790390000000373,
+          "left_grasp_reference_residual_mm": 4.705024103,
+          "right_grasp_reference_residual_mm": 4.064991841,
+          "rod_attitude_deg": 0.338662567024631
+        },
+        {
+          "t": 1.272000000000002,
+          "rod": -0.1642617000000013,
+          "left_hand": -0.01603049999998607,
+          "right_hand": 0.1183922000000115,
+          "left_grasp_reference_residual_mm": 4.712073004,
+          "right_grasp_reference_residual_mm": 4.1337144189999995,
+          "rod_attitude_deg": 0.33093388724457373
+        },
+        {
+          "t": 1.3320000000000007,
+          "rod": -0.18892557999999893,
+          "left_hand": -0.044797099999993595,
+          "right_hand": 0.11501029999999579,
+          "left_grasp_reference_residual_mm": 4.861495065,
+          "right_grasp_reference_residual_mm": 4.138089745,
+          "rod_attitude_deg": 0.3413415539700851
+        },
+        {
+          "t": 1.3719999999999999,
+          "rod": -0.22736219999999752,
+          "left_hand": -0.055843499999985724,
+          "right_hand": 0.09325800000001272,
+          "left_grasp_reference_residual_mm": 4.850975855,
+          "right_grasp_reference_residual_mm": 4.211938958,
+          "rod_attitude_deg": 0.3526556124157223
+        },
+        {
+          "t": 1.4280000000000008,
+          "rod": -0.25662139000000306,
+          "left_hand": -0.07070319999999408,
+          "right_hand": 0.0782149999999926,
+          "left_grasp_reference_residual_mm": 4.881097792,
+          "right_grasp_reference_residual_mm": 4.30585651,
+          "rod_attitude_deg": 0.3489141433907054
+        },
+        {
+          "t": 1.4720000000000013,
+          "rod": -0.2766698500000081,
+          "left_hand": -0.1036138999999936,
+          "right_hand": 0.05893619999999822,
+          "left_grasp_reference_residual_mm": 5.103650573,
+          "right_grasp_reference_residual_mm": 4.355818503,
+          "rod_attitude_deg": 0.35268543298871163
+        },
+        {
+          "t": 1.5340000000000025,
+          "rod": -0.30452720000000155,
+          "left_hand": -0.12089339999998838,
+          "right_hand": 0.054728899999995084,
+          "left_grasp_reference_residual_mm": 5.11006739,
+          "right_grasp_reference_residual_mm": 4.39785108,
+          "rod_attitude_deg": 0.3484656587007053
+        },
+        {
+          "t": 1.5719999999999992,
+          "rod": -0.3388577400000037,
+          "left_hand": -0.15923779999998944,
+          "right_hand": 0.05032739999999425,
+          "left_grasp_reference_residual_mm": 5.30822516,
+          "right_grasp_reference_residual_mm": 4.405787259,
+          "rod_attitude_deg": 0.3333178469026617
+        },
+        {
+          "t": 1.6340000000000003,
+          "rod": -0.35004137999999907,
+          "left_hand": -0.17445489999998176,
+          "right_hand": 0.05377140000001335,
+          "left_grasp_reference_residual_mm": 5.458156763,
+          "right_grasp_reference_residual_mm": 4.472370897999999,
+          "rod_attitude_deg": 0.29896246176084024
+        },
+        {
+          "t": 1.6720000000000006,
+          "rod": -0.3782358600000063,
+          "left_hand": -0.22557609999998562,
+          "right_hand": 0.04990630000001328,
+          "left_grasp_reference_residual_mm": 5.623919247,
+          "right_grasp_reference_residual_mm": 4.554736904,
+          "rod_attitude_deg": 0.2992988572857626
+        },
+        {
+          "t": 1.7319999999999993,
+          "rod": -0.41532733000000654,
+          "left_hand": -0.24430629999999676,
+          "right_hand": 0.04659460000000504,
+          "left_grasp_reference_residual_mm": 5.690091701,
+          "right_grasp_reference_residual_mm": 4.544948048,
+          "rod_attitude_deg": 0.30914597957938506
+        },
+        {
+          "t": 1.772000000000002,
+          "rod": -0.4608822200000001,
+          "left_hand": -0.2731168999999811,
+          "right_hand": 0.032752200000013554,
+          "left_grasp_reference_residual_mm": 5.7574173580000005,
+          "right_grasp_reference_residual_mm": 4.616092136,
+          "rod_attitude_deg": 0.37650515660003325
+        },
+        {
+          "t": 1.8320000000000007,
+          "rod": -0.49143520000000107,
+          "left_hand": -0.29120309999999816,
+          "right_hand": 0.03778760000000547,
+          "left_grasp_reference_residual_mm": 5.81677002,
+          "right_grasp_reference_residual_mm": 4.636796946,
+          "rod_attitude_deg": 0.3701448606813059
+        },
+        {
+          "t": 1.8719999999999999,
+          "rod": -0.5241839500000067,
+          "left_hand": -0.3102077999999897,
+          "right_hand": 0.039567000000018115,
+          "left_grasp_reference_residual_mm": 5.878366754,
+          "right_grasp_reference_residual_mm": 4.613878452,
+          "rod_attitude_deg": 0.38424836611455215
+        },
+        {
+          "t": 1.9299999999999997,
+          "rod": -0.5496665500000081,
+          "left_hand": -0.3117872999999771,
+          "right_hand": 0.03656630000001271,
+          "left_grasp_reference_residual_mm": 5.887728184999999,
+          "right_grasp_reference_residual_mm": 4.662897177,
+          "rod_attitude_deg": 0.3604274714898909
+        },
+        {
+          "t": 1.9720000000000013,
+          "rod": -0.6696219500000045,
+          "left_hand": -0.3286892999999902,
+          "right_hand": 0.03625440000001867,
+          "left_grasp_reference_residual_mm": 5.963561619,
+          "right_grasp_reference_residual_mm": 4.714563181,
+          "rod_attitude_deg": 0.3687148481527644
+        },
+        {
+          "t": 2.032,
+          "rod": -0.7215910699999994,
+          "left_hand": -0.35070090000000054,
+          "right_hand": 0.033539299999996164,
+          "left_grasp_reference_residual_mm": 6.042103051000001,
+          "right_grasp_reference_residual_mm": 4.821432602,
+          "rod_attitude_deg": 0.38596144784066017
+        },
+        {
+          "t": 2.071999999999999,
+          "rod": -0.7307627800000049,
+          "left_hand": -0.3691676999999782,
+          "right_hand": 0.03427859999999283,
+          "left_grasp_reference_residual_mm": 6.130037458,
+          "right_grasp_reference_residual_mm": 4.912282943,
+          "rod_attitude_deg": 0.3568445461310657
+        },
+        {
+          "t": 2.1320000000000014,
+          "rod": -0.8696075800000008,
+          "left_hand": -0.37781919999999025,
+          "right_hand": 0.02938320000001049,
+          "left_grasp_reference_residual_mm": 6.174075032999999,
+          "right_grasp_reference_residual_mm": 4.883091952,
+          "rod_attitude_deg": 0.3379678043322194
+        },
+        {
+          "t": 2.1720000000000006,
+          "rod": -0.9006044499999949,
+          "left_hand": -0.40510449999997533,
+          "right_hand": -0.004435100000005354,
+          "left_grasp_reference_residual_mm": 6.30767292,
+          "right_grasp_reference_residual_mm": 5.008844593,
+          "rod_attitude_deg": 0.3113664237922738
+        },
+        {
+          "t": 2.2319999999999993,
+          "rod": -0.9366602299999971,
+          "left_hand": -0.4327336999999931,
+          "right_hand": -0.007332199999987576,
+          "left_grasp_reference_residual_mm": 6.439910706,
+          "right_grasp_reference_residual_mm": 5.069727801,
+          "rod_attitude_deg": 0.29628643020847606
+        },
+        {
+          "t": 2.2920000000000016,
+          "rod": -0.957061549999999,
+          "left_hand": -0.47613769999999,
+          "right_hand": -0.05061619999999212,
+          "left_grasp_reference_residual_mm": 6.613615031,
+          "right_grasp_reference_residual_mm": 5.2714946970000005,
+          "rod_attitude_deg": 0.27044282893421784
+        },
+        {
+          "t": 2.330000000000002,
+          "rod": -0.9990233600000037,
+          "left_hand": -0.5038537999999815,
+          "right_hand": -0.07687009999998717,
+          "left_grasp_reference_residual_mm": 6.7335094589999995,
+          "right_grasp_reference_residual_mm": 5.381652388,
+          "rod_attitude_deg": 0.2517429980973879
+        },
+        {
+          "t": 2.3919999999999995,
+          "rod": -1.0460462199999991,
+          "left_hand": -0.5395223999999921,
+          "right_hand": -0.13689359999999318,
+          "left_grasp_reference_residual_mm": 6.865368206,
+          "right_grasp_reference_residual_mm": 5.570003388,
+          "rod_attitude_deg": 0.24029392549601866
+        },
+        {
+          "t": 2.434000000000001,
+          "rod": -1.081977169999998,
+          "left_hand": -0.5589704999999778,
+          "right_hand": -0.14582380000000006,
+          "left_grasp_reference_residual_mm": 6.996807962,
+          "right_grasp_reference_residual_mm": 5.569164445,
+          "rod_attitude_deg": 0.26212345652628083
+        },
+        {
+          "t": 2.4939999999999998,
+          "rod": -1.1409951900000075,
+          "left_hand": -0.5874309999999994,
+          "right_hand": -0.16878339999998326,
+          "left_grasp_reference_residual_mm": 7.119783002999999,
+          "right_grasp_reference_residual_mm": 5.609083585,
+          "rod_attitude_deg": 0.34564982951897316
+        },
+        {
+          "t": 2.532,
+          "rod": -1.171178960000005,
+          "left_hand": -0.5915512999999928,
+          "right_hand": -0.1740778999999859,
+          "left_grasp_reference_residual_mm": 7.156522288,
+          "right_grasp_reference_residual_mm": 5.633298573,
+          "rod_attitude_deg": 0.35619014440382096
+        },
+        {
+          "t": 2.594000000000001,
+          "rod": -1.206948200000002,
+          "left_hand": -0.630886499999983,
+          "right_hand": -0.17019909999999028,
+          "left_grasp_reference_residual_mm": 7.345893428,
+          "right_grasp_reference_residual_mm": 5.682622535999999,
+          "rod_attitude_deg": 0.35063354636504296
+        },
+        {
+          "t": 2.6320000000000014,
+          "rod": -1.224239540000005,
+          "left_hand": -0.6404592999999792,
+          "right_hand": -0.18338249999999556,
+          "left_grasp_reference_residual_mm": 7.44453372,
+          "right_grasp_reference_residual_mm": 5.782076073,
+          "rod_attitude_deg": 0.3171150760291957
+        },
+        {
+          "t": 2.693999999999999,
+          "rod": -1.290715900000003,
+          "left_hand": -0.6887808999999911,
+          "right_hand": -0.18331709999999668,
+          "left_grasp_reference_residual_mm": 7.622859288,
+          "right_grasp_reference_residual_mm": 5.803130111,
+          "rod_attitude_deg": 0.37549911487264037
+        },
+        {
+          "t": 2.7340000000000018,
+          "rod": -1.322063679999999,
+          "left_hand": -0.6998170999999997,
+          "right_hand": -0.19417720000000638,
+          "left_grasp_reference_residual_mm": 7.695376105999999,
+          "right_grasp_reference_residual_mm": 5.890117194,
+          "rod_attitude_deg": 0.3817849905487822
+        },
+        {
+          "t": 2.7880000000000003,
+          "rod": -1.3471955399999986,
+          "left_hand": -0.7094860999999897,
+          "right_hand": -0.2382052000000079,
+          "left_grasp_reference_residual_mm": 7.743922434,
+          "right_grasp_reference_residual_mm": 6.033738298,
+          "rod_attitude_deg": 0.3994638296442728
+        },
+        {
+          "t": 2.8339999999999996,
+          "rod": -1.386196320000005,
+          "left_hand": -0.7084827999999932,
+          "right_hand": -0.2508563999999991,
+          "left_grasp_reference_residual_mm": 7.681983998000001,
+          "right_grasp_reference_residual_mm": 6.196611062,
+          "rod_attitude_deg": 0.4408907339618834
+        },
+        {
+          "t": 2.894000000000002,
+          "rod": -1.4056700099999986,
+          "left_hand": -0.7147537999999953,
+          "right_hand": -0.2591450999999967,
+          "left_grasp_reference_residual_mm": 7.782024486,
+          "right_grasp_reference_residual_mm": 6.200577192,
+          "rod_attitude_deg": 0.37770463678001254
+        },
+        {
+          "t": 2.9299999999999997,
+          "rod": -1.4324639900000076,
+          "left_hand": -0.754078800000002,
+          "right_hand": -0.29017400000000415,
+          "left_grasp_reference_residual_mm": 8.009064848,
+          "right_grasp_reference_residual_mm": 6.45994535,
+          "rod_attitude_deg": 0.34497299258702857
+        },
+        {
+          "t": 2.992000000000001,
+          "rod": -1.4900003700000082,
+          "left_hand": -0.7906529999999745,
+          "right_hand": -0.28976859999998994,
+          "left_grasp_reference_residual_mm": 8.140374212,
+          "right_grasp_reference_residual_mm": 6.573505472,
+          "rod_attitude_deg": 0.39992458970019507
+        }
+      ],
+      "completed": true,
+      "sample": "A3"
+    },
+    {
+      "group": "B",
+      "run_id": "contact_hover_ab_lidio_20261020_B1",
+      "window_t0_sim_sec": 48.036,
+      "window_rows": 59,
+      "window_span_sec": 2.940000000000005,
+      "post_lift_switch_sec": 0.06417703628540039,
+      "entry": {
+        "rod_world_xyz_mm": [
+          498.0894028,
+          0.07690096464,
+          65.85106772
+        ],
+        "left_hand_world_xyz_mm": [
+          472.5940234,
+          149.4611518,
+          163.2065916
+        ],
+        "right_hand_world_xyz_mm": [
+          524.8658506,
+          -151.3218938,
+          162.20144119999998
+        ],
+        "rod_quat_xyzw": [
+          0.0005803188131,
+          -0.0003635032317,
+          0.08521473827,
+          0.9963623736
+        ],
+        "left_hand_quat_xyzw": [
+          0.8864262654,
+          0.4628561224,
+          -0.001840471288,
+          -0.003049370274
+        ],
+        "right_hand_quat_xyzw": [
+          0.8878498544,
+          0.4601155863,
+          -0.004026981619,
+          -0.0002582873034
+        ],
+        "left_grasp_reference_residual_mm": 2.544503202,
+        "right_grasp_reference_residual_mm": 3.445644643
+      },
+      "end": {
+        "left_grasp_reference_residual_mm": 5.751111987,
+        "right_grasp_reference_residual_mm": 8.443797789
+      },
+      "delta": {
+        "rod_xyz_mm": [
+          -1.6819320000000526,
+          0.54699979306,
+          -8.868544420000006
+        ],
+        "left_hand_xyz_mm": [
+          -1.3329554000000021,
+          4.271074300000011,
+          -7.304105000000005
+        ],
+        "right_hand_xyz_mm": [
+          -0.33873380000004616,
+          -3.900297900000016,
+          -6.577400900000002
+        ],
+        "left_grasp_reference_residual_mm": 3.206608785,
+        "right_grasp_reference_residual_mm": 4.998153146,
+        "left_rod_hand_xyz_mm": [
+          -0.3489766000000505,
+          -3.7240745069400116,
+          -1.564439419999994
+        ],
+        "right_rod_hand_xyz_mm": [
+          -1.3431982000000064,
+          4.447297693060015,
+          -2.2911435199999968
+        ],
+        "left_rod_hand_norm_mm": 4.054378657629058,
+        "right_rod_hand_norm_mm": 5.179959150844548,
+        "rod_attitude_deg": 0.43764535080427625
+      },
+      "window_max": {
+        "left_grasp_reference_residual_mm": 5.751111987,
+        "right_grasp_reference_residual_mm": 8.443797789,
+        "left_angle_deg": 1.0367341118774067,
+        "right_angle_deg": 0.5781638306049995
+      },
+      "all_four_contact_sample_percent": 66.10169491525424,
+      "series": [
+        {
+          "t": 0.0,
+          "rod": 0.0,
+          "left_hand": 0.0,
+          "right_hand": 0.0,
+          "left_grasp_reference_residual_mm": 2.544503202,
+          "right_grasp_reference_residual_mm": 3.445644643,
+          "rod_attitude_deg": 0.0
+        },
+        {
+          "t": 0.05799999999999983,
+          "rod": -0.3120976599999964,
+          "left_hand": -0.4119009999999923,
+          "right_hand": -0.39614259999998236,
+          "left_grasp_reference_residual_mm": 2.703819249,
+          "right_grasp_reference_residual_mm": 3.467441409,
+          "rod_attitude_deg": 0.0776881111834722
+        },
+        {
+          "t": 0.10000000000000142,
+          "rod": -1.147959490000003,
+          "left_hand": -1.6817293000000177,
+          "right_hand": -1.5758231999999928,
+          "left_grasp_reference_residual_mm": 2.572470205,
+          "right_grasp_reference_residual_mm": 3.780087201,
+          "rod_attitude_deg": 0.19492701634801715
+        },
+        {
+          "t": 0.1560000000000059,
+          "rod": -2.157782770000005,
+          "left_hand": -2.3393825000000144,
+          "right_hand": -2.156142899999991,
+          "left_grasp_reference_residual_mm": 2.70776913,
+          "right_grasp_reference_residual_mm": 3.6312298800000002,
+          "rod_attitude_deg": 0.3402190168540403
+        },
+        {
+          "t": 0.1980000000000004,
+          "rod": -3.172792950000003,
+          "left_hand": -3.571650400000015,
+          "right_hand": -3.2784574999999982,
+          "left_grasp_reference_residual_mm": 2.737604795,
+          "right_grasp_reference_residual_mm": 3.730487471,
+          "rod_attitude_deg": 0.473654444305735
+        },
+        {
+          "t": 0.25800000000000267,
+          "rod": -3.760155300000005,
+          "left_hand": -4.0627326000000075,
+          "right_hand": -3.7067430999999926,
+          "left_grasp_reference_residual_mm": 2.699104534,
+          "right_grasp_reference_residual_mm": 3.740087301,
+          "rod_attitude_deg": 0.5517966130774714
+        },
+        {
+          "t": 0.30000000000000426,
+          "rod": -4.522805250000005,
+          "left_hand": -4.859092600000004,
+          "right_hand": -4.401808600000001,
+          "left_grasp_reference_residual_mm": 2.721119064,
+          "right_grasp_reference_residual_mm": 3.7638357300000003,
+          "rod_attitude_deg": 0.6307835072373774
+        },
+        {
+          "t": 0.3580000000000041,
+          "rod": -5.04806,
+          "left_hand": -5.1287631000000165,
+          "right_hand": -4.642856799999984,
+          "left_grasp_reference_residual_mm": 2.7419321610000003,
+          "right_grasp_reference_residual_mm": 3.7853841679999998,
+          "rod_attitude_deg": 0.6630296313942146
+        },
+        {
+          "t": 0.4000000000000057,
+          "rod": -5.393229010000001,
+          "left_hand": -5.5654395999999995,
+          "right_hand": -4.9772642999999785,
+          "left_grasp_reference_residual_mm": 2.828908046,
+          "right_grasp_reference_residual_mm": 3.760457437,
+          "rod_attitude_deg": 0.6634946060459928
+        },
+        {
+          "t": 0.46000000000000085,
+          "rod": -5.667564150000006,
+          "left_hand": -5.6924254000000065,
+          "right_hand": -5.096609700000005,
+          "left_grasp_reference_residual_mm": 2.84229856,
+          "right_grasp_reference_residual_mm": 3.801652095,
+          "rod_attitude_deg": 0.6730682557143711
+        },
+        {
+          "t": 0.5,
+          "rod": -5.844938420000001,
+          "left_hand": -5.909246199999996,
+          "right_hand": -5.251732600000003,
+          "left_grasp_reference_residual_mm": 2.880566599,
+          "right_grasp_reference_residual_mm": 3.876558921,
+          "rod_attitude_deg": 0.654369152275961
+        },
+        {
+          "t": 0.5560000000000045,
+          "rod": -5.961738670000001,
+          "left_hand": -5.9811367,
+          "right_hand": -5.304881499999997,
+          "left_grasp_reference_residual_mm": 2.91533267,
+          "right_grasp_reference_residual_mm": 3.875389158,
+          "rod_attitude_deg": 0.6573916223674043
+        },
+        {
+          "t": 0.6000000000000014,
+          "rod": -6.193635920000003,
+          "left_hand": -6.106913200000008,
+          "right_hand": -5.376478099999998,
+          "left_grasp_reference_residual_mm": 3.00546773,
+          "right_grasp_reference_residual_mm": 3.894865933,
+          "rod_attitude_deg": 0.640862019882475
+        },
+        {
+          "t": 0.6600000000000037,
+          "rod": -6.264118480000004,
+          "left_hand": -6.142730499999999,
+          "right_hand": -5.404010099999995,
+          "left_grasp_reference_residual_mm": 3.160766425,
+          "right_grasp_reference_residual_mm": 3.89573839,
+          "rod_attitude_deg": 0.6034211793935049
+        },
+        {
+          "t": 0.7000000000000028,
+          "rod": -6.3243282300000025,
+          "left_hand": -6.232145900000013,
+          "right_hand": -5.453045999999989,
+          "left_grasp_reference_residual_mm": 3.202626074,
+          "right_grasp_reference_residual_mm": 4.097331406,
+          "rod_attitude_deg": 0.5955617621265105
+        },
+        {
+          "t": 0.7580000000000027,
+          "rod": -6.387307620000005,
+          "left_hand": -6.2595329000000035,
+          "right_hand": -5.484130199999992,
+          "left_grasp_reference_residual_mm": 3.2090170739999997,
+          "right_grasp_reference_residual_mm": 4.17041987,
+          "rod_attitude_deg": 0.607758507658432
+        },
+        {
+          "t": 0.8000000000000043,
+          "rod": -6.459110280000006,
+          "left_hand": -6.366545599999995,
+          "right_hand": -5.541262999999991,
+          "left_grasp_reference_residual_mm": 3.3964459359999997,
+          "right_grasp_reference_residual_mm": 4.36149493,
+          "rod_attitude_deg": 0.5510085222544402
+        },
+        {
+          "t": 0.8599999999999994,
+          "rod": -6.55237753,
+          "left_hand": -6.402512400000004,
+          "right_hand": -5.569200699999999,
+          "left_grasp_reference_residual_mm": 3.478141765,
+          "right_grasp_reference_residual_mm": 4.401214663,
+          "rod_attitude_deg": 0.5817698637758926
+        },
+        {
+          "t": 0.9200000000000017,
+          "rod": -6.6032304400000035,
+          "left_hand": -6.4813565000000075,
+          "right_hand": -5.624793299999986,
+          "left_grasp_reference_residual_mm": 3.648688633,
+          "right_grasp_reference_residual_mm": 4.54854433,
+          "rod_attitude_deg": 0.5091229383175926
+        },
+        {
+          "t": 0.9600000000000009,
+          "rod": -6.664869100000005,
+          "left_hand": -6.541562700000004,
+          "right_hand": -5.67333909999998,
+          "left_grasp_reference_residual_mm": 3.7411989130000003,
+          "right_grasp_reference_residual_mm": 4.793073281000001,
+          "rod_attitude_deg": 0.48000562134872177
+        },
+        {
+          "t": 1.0220000000000056,
+          "rod": -6.731084890000003,
+          "left_hand": -6.568946200000009,
+          "right_hand": -5.690446399999994,
+          "left_grasp_reference_residual_mm": 3.771967631,
+          "right_grasp_reference_residual_mm": 4.91141447,
+          "rod_attitude_deg": 0.48975543746701083
+        },
+        {
+          "t": 1.0600000000000023,
+          "rod": -6.763730650000001,
+          "left_hand": -6.596614800000012,
+          "right_hand": -5.7220724,
+          "left_grasp_reference_residual_mm": 3.835090246,
+          "right_grasp_reference_residual_mm": 5.086570258,
+          "rod_attitude_deg": 0.4583692455907571
+        },
+        {
+          "t": 1.1159999999999997,
+          "rod": -6.803468480000005,
+          "left_hand": -6.61841660000001,
+          "right_hand": -5.754398599999988,
+          "left_grasp_reference_residual_mm": 3.9118336,
+          "right_grasp_reference_residual_mm": 5.160983874999999,
+          "rod_attitude_deg": 0.4504065781926328
+        },
+        {
+          "t": 1.1600000000000037,
+          "rod": -6.841190300000001,
+          "left_hand": -6.683807099999994,
+          "right_hand": -5.83288329999998,
+          "left_grasp_reference_residual_mm": 4.01459765,
+          "right_grasp_reference_residual_mm": 5.381323654,
+          "rod_attitude_deg": 0.46806662563378204
+        },
+        {
+          "t": 1.2199999999999989,
+          "rod": -6.945044740000003,
+          "left_hand": -6.720950500000017,
+          "right_hand": -5.86223629999999,
+          "left_grasp_reference_residual_mm": 4.132316478,
+          "right_grasp_reference_residual_mm": 5.377045349,
+          "rod_attitude_deg": 0.4940749657845161
+        },
+        {
+          "t": 1.2600000000000051,
+          "rod": -7.018451490000001,
+          "left_hand": -6.779621499999999,
+          "right_hand": -5.915246200000002,
+          "left_grasp_reference_residual_mm": 4.27903772,
+          "right_grasp_reference_residual_mm": 5.494054075,
+          "rod_attitude_deg": 0.5363773962750519
+        },
+        {
+          "t": 1.318000000000005,
+          "rod": -7.060809000000001,
+          "left_hand": -6.820830500000014,
+          "right_hand": -5.924793699999986,
+          "left_grasp_reference_residual_mm": 4.428448259,
+          "right_grasp_reference_residual_mm": 5.538288635,
+          "rod_attitude_deg": 0.45289970285360653
+        },
+        {
+          "t": 1.3599999999999994,
+          "rod": -7.127660700000003,
+          "left_hand": -6.843722800000007,
+          "right_hand": -5.976941499999999,
+          "left_grasp_reference_residual_mm": 4.454313788,
+          "right_grasp_reference_residual_mm": 5.744490627,
+          "rod_attitude_deg": 0.5253443199794711
+        },
+        {
+          "t": 1.4200000000000017,
+          "rod": -7.15885795,
+          "left_hand": -6.861353300000012,
+          "right_hand": -5.997711299999986,
+          "left_grasp_reference_residual_mm": 4.5443085000000005,
+          "right_grasp_reference_residual_mm": 5.7750740359999995,
+          "rod_attitude_deg": 0.4846183643562471
+        },
+        {
+          "t": 1.4600000000000009,
+          "rod": -7.202160380000003,
+          "left_hand": -6.8834034999999965,
+          "right_hand": -6.0103769000000025,
+          "left_grasp_reference_residual_mm": 4.661993883999999,
+          "right_grasp_reference_residual_mm": 5.836925547,
+          "rod_attitude_deg": 0.40688469002486843
+        },
+        {
+          "t": 1.5200000000000031,
+          "rod": -7.2282260100000055,
+          "left_hand": -6.907927899999999,
+          "right_hand": -6.016333599999979,
+          "left_grasp_reference_residual_mm": 4.7261217669999995,
+          "right_grasp_reference_residual_mm": 5.966516715,
+          "rod_attitude_deg": 0.4000725093488518
+        },
+        {
+          "t": 1.5560000000000045,
+          "rod": -7.262298970000004,
+          "left_hand": -6.94689580000002,
+          "right_hand": -6.045898599999989,
+          "left_grasp_reference_residual_mm": 4.85845163,
+          "right_grasp_reference_residual_mm": 6.115379548,
+          "rod_attitude_deg": 0.41620646215087775
+        },
+        {
+          "t": 1.6200000000000045,
+          "rod": -7.328681340000004,
+          "left_hand": -6.974934799999999,
+          "right_hand": -6.052590299999993,
+          "left_grasp_reference_residual_mm": 4.957984027,
+          "right_grasp_reference_residual_mm": 6.088519409,
+          "rod_attitude_deg": 0.4128949689967504
+        },
+        {
+          "t": 1.6799999999999997,
+          "rod": -7.377765650000007,
+          "left_hand": -7.012389800000019,
+          "right_hand": -6.081024599999985,
+          "left_grasp_reference_residual_mm": 5.118460586,
+          "right_grasp_reference_residual_mm": 6.22407679,
+          "rod_attitude_deg": 0.4090234395529419
+        },
+        {
+          "t": 1.7199999999999989,
+          "rod": -7.412783590000006,
+          "left_hand": -7.025040400000016,
+          "right_hand": -6.108080299999985,
+          "left_grasp_reference_residual_mm": 5.14510995,
+          "right_grasp_reference_residual_mm": 6.3405556480000005,
+          "rod_attitude_deg": 0.4244567053463755
+        },
+        {
+          "t": 1.7780000000000058,
+          "rod": -7.458634880000002,
+          "left_hand": -7.0348469000000025,
+          "right_hand": -6.1477137000000015,
+          "left_grasp_reference_residual_mm": 5.080719319,
+          "right_grasp_reference_residual_mm": 6.432962128,
+          "rod_attitude_deg": 0.4346795591916339
+        },
+        {
+          "t": 1.8220000000000027,
+          "rod": -7.499255700000005,
+          "left_hand": -7.03634390000002,
+          "right_hand": -6.156300699999978,
+          "left_grasp_reference_residual_mm": 5.1010912280000005,
+          "right_grasp_reference_residual_mm": 6.455165715,
+          "rod_attitude_deg": 0.4198242928578864
+        },
+        {
+          "t": 1.8800000000000026,
+          "rod": -7.554854130000003,
+          "left_hand": -7.059396800000006,
+          "right_hand": -6.186626599999995,
+          "left_grasp_reference_residual_mm": 5.164525441,
+          "right_grasp_reference_residual_mm": 6.680050148,
+          "rod_attitude_deg": 0.44817904690900934
+        },
+        {
+          "t": 1.9200000000000017,
+          "rod": -7.578864080000004,
+          "left_hand": -7.0684002999999995,
+          "right_hand": -6.198404800000001,
+          "left_grasp_reference_residual_mm": 5.18559456,
+          "right_grasp_reference_residual_mm": 6.726723239,
+          "rod_attitude_deg": 0.42801617914197065
+        },
+        {
+          "t": 1.980000000000004,
+          "rod": -7.608189750000001,
+          "left_hand": -7.076111200000012,
+          "right_hand": -6.199801499999991,
+          "left_grasp_reference_residual_mm": 5.197183914,
+          "right_grasp_reference_residual_mm": 6.791252422,
+          "rod_attitude_deg": 0.4065065697598792
+        },
+        {
+          "t": 2.0160000000000053,
+          "rod": -7.871310320000005,
+          "left_hand": -7.0746237000000045,
+          "right_hand": -6.202821400000003,
+          "left_grasp_reference_residual_mm": 5.183146371,
+          "right_grasp_reference_residual_mm": 6.849815542,
+          "rod_attitude_deg": 0.3988774127974343
+        },
+        {
+          "t": 2.0800000000000054,
+          "rod": -7.903006530000006,
+          "left_hand": -7.085965100000008,
+          "right_hand": -6.246759399999996,
+          "left_grasp_reference_residual_mm": 5.281010741999999,
+          "right_grasp_reference_residual_mm": 6.981224082,
+          "rod_attitude_deg": 0.40837694213980597
+        },
+        {
+          "t": 2.1200000000000045,
+          "rod": -7.958142830000001,
+          "left_hand": -7.105976200000002,
+          "right_hand": -6.269548899999977,
+          "left_grasp_reference_residual_mm": 5.221075375,
+          "right_grasp_reference_residual_mm": 7.070907538,
+          "rod_attitude_deg": 0.44445657958131124
+        },
+        {
+          "t": 2.1799999999999997,
+          "rod": -8.008414920000005,
+          "left_hand": -7.1540145,
+          "right_hand": -6.306567200000002,
+          "left_grasp_reference_residual_mm": 5.363543224,
+          "right_grasp_reference_residual_mm": 7.21010293,
+          "rod_attitude_deg": 0.43515819989310806
+        },
+        {
+          "t": 2.2180000000000035,
+          "rod": -8.033159160000004,
+          "left_hand": -7.165399799999999,
+          "right_hand": -6.322794299999989,
+          "left_grasp_reference_residual_mm": 5.375421069000001,
+          "right_grasp_reference_residual_mm": 7.215637086999999,
+          "rod_attitude_deg": 0.43810779356636137
+        },
+        {
+          "t": 2.278000000000006,
+          "rod": -8.07109441,
+          "left_hand": -7.166368300000004,
+          "right_hand": -6.327044599999998,
+          "left_grasp_reference_residual_mm": 5.359037913,
+          "right_grasp_reference_residual_mm": 7.227196434,
+          "rod_attitude_deg": 0.4477250124394217
+        },
+        {
+          "t": 2.3200000000000003,
+          "rod": -8.110312920000002,
+          "left_hand": -7.168365300000007,
+          "right_hand": -6.3383994,
+          "left_grasp_reference_residual_mm": 5.346325768000001,
+          "right_grasp_reference_residual_mm": 7.236070594,
+          "rod_attitude_deg": 0.4578102730141649
+        },
+        {
+          "t": 2.378,
+          "rod": -8.14154837,
+          "left_hand": -7.169419400000016,
+          "right_hand": -6.356032299999981,
+          "left_grasp_reference_residual_mm": 5.382854504999999,
+          "right_grasp_reference_residual_mm": 7.318706558,
+          "rod_attitude_deg": 0.46116516115841794
+        },
+        {
+          "t": 2.4200000000000017,
+          "rod": -8.173590290000005,
+          "left_hand": -7.198571700000017,
+          "right_hand": -6.3765499000000005,
+          "left_grasp_reference_residual_mm": 5.435210894,
+          "right_grasp_reference_residual_mm": 7.3574069049999995,
+          "rod_attitude_deg": 0.4581076774755265
+        },
+        {
+          "t": 2.4780000000000015,
+          "rod": -8.211001710000005,
+          "left_hand": -7.1994525000000085,
+          "right_hand": -6.394264699999985,
+          "left_grasp_reference_residual_mm": 5.453635047000001,
+          "right_grasp_reference_residual_mm": 7.413296796,
+          "rod_attitude_deg": 0.4599967762892011
+        },
+        {
+          "t": 2.520000000000003,
+          "rod": -8.246073130000003,
+          "left_hand": -7.200897900000003,
+          "right_hand": -6.434087999999977,
+          "left_grasp_reference_residual_mm": 5.383025212,
+          "right_grasp_reference_residual_mm": 7.5828774160000005,
+          "rod_attitude_deg": 0.4569735255515198
+        },
+        {
+          "t": 2.578000000000003,
+          "rod": -8.27993406,
+          "left_hand": -7.21636710000001,
+          "right_hand": -6.450446999999998,
+          "left_grasp_reference_residual_mm": 5.434006012,
+          "right_grasp_reference_residual_mm": 7.752511066,
+          "rod_attitude_deg": 0.4013258736058769
+        },
+        {
+          "t": 2.6380000000000052,
+          "rod": -8.424720910000003,
+          "left_hand": -7.239276500000003,
+          "right_hand": -6.461329799999999,
+          "left_grasp_reference_residual_mm": 5.516988284,
+          "right_grasp_reference_residual_mm": 7.866900982,
+          "rod_attitude_deg": 0.4052389303496722
+        },
+        {
+          "t": 2.6799999999999997,
+          "rod": -8.47326583,
+          "left_hand": -7.244515000000007,
+          "right_hand": -6.469151499999992,
+          "left_grasp_reference_residual_mm": 5.5555499809999995,
+          "right_grasp_reference_residual_mm": 7.9500458599999995,
+          "rod_attitude_deg": 0.4213893958040867
+        },
+        {
+          "t": 2.7340000000000018,
+          "rod": -8.493826310000001,
+          "left_hand": -7.247346900000007,
+          "right_hand": -6.475389499999984,
+          "left_grasp_reference_residual_mm": 5.522610994,
+          "right_grasp_reference_residual_mm": 8.042599277,
+          "rod_attitude_deg": 0.3881065001231259
+        },
+        {
+          "t": 2.780000000000001,
+          "rod": -8.669016610000003,
+          "left_hand": -7.250564399999993,
+          "right_hand": -6.47379369999998,
+          "left_grasp_reference_residual_mm": 5.61608311,
+          "right_grasp_reference_residual_mm": 8.040377418999999,
+          "rod_attitude_deg": 0.40661888940782104
+        },
+        {
+          "t": 2.8400000000000034,
+          "rod": -8.78370589,
+          "left_hand": -7.265390499999996,
+          "right_hand": -6.503312499999997,
+          "left_grasp_reference_residual_mm": 5.652712623,
+          "right_grasp_reference_residual_mm": 8.218181986,
+          "rod_attitude_deg": 0.38990218262357657
+        },
+        {
+          "t": 2.8800000000000026,
+          "rod": -8.833280280000002,
+          "left_hand": -7.271338900000007,
+          "right_hand": -6.528379799999984,
+          "left_grasp_reference_residual_mm": 5.673516396,
+          "right_grasp_reference_residual_mm": 8.285719969999999,
+          "rod_attitude_deg": 0.43617787399988933
+        },
+        {
+          "t": 2.940000000000005,
+          "rod": -8.868544420000006,
+          "left_hand": -7.304105000000005,
+          "right_hand": -6.577400900000002,
+          "left_grasp_reference_residual_mm": 5.751111987,
+          "right_grasp_reference_residual_mm": 8.443797789,
+          "rod_attitude_deg": 0.43764535080427625
+        }
+      ],
+      "completed": true,
+      "sample": "B1"
+    },
+    {
+      "group": "B",
+      "run_id": "contact_hover_ab_lidio_20261020_B2",
+      "window_t0_sim_sec": 50.366,
+      "window_rows": 59,
+      "window_span_sec": 2.9200000000000017,
+      "post_lift_switch_sec": 0.06503152847290039,
+      "entry": {
+        "rod_world_xyz_mm": [
+          498.47519,
+          -0.17420787940000002,
+          66.52387866999999
+        ],
+        "left_hand_world_xyz_mm": [
+          472.7832584,
+          149.5059288,
+          163.6164167
+        ],
+        "right_hand_world_xyz_mm": [
+          525.2615317,
+          -151.5282558,
+          162.7059481
+        ],
+        "rod_quat_xyzw": [
+          0.0003982456653,
+          0.0003086335038,
+          0.08559608371,
+          0.9963297931
+        ],
+        "left_hand_quat_xyzw": [
+          0.886461251,
+          0.4627905415,
+          -0.001700194097,
+          -0.002911109219
+        ],
+        "right_hand_quat_xyzw": [
+          0.8877800234,
+          0.4602524026,
+          -0.003788722861,
+          3.913947209e-05
+        ],
+        "left_grasp_reference_residual_mm": 2.801933074,
+        "right_grasp_reference_residual_mm": 3.5823463749999997
+      },
+      "end": {
+        "left_grasp_reference_residual_mm": 8.373020698,
+        "right_grasp_reference_residual_mm": 9.502011066
+      },
+      "delta": {
+        "rod_xyz_mm": [
+          -1.5869597000000013,
+          -0.08666507669999998,
+          -8.475954419999994
+        ],
+        "left_hand_xyz_mm": [
+          -1.567287800000039,
+          5.924503900000016,
+          -7.544760200000001
+        ],
+        "right_hand_xyz_mm": [
+          -0.06611219999996809,
+          -5.405790599999988,
+          -6.415474300000001
+        ],
+        "left_grasp_reference_residual_mm": 5.571087624,
+        "right_grasp_reference_residual_mm": 5.919664691,
+        "left_rod_hand_xyz_mm": [
+          -0.019671899999962328,
+          -6.011168976700009,
+          -0.9311942200000006
+        ],
+        "right_rod_hand_xyz_mm": [
+          -1.5208475000000332,
+          5.319125523299995,
+          -2.0604801199999994
+        ],
+        "left_rod_hand_norm_mm": 6.082899154634381,
+        "right_rod_hand_norm_mm": 5.903528756243422,
+        "rod_attitude_deg": 0.33284231153077304
+      },
+      "window_max": {
+        "left_grasp_reference_residual_mm": 8.373020698,
+        "right_grasp_reference_residual_mm": 9.502011066,
+        "left_angle_deg": 1.1745888826749924,
+        "right_angle_deg": 0.5416864183761881
+      },
+      "all_four_contact_sample_percent": 62.71186440677966,
+      "series": [
+        {
+          "t": 0.0,
+          "rod": 0.0,
+          "left_hand": 0.0,
+          "right_hand": 0.0,
+          "left_grasp_reference_residual_mm": 2.801933074,
+          "right_grasp_reference_residual_mm": 3.5823463749999997,
+          "rod_attitude_deg": 0.0
+        },
+        {
+          "t": 0.03999999999999915,
+          "rod": -0.3129654899999973,
+          "left_hand": -0.5019201999999778,
+          "right_hand": -0.44750969999998724,
+          "left_grasp_reference_residual_mm": 2.877095894,
+          "right_grasp_reference_residual_mm": 3.73345069,
+          "rod_attitude_deg": 0.059183187018644376
+        },
+        {
+          "t": 0.10200000000000387,
+          "rod": -1.1646555199999882,
+          "left_hand": -1.7114787999999992,
+          "right_hand": -1.5606368999999953,
+          "left_grasp_reference_residual_mm": 2.9584933679999996,
+          "right_grasp_reference_residual_mm": 4.0062967149999995,
+          "rod_attitude_deg": 0.14093192681342723
+        },
+        {
+          "t": 0.14000000000000057,
+          "rod": -2.107913539999992,
+          "left_hand": -2.3915799999999763,
+          "right_hand": -2.172423099999987,
+          "left_grasp_reference_residual_mm": 2.9987572940000002,
+          "right_grasp_reference_residual_mm": 3.853155498,
+          "rod_attitude_deg": 0.2492948952751184
+        },
+        {
+          "t": 0.20199999999999818,
+          "rod": -2.9489847999999985,
+          "left_hand": -3.580894499999987,
+          "right_hand": -3.223533599999995,
+          "left_grasp_reference_residual_mm": 3.019418065,
+          "right_grasp_reference_residual_mm": 4.024140287,
+          "rod_attitude_deg": 0.3379731221508
+        },
+        {
+          "t": 0.240000000000002,
+          "rod": -3.9563549199999883,
+          "left_hand": -4.085632499999992,
+          "right_hand": -3.6693063999999884,
+          "left_grasp_reference_residual_mm": 3.048872972,
+          "right_grasp_reference_residual_mm": 3.9076237929999995,
+          "rod_attitude_deg": 0.45702517304452217
+        },
+        {
+          "t": 0.3019999999999996,
+          "rod": -4.663809929999991,
+          "left_hand": -4.863776200000003,
+          "right_hand": -4.296011999999988,
+          "left_grasp_reference_residual_mm": 3.2559656749999997,
+          "right_grasp_reference_residual_mm": 4.067119674,
+          "rod_attitude_deg": 0.48701785182372415
+        },
+        {
+          "t": 0.32200000000000273,
+          "rod": -5.111690649999994,
+          "left_hand": -4.863776200000003,
+          "right_hand": -4.296011999999988,
+          "left_grasp_reference_residual_mm": 3.269866419,
+          "right_grasp_reference_residual_mm": 4.031457541,
+          "rod_attitude_deg": 0.48905718128443076
+        },
+        {
+          "t": 0.382000000000005,
+          "rod": -5.258407949999995,
+          "left_hand": -5.402006500000001,
+          "right_hand": -4.730975299999995,
+          "left_grasp_reference_residual_mm": 3.4839418020000004,
+          "right_grasp_reference_residual_mm": 4.280646308,
+          "rod_attitude_deg": 0.5047162314941817
+        },
+        {
+          "t": 0.46000000000000085,
+          "rod": -5.748245369999995,
+          "left_hand": -5.75286279999998,
+          "right_hand": -4.991034700000007,
+          "left_grasp_reference_residual_mm": 3.619867828,
+          "right_grasp_reference_residual_mm": 4.487328875,
+          "rod_attitude_deg": 0.453954785147335
+        },
+        {
+          "t": 0.49800000000000466,
+          "rod": -5.905985029999991,
+          "left_hand": -6.000409899999975,
+          "right_hand": -5.147975999999998,
+          "left_grasp_reference_residual_mm": 3.84199813,
+          "right_grasp_reference_residual_mm": 4.677678933,
+          "rod_attitude_deg": 0.45152863084847855
+        },
+        {
+          "t": 0.5620000000000047,
+          "rod": -6.017025899999993,
+          "left_hand": -6.0879293999999975,
+          "right_hand": -5.218329800000005,
+          "left_grasp_reference_residual_mm": 3.9237684120000003,
+          "right_grasp_reference_residual_mm": 4.747218724,
+          "rod_attitude_deg": 0.42993994120098794
+        },
+        {
+          "t": 0.6000000000000014,
+          "rod": -6.120861649999997,
+          "left_hand": -6.221310600000002,
+          "right_hand": -5.330429500000012,
+          "left_grasp_reference_residual_mm": 4.062937849,
+          "right_grasp_reference_residual_mm": 4.896753306,
+          "rod_attitude_deg": 0.43013265982697074
+        },
+        {
+          "t": 0.661999999999999,
+          "rod": -6.226404019999992,
+          "left_hand": -6.267479899999984,
+          "right_hand": -5.383422100000007,
+          "left_grasp_reference_residual_mm": 3.992773225,
+          "right_grasp_reference_residual_mm": 4.987489921,
+          "rod_attitude_deg": 0.45061412753008584
+        },
+        {
+          "t": 0.6900000000000048,
+          "rod": -6.329300539999992,
+          "left_hand": -6.331833999999981,
+          "right_hand": -5.465536800000004,
+          "left_grasp_reference_residual_mm": 3.9801430810000005,
+          "right_grasp_reference_residual_mm": 5.032113884,
+          "rod_attitude_deg": 0.4657572344160606
+        },
+        {
+          "t": 0.7620000000000005,
+          "rod": -6.390645619999996,
+          "left_hand": -6.357272299999995,
+          "right_hand": -5.4877453999999934,
+          "left_grasp_reference_residual_mm": 3.9778772649999996,
+          "right_grasp_reference_residual_mm": 5.157255102,
+          "rod_attitude_deg": 0.4968020692099414
+        },
+        {
+          "t": 0.8000000000000043,
+          "rod": -6.442935909999996,
+          "left_hand": -6.40394449999998,
+          "right_hand": -5.5357705999999895,
+          "left_grasp_reference_residual_mm": 4.057375778,
+          "right_grasp_reference_residual_mm": 5.336971005,
+          "rod_attitude_deg": 0.4589680691062174
+        },
+        {
+          "t": 0.8599999999999994,
+          "rod": -6.4998005799999925,
+          "left_hand": -6.437538999999992,
+          "right_hand": -5.547304899999994,
+          "left_grasp_reference_residual_mm": 4.11206991,
+          "right_grasp_reference_residual_mm": 5.411585902,
+          "rod_attitude_deg": 0.45853490094355365
+        },
+        {
+          "t": 0.8999999999999986,
+          "rod": -6.592287719999993,
+          "left_hand": -6.51026289999998,
+          "right_hand": -5.57106160000001,
+          "left_grasp_reference_residual_mm": 4.3548066709999995,
+          "right_grasp_reference_residual_mm": 5.580718077,
+          "rod_attitude_deg": 0.4447351442581324
+        },
+        {
+          "t": 0.9620000000000033,
+          "rod": -6.624309349999996,
+          "left_hand": -6.54173159999999,
+          "right_hand": -5.584731499999995,
+          "left_grasp_reference_residual_mm": 4.413882228,
+          "right_grasp_reference_residual_mm": 5.672102582,
+          "rod_attitude_deg": 0.42115126666027264
+        },
+        {
+          "t": 1.0020000000000024,
+          "rod": -6.790211629999994,
+          "left_hand": -6.577629099999982,
+          "right_hand": -5.635278599999988,
+          "left_grasp_reference_residual_mm": 4.530906005,
+          "right_grasp_reference_residual_mm": 5.770793874,
+          "rod_attitude_deg": 0.40388123563270834
+        },
+        {
+          "t": 1.0579999999999998,
+          "rod": -6.842828189999997,
+          "left_hand": -6.606925499999999,
+          "right_hand": -5.6690728000000075,
+          "left_grasp_reference_residual_mm": 4.568325263999999,
+          "right_grasp_reference_residual_mm": 5.820907258,
+          "rod_attitude_deg": 0.378418558187634
+        },
+        {
+          "t": 1.1000000000000014,
+          "rod": -6.8895250099999945,
+          "left_hand": -6.644106099999991,
+          "right_hand": -5.721930600000008,
+          "left_grasp_reference_residual_mm": 4.642261476,
+          "right_grasp_reference_residual_mm": 5.889283861,
+          "rod_attitude_deg": 0.37998674941270566
+        },
+        {
+          "t": 1.1580000000000013,
+          "rod": -6.9467062499999965,
+          "left_hand": -6.664612799999997,
+          "right_hand": -5.729643600000001,
+          "left_grasp_reference_residual_mm": 4.683389268,
+          "right_grasp_reference_residual_mm": 5.982748102,
+          "rod_attitude_deg": 0.3992143839004153
+        },
+        {
+          "t": 1.2000000000000028,
+          "rod": -6.982386789999996,
+          "left_hand": -6.665734199999996,
+          "right_hand": -5.755098200000003,
+          "left_grasp_reference_residual_mm": 4.687399564000001,
+          "right_grasp_reference_residual_mm": 6.012193661,
+          "rod_attitude_deg": 0.40881884181650857
+        },
+        {
+          "t": 1.2620000000000005,
+          "rod": -7.019962289999994,
+          "left_hand": -6.666911899999989,
+          "right_hand": -5.767180300000008,
+          "left_grasp_reference_residual_mm": 4.651624728,
+          "right_grasp_reference_residual_mm": 6.104178188000001,
+          "rod_attitude_deg": 0.41027332517297316
+        },
+        {
+          "t": 1.3200000000000003,
+          "rod": -7.0591073799999915,
+          "left_hand": -6.690598399999997,
+          "right_hand": -5.79795420000001,
+          "left_grasp_reference_residual_mm": 4.7617297,
+          "right_grasp_reference_residual_mm": 6.1665436719999995,
+          "rod_attitude_deg": 0.4213229771188769
+        },
+        {
+          "t": 1.3620000000000019,
+          "rod": -7.1093700099999975,
+          "left_hand": -6.697365799999994,
+          "right_hand": -5.8185648999999895,
+          "left_grasp_reference_residual_mm": 4.730491183000001,
+          "right_grasp_reference_residual_mm": 6.228565376000001,
+          "rod_attitude_deg": 0.411826099255546
+        },
+        {
+          "t": 1.4220000000000041,
+          "rod": -7.145010109999996,
+          "left_hand": -6.7034959999999755,
+          "right_hand": -5.844635600000009,
+          "left_grasp_reference_residual_mm": 4.73523246,
+          "right_grasp_reference_residual_mm": 6.254226012,
+          "rod_attitude_deg": 0.4203171517952045
+        },
+        {
+          "t": 1.4579999999999984,
+          "rod": -7.171896159999997,
+          "left_hand": -6.733780899999986,
+          "right_hand": -5.875049800000004,
+          "left_grasp_reference_residual_mm": 4.82157866,
+          "right_grasp_reference_residual_mm": 6.360461586,
+          "rod_attitude_deg": 0.4040340900961986
+        },
+        {
+          "t": 1.5219999999999985,
+          "rod": -7.221652829999995,
+          "left_hand": -6.733625399999998,
+          "right_hand": -5.887461600000004,
+          "left_grasp_reference_residual_mm": 4.817597103,
+          "right_grasp_reference_residual_mm": 6.359712407,
+          "rod_attitude_deg": 0.4190047896314694
+        },
+        {
+          "t": 1.5620000000000047,
+          "rod": -7.252261059999994,
+          "left_hand": -6.734276299999981,
+          "right_hand": -5.907700699999991,
+          "left_grasp_reference_residual_mm": 4.799663185,
+          "right_grasp_reference_residual_mm": 6.468568093,
+          "rod_attitude_deg": 0.4224487806991626
+        },
+        {
+          "t": 1.6219999999999999,
+          "rod": -7.288759859999994,
+          "left_hand": -6.768244999999978,
+          "right_hand": -5.934437600000009,
+          "left_grasp_reference_residual_mm": 4.912812059999999,
+          "right_grasp_reference_residual_mm": 6.4769135460000005,
+          "rod_attitude_deg": 0.41761502985159665
+        },
+        {
+          "t": 1.661999999999999,
+          "rod": -7.333635609999993,
+          "left_hand": -6.767796399999998,
+          "right_hand": -5.957859199999999,
+          "left_grasp_reference_residual_mm": 4.869565944,
+          "right_grasp_reference_residual_mm": 6.578083377,
+          "rod_attitude_deg": 0.4229275327635306
+        },
+        {
+          "t": 1.7199999999999989,
+          "rod": -7.373991829999996,
+          "left_hand": -6.814752600000001,
+          "right_hand": -5.980647199999995,
+          "left_grasp_reference_residual_mm": 5.036215462,
+          "right_grasp_reference_residual_mm": 6.788879908999999,
+          "rod_attitude_deg": 0.37416779881561535
+        },
+        {
+          "t": 1.7540000000000049,
+          "rod": -7.4394841699999965,
+          "left_hand": -6.8311974999999965,
+          "right_hand": -5.996740499999986,
+          "left_grasp_reference_residual_mm": 5.112575868,
+          "right_grasp_reference_residual_mm": 6.828396562,
+          "rod_attitude_deg": 0.3965679422123055
+        },
+        {
+          "t": 1.7959999999999994,
+          "rod": -7.490849389999991,
+          "left_hand": -6.8406211,
+          "right_hand": -6.009542099999987,
+          "left_grasp_reference_residual_mm": 5.0974038230000005,
+          "right_grasp_reference_residual_mm": 6.935174985,
+          "rod_attitude_deg": 0.42023925974884635
+        },
+        {
+          "t": 1.8440000000000012,
+          "rod": -7.516969909999998,
+          "left_hand": -6.927131199999992,
+          "right_hand": -6.027811399999999,
+          "left_grasp_reference_residual_mm": 5.423781367,
+          "right_grasp_reference_residual_mm": 7.179402826,
+          "rod_attitude_deg": 0.36882082105463426
+        },
+        {
+          "t": 1.9200000000000017,
+          "rod": -7.594503319999994,
+          "left_hand": -6.940171799999978,
+          "right_hand": -6.038805300000005,
+          "left_grasp_reference_residual_mm": 5.563299598,
+          "right_grasp_reference_residual_mm": 7.154073204,
+          "rod_attitude_deg": 0.3579083126513603
+        },
+        {
+          "t": 1.9600000000000009,
+          "rod": -7.650719029999996,
+          "left_hand": -6.9669595999999885,
+          "right_hand": -6.05278070000001,
+          "left_grasp_reference_residual_mm": 5.720859139,
+          "right_grasp_reference_residual_mm": 7.253435114,
+          "rod_attitude_deg": 0.38398067777710937
+        },
+        {
+          "t": 2.0219999999999985,
+          "rod": -7.677433989999996,
+          "left_hand": -6.9831457999999795,
+          "right_hand": -6.079615099999991,
+          "left_grasp_reference_residual_mm": 5.764432816999999,
+          "right_grasp_reference_residual_mm": 7.379297819,
+          "rod_attitude_deg": 0.3741012791413714
+        },
+        {
+          "t": 2.0620000000000047,
+          "rod": -7.733991839999995,
+          "left_hand": -7.062918099999981,
+          "right_hand": -6.117452400000001,
+          "left_grasp_reference_residual_mm": 6.02337154,
+          "right_grasp_reference_residual_mm": 7.596406097999999,
+          "rod_attitude_deg": 0.3229606619473633
+        },
+        {
+          "t": 2.122,
+          "rod": -7.789281019999997,
+          "left_hand": -7.093813300000002,
+          "right_hand": -6.1378038000000075,
+          "left_grasp_reference_residual_mm": 6.1096538989999996,
+          "right_grasp_reference_residual_mm": 7.706642481,
+          "rod_attitude_deg": 0.36416909560841637
+        },
+        {
+          "t": 2.182000000000002,
+          "rod": -7.842176819999998,
+          "left_hand": -7.137032999999987,
+          "right_hand": -6.180808799999992,
+          "left_grasp_reference_residual_mm": 6.305032701,
+          "right_grasp_reference_residual_mm": 7.916175656,
+          "rod_attitude_deg": 0.3349636230868642
+        },
+        {
+          "t": 2.2220000000000013,
+          "rod": -7.867326469999991,
+          "left_hand": -7.1562493999999806,
+          "right_hand": -6.1940222999999905,
+          "left_grasp_reference_residual_mm": 6.382355856,
+          "right_grasp_reference_residual_mm": 7.963669959999999,
+          "rod_attitude_deg": 0.33645634309629435
+        },
+        {
+          "t": 2.2820000000000036,
+          "rod": -7.912034139999996,
+          "left_hand": -7.186631499999985,
+          "right_hand": -6.216985199999997,
+          "left_grasp_reference_residual_mm": 6.557956583,
+          "right_grasp_reference_residual_mm": 8.05930296,
+          "rod_attitude_deg": 0.3261982027134168
+        },
+        {
+          "t": 2.3220000000000027,
+          "rod": -7.944021619999991,
+          "left_hand": -7.199003199999998,
+          "right_hand": -6.212188600000001,
+          "left_grasp_reference_residual_mm": 6.578904804,
+          "right_grasp_reference_residual_mm": 8.062354344,
+          "rod_attitude_deg": 0.3573789949212079
+        },
+        {
+          "t": 2.382000000000005,
+          "rod": -7.999065109999995,
+          "left_hand": -7.222868100000001,
+          "right_hand": -6.233896799999999,
+          "left_grasp_reference_residual_mm": 6.761435491,
+          "right_grasp_reference_residual_mm": 8.223229681,
+          "rod_attitude_deg": 0.3663054137569594
+        },
+        {
+          "t": 2.4179999999999993,
+          "rod": -8.055549489999994,
+          "left_hand": -7.2422550999999835,
+          "right_hand": -6.234560499999986,
+          "left_grasp_reference_residual_mm": 6.867475986,
+          "right_grasp_reference_residual_mm": 8.209974833999999,
+          "rod_attitude_deg": 0.35557335746435637
+        },
+        {
+          "t": 2.4819999999999993,
+          "rod": -8.112059009999992,
+          "left_hand": -7.263826499999987,
+          "right_hand": -6.243514799999988,
+          "left_grasp_reference_residual_mm": 6.996254169,
+          "right_grasp_reference_residual_mm": 8.252393586,
+          "rod_attitude_deg": 0.36976173154305086
+        },
+        {
+          "t": 2.520000000000003,
+          "rod": -8.146818529999996,
+          "left_hand": -7.279236299999992,
+          "right_hand": -6.242251599999999,
+          "left_grasp_reference_residual_mm": 7.071641423,
+          "right_grasp_reference_residual_mm": 8.253915856999999,
+          "rod_attitude_deg": 0.3797177459464437
+        },
+        {
+          "t": 2.5820000000000007,
+          "rod": -8.184696839999992,
+          "left_hand": -7.296752999999989,
+          "right_hand": -6.287340700000005,
+          "left_grasp_reference_residual_mm": 7.170534047,
+          "right_grasp_reference_residual_mm": 8.475334313,
+          "rod_attitude_deg": 0.3724096564518844
+        },
+        {
+          "t": 2.622,
+          "rod": -8.220745939999997,
+          "left_hand": -7.32421749999998,
+          "right_hand": -6.309740000000009,
+          "left_grasp_reference_residual_mm": 7.321446636,
+          "right_grasp_reference_residual_mm": 8.557979794,
+          "rod_attitude_deg": 0.3265804260312264
+        },
+        {
+          "t": 2.682000000000002,
+          "rod": -8.275961459999994,
+          "left_hand": -7.393764099999977,
+          "right_hand": -6.331737799999987,
+          "left_grasp_reference_residual_mm": 7.566096987000001,
+          "right_grasp_reference_residual_mm": 8.771434175,
+          "rod_attitude_deg": 0.3421905573069659
+        },
+        {
+          "t": 2.719999999999999,
+          "rod": -8.337872109999992,
+          "left_hand": -7.4205611000000005,
+          "right_hand": -6.342895999999987,
+          "left_grasp_reference_residual_mm": 7.693291601,
+          "right_grasp_reference_residual_mm": 8.934454351,
+          "rod_attitude_deg": 0.3220214625558657
+        },
+        {
+          "t": 2.7820000000000036,
+          "rod": -8.385056529999996,
+          "left_hand": -7.4479395,
+          "right_hand": -6.365694700000008,
+          "left_grasp_reference_residual_mm": 7.876293697,
+          "right_grasp_reference_residual_mm": 9.147198215,
+          "rod_attitude_deg": 0.318514532305424
+        },
+        {
+          "t": 2.8220000000000027,
+          "rod": -8.411452639999997,
+          "left_hand": -7.48339919999999,
+          "right_hand": -6.4083063,
+          "left_grasp_reference_residual_mm": 8.075636815000001,
+          "right_grasp_reference_residual_mm": 9.28848228,
+          "rod_attitude_deg": 0.3285310741686306
+        },
+        {
+          "t": 2.882000000000005,
+          "rod": -8.459006639999995,
+          "left_hand": -7.504671699999993,
+          "right_hand": -6.412791400000007,
+          "left_grasp_reference_residual_mm": 8.163955496,
+          "right_grasp_reference_residual_mm": 9.382999788,
+          "rod_attitude_deg": 0.32272925667867064
+        },
+        {
+          "t": 2.9200000000000017,
+          "rod": -8.475954419999994,
+          "left_hand": -7.544760200000001,
+          "right_hand": -6.415474300000001,
+          "left_grasp_reference_residual_mm": 8.373020698,
+          "right_grasp_reference_residual_mm": 9.502011066,
+          "rod_attitude_deg": 0.33284231153077304
+        }
+      ],
+      "completed": true,
+      "sample": "B2"
+    },
+    {
+      "group": "B",
+      "run_id": "contact_hover_ab_lidio_20261020_B3_retry1",
+      "window_t0_sim_sec": 45.908,
+      "window_rows": 59,
+      "window_span_sec": 2.9399999999999977,
+      "post_lift_switch_sec": 0.07402157783508301,
+      "entry": {
+        "rod_world_xyz_mm": [
+          497.9253816,
+          0.36340603309999997,
+          66.79269814
+        ],
+        "left_hand_world_xyz_mm": [
+          472.730948,
+          149.5977977,
+          164.172046
+        ],
+        "right_hand_world_xyz_mm": [
+          524.9298828999999,
+          -151.3957176,
+          162.8987875
+        ],
+        "rod_quat_xyzw": [
+          0.0001965004974,
+          0.0006447698606,
+          0.08533210386,
+          0.9963523361
+        ],
+        "left_hand_quat_xyzw": [
+          0.8864120393,
+          0.4628847699,
+          -0.001861587945,
+          -0.002814387745
+        ],
+        "right_hand_quat_xyzw": [
+          0.8878210138,
+          0.4601697584,
+          -0.004184511095,
+          -0.000361570368
+        ],
+        "left_grasp_reference_residual_mm": 2.568057504,
+        "right_grasp_reference_residual_mm": 3.585382784
+      },
+      "end": {
+        "left_grasp_reference_residual_mm": 6.324660527,
+        "right_grasp_reference_residual_mm": 8.666045295
+      },
+      "delta": {
+        "rod_xyz_mm": [
+          -1.3973808000000143,
+          0.1233709445,
+          -7.759127399999996
+        ],
+        "left_hand_xyz_mm": [
+          -1.4406817000000016,
+          4.627593499999999,
+          -6.847898299999988
+        ],
+        "right_hand_xyz_mm": [
+          -0.2784556999999577,
+          -4.381365999999998,
+          -6.021377699999997
+        ],
+        "left_grasp_reference_residual_mm": 3.7566030230000003,
+        "right_grasp_reference_residual_mm": 5.080662511000001,
+        "left_rod_hand_xyz_mm": [
+          0.04330089999998732,
+          -4.504222555500009,
+          -0.9112291000000078
+        ],
+        "right_rod_hand_xyz_mm": [
+          -1.1189251000000566,
+          4.504736944499987,
+          -1.7377496999999993
+        ],
+        "left_rod_hand_norm_mm": 4.5956756054037005,
+        "right_rod_hand_norm_mm": 4.956250834895598,
+        "rod_attitude_deg": 0.36752872363072214
+      },
+      "window_max": {
+        "left_grasp_reference_residual_mm": 6.324660527,
+        "right_grasp_reference_residual_mm": 8.666045295,
+        "left_angle_deg": 1.0568823148367155,
+        "right_angle_deg": 0.49186668052406496
+      },
+      "all_four_contact_sample_percent": 72.88135593220339,
+      "series": [
+        {
+          "t": 0.0,
+          "rod": 0.0,
+          "left_hand": 0.0,
+          "right_hand": 0.0,
+          "left_grasp_reference_residual_mm": 2.568057504,
+          "right_grasp_reference_residual_mm": 3.585382784,
+          "rod_attitude_deg": 0.0012371672119628246
+        },
+        {
+          "t": 0.05799999999999983,
+          "rod": -0.37632299999999785,
+          "left_hand": -0.7904075999999871,
+          "right_hand": -0.7263147000000081,
+          "left_grasp_reference_residual_mm": 2.423876454,
+          "right_grasp_reference_residual_mm": 3.769614324,
+          "rod_attitude_deg": 0.07404144991193076
+        },
+        {
+          "t": 0.09799999999999898,
+          "rod": -1.1733479399999998,
+          "left_hand": -1.363748299999995,
+          "right_hand": -1.226794199999992,
+          "left_grasp_reference_residual_mm": 2.558824342,
+          "right_grasp_reference_residual_mm": 3.6788590439999997,
+          "rod_attitude_deg": 0.13254266921580668
+        },
+        {
+          "t": 0.15800000000000125,
+          "rod": -2.2275662699999947,
+          "left_hand": -2.6141617999999864,
+          "right_hand": -2.33911140000001,
+          "left_grasp_reference_residual_mm": 2.580231419,
+          "right_grasp_reference_residual_mm": 3.8629092600000003,
+          "rod_attitude_deg": 0.20370153865381946
+        },
+        {
+          "t": 0.1980000000000004,
+          "rod": -2.937787679999998,
+          "left_hand": -3.660089499999991,
+          "right_hand": -3.263104900000008,
+          "left_grasp_reference_residual_mm": 2.790064076,
+          "right_grasp_reference_residual_mm": 4.054628128,
+          "rod_attitude_deg": 0.22605927716945998
+        },
+        {
+          "t": 0.259999999999998,
+          "rod": -3.6743354399999957,
+          "left_hand": -4.101112800000001,
+          "right_hand": -3.6328542000000077,
+          "left_grasp_reference_residual_mm": 2.7780689190000003,
+          "right_grasp_reference_residual_mm": 4.066090313,
+          "rod_attitude_deg": 0.2797077035053111
+        },
+        {
+          "t": 0.30000000000000426,
+          "rod": -4.247306299999989,
+          "left_hand": -4.4402335000000015,
+          "right_hand": -3.932032599999996,
+          "left_grasp_reference_residual_mm": 2.875492655,
+          "right_grasp_reference_residual_mm": 4.020537865,
+          "rod_attitude_deg": 0.2605787225204798
+        },
+        {
+          "t": 0.35600000000000165,
+          "rod": -4.7155581499999935,
+          "left_hand": -4.975495599999991,
+          "right_hand": -4.378824100000012,
+          "left_grasp_reference_residual_mm": 2.9895383730000002,
+          "right_grasp_reference_residual_mm": 4.138342609,
+          "rod_attitude_deg": 0.308142356153169
+        },
+        {
+          "t": 0.39800000000000324,
+          "rod": -4.989879639999993,
+          "left_hand": -5.302727600000001,
+          "right_hand": -4.647681399999993,
+          "left_grasp_reference_residual_mm": 3.0383542890000004,
+          "right_grasp_reference_residual_mm": 4.265468975,
+          "rod_attitude_deg": 0.3259921620335712
+        },
+        {
+          "t": 0.4579999999999984,
+          "rod": -5.203546269999998,
+          "left_hand": -5.433337499999996,
+          "right_hand": -4.742361899999992,
+          "left_grasp_reference_residual_mm": 3.174199956,
+          "right_grasp_reference_residual_mm": 4.306336308,
+          "rod_attitude_deg": 0.33866541446920334
+        },
+        {
+          "t": 0.5,
+          "rod": -5.391912559999996,
+          "left_hand": -5.607024299999985,
+          "right_hand": -4.880856099999997,
+          "left_grasp_reference_residual_mm": 3.2842957,
+          "right_grasp_reference_residual_mm": 4.3977477369999995,
+          "rod_attitude_deg": 0.40040520224371895
+        },
+        {
+          "t": 0.5600000000000023,
+          "rod": -5.515755269999999,
+          "left_hand": -5.6761178999999995,
+          "right_hand": -4.92551220000001,
+          "left_grasp_reference_residual_mm": 3.305149808,
+          "right_grasp_reference_residual_mm": 4.496904415,
+          "rod_attitude_deg": 0.45852434811070586
+        },
+        {
+          "t": 0.6139999999999972,
+          "rod": -5.6199756699999925,
+          "left_hand": -5.751179899999986,
+          "right_hand": -4.958437700000013,
+          "left_grasp_reference_residual_mm": 3.404011486,
+          "right_grasp_reference_residual_mm": 4.648760844,
+          "rod_attitude_deg": 0.3969819841483585
+        },
+        {
+          "t": 0.6600000000000037,
+          "rod": -5.715531549999993,
+          "left_hand": -5.828993300000001,
+          "right_hand": -5.023792200000016,
+          "left_grasp_reference_residual_mm": 3.546608431,
+          "right_grasp_reference_residual_mm": 4.72691825,
+          "rod_attitude_deg": 0.43135914646972523
+        },
+        {
+          "t": 0.7199999999999989,
+          "rod": -5.783724079999997,
+          "left_hand": -5.902340899999997,
+          "right_hand": -5.081579199999991,
+          "left_grasp_reference_residual_mm": 3.606545949,
+          "right_grasp_reference_residual_mm": 4.93649865,
+          "rod_attitude_deg": 0.44269740092502724
+        },
+        {
+          "t": 0.759999999999998,
+          "rod": -5.856226299999996,
+          "left_hand": -5.9363082999999985,
+          "right_hand": -5.102929700000009,
+          "left_grasp_reference_residual_mm": 3.685882934,
+          "right_grasp_reference_residual_mm": 5.045776583,
+          "rod_attitude_deg": 0.4440669269554212
+        },
+        {
+          "t": 0.8160000000000025,
+          "rod": -5.907811839999992,
+          "left_hand": -5.970244199999975,
+          "right_hand": -5.155113900000008,
+          "left_grasp_reference_residual_mm": 3.734060447,
+          "right_grasp_reference_residual_mm": 5.244956763,
+          "rod_attitude_deg": 0.436631465681125
+        },
+        {
+          "t": 0.8599999999999994,
+          "rod": -5.970731719999997,
+          "left_hand": -5.989663999999978,
+          "right_hand": -5.176225100000015,
+          "left_grasp_reference_residual_mm": 3.69916478,
+          "right_grasp_reference_residual_mm": 5.270348712,
+          "rod_attitude_deg": 0.4443302457714387
+        },
+        {
+          "t": 0.9200000000000017,
+          "rod": -6.0117073799999945,
+          "left_hand": -6.004530799999991,
+          "right_hand": -5.212539200000005,
+          "left_grasp_reference_residual_mm": 3.771900629,
+          "right_grasp_reference_residual_mm": 5.372964464,
+          "rod_attitude_deg": 0.44614430780274106
+        },
+        {
+          "t": 0.9600000000000009,
+          "rod": -6.050204129999994,
+          "left_hand": -6.032788899999975,
+          "right_hand": -5.222277200000014,
+          "left_grasp_reference_residual_mm": 3.8119129910000003,
+          "right_grasp_reference_residual_mm": 5.414339627,
+          "rod_attitude_deg": 0.4478825735661715
+        },
+        {
+          "t": 1.0159999999999982,
+          "rod": -6.098505969999994,
+          "left_hand": -6.046364199999987,
+          "right_hand": -5.272551799999997,
+          "left_grasp_reference_residual_mm": 3.81648218,
+          "right_grasp_reference_residual_mm": 5.5387963000000004,
+          "rod_attitude_deg": 0.4482082499174701
+        },
+        {
+          "t": 1.0600000000000023,
+          "rod": -6.131538519999993,
+          "left_hand": -6.06996429999998,
+          "right_hand": -5.285701199999993,
+          "left_grasp_reference_residual_mm": 3.866889246,
+          "right_grasp_reference_residual_mm": 5.628044093,
+          "rod_attitude_deg": 0.420304744924142
+        },
+        {
+          "t": 1.1139999999999972,
+          "rod": -6.185647039999992,
+          "left_hand": -6.0938959999999875,
+          "right_hand": -5.326429699999996,
+          "left_grasp_reference_residual_mm": 3.900916886,
+          "right_grasp_reference_residual_mm": 5.661515217,
+          "rod_attitude_deg": 0.4317801858055303
+        },
+        {
+          "t": 1.1600000000000037,
+          "rod": -6.228780039999993,
+          "left_hand": -6.0965741000000016,
+          "right_hand": -5.342362699999992,
+          "left_grasp_reference_residual_mm": 3.865975493,
+          "right_grasp_reference_residual_mm": 5.684577809,
+          "rod_attitude_deg": 0.44340152506387775
+        },
+        {
+          "t": 1.2180000000000035,
+          "rod": -6.265619499999993,
+          "left_hand": -6.132194299999977,
+          "right_hand": -5.367868400000003,
+          "left_grasp_reference_residual_mm": 4.025799394,
+          "right_grasp_reference_residual_mm": 5.893238736,
+          "rod_attitude_deg": 0.4359545015346904
+        },
+        {
+          "t": 1.259999999999998,
+          "rod": -6.338553499999996,
+          "left_hand": -6.1570447999999836,
+          "right_hand": -5.379929300000002,
+          "left_grasp_reference_residual_mm": 4.102087903999999,
+          "right_grasp_reference_residual_mm": 5.940311048,
+          "rod_attitude_deg": 0.443445977928168
+        },
+        {
+          "t": 1.3200000000000003,
+          "rod": -6.3824472899999956,
+          "left_hand": -6.198605400000002,
+          "right_hand": -5.404248800000011,
+          "left_grasp_reference_residual_mm": 4.239146,
+          "right_grasp_reference_residual_mm": 6.1320149090000005,
+          "rod_attitude_deg": 0.41316983285807524
+        },
+        {
+          "t": 1.3599999999999994,
+          "rod": -6.427140289999994,
+          "left_hand": -6.2295550999999785,
+          "right_hand": -5.417613200000004,
+          "left_grasp_reference_residual_mm": 4.311690501,
+          "right_grasp_reference_residual_mm": 6.240823458,
+          "rod_attitude_deg": 0.3797923906516008
+        },
+        {
+          "t": 1.4200000000000017,
+          "rod": -6.480013389999997,
+          "left_hand": -6.286904999999981,
+          "right_hand": -5.441019600000013,
+          "left_grasp_reference_residual_mm": 4.497669844,
+          "right_grasp_reference_residual_mm": 6.316891998,
+          "rod_attitude_deg": 0.3436095073372311
+        },
+        {
+          "t": 1.480000000000004,
+          "rod": -6.553319249999995,
+          "left_hand": -6.300112199999985,
+          "right_hand": -5.465715700000012,
+          "left_grasp_reference_residual_mm": 4.612651436,
+          "right_grasp_reference_residual_mm": 6.3843748,
+          "rod_attitude_deg": 0.38188273664508365
+        },
+        {
+          "t": 1.5200000000000031,
+          "rod": -6.590619619999995,
+          "left_hand": -6.3546845999999935,
+          "right_hand": -5.478251800000001,
+          "left_grasp_reference_residual_mm": 4.824704247000001,
+          "right_grasp_reference_residual_mm": 6.428322002,
+          "rod_attitude_deg": 0.3537614047865636
+        },
+        {
+          "t": 1.5799999999999983,
+          "rod": -6.663653359999993,
+          "left_hand": -6.39281559999999,
+          "right_hand": -5.486843699999993,
+          "left_grasp_reference_residual_mm": 5.002457714,
+          "right_grasp_reference_residual_mm": 6.48478775,
+          "rod_attitude_deg": 0.38463063281898263
+        },
+        {
+          "t": 1.6139999999999972,
+          "rod": -6.720198599999998,
+          "left_hand": -6.411665599999977,
+          "right_hand": -5.498980900000006,
+          "left_grasp_reference_residual_mm": 5.095773186,
+          "right_grasp_reference_residual_mm": 6.547768949,
+          "rod_attitude_deg": 0.38007243569602184
+        },
+        {
+          "t": 1.6799999999999997,
+          "rod": -6.7625151899999985,
+          "left_hand": -6.430870799999989,
+          "right_hand": -5.549308199999992,
+          "left_grasp_reference_residual_mm": 5.090669291,
+          "right_grasp_reference_residual_mm": 6.7255172729999995,
+          "rod_attitude_deg": 0.38112183101922875
+        },
+        {
+          "t": 1.7180000000000035,
+          "rod": -6.784739859999993,
+          "left_hand": -6.451753300000002,
+          "right_hand": -5.5689458000000025,
+          "left_grasp_reference_residual_mm": 5.163969389,
+          "right_grasp_reference_residual_mm": 6.831718124999999,
+          "rod_attitude_deg": 0.36052492245627893
+        },
+        {
+          "t": 1.7800000000000011,
+          "rod": -6.826061849999995,
+          "left_hand": -6.4739842999999855,
+          "right_hand": -5.602989100000011,
+          "left_grasp_reference_residual_mm": 5.143577964,
+          "right_grasp_reference_residual_mm": 6.843091821,
+          "rod_attitude_deg": 0.3581283336969185
+        },
+        {
+          "t": 1.8179999999999978,
+          "rod": -6.879366909999997,
+          "left_hand": -6.465976599999978,
+          "right_hand": -5.628275900000007,
+          "left_grasp_reference_residual_mm": 5.151346972,
+          "right_grasp_reference_residual_mm": 6.900608259,
+          "rod_attitude_deg": 0.36995399786426736
+        },
+        {
+          "t": 1.8800000000000026,
+          "rod": -6.935896669999996,
+          "left_hand": -6.518892799999981,
+          "right_hand": -5.6511030999999985,
+          "left_grasp_reference_residual_mm": 5.231386626,
+          "right_grasp_reference_residual_mm": 7.146183304999999,
+          "rod_attitude_deg": 0.3715489547135013
+        },
+        {
+          "t": 1.9179999999999993,
+          "rod": -6.984627069999992,
+          "left_hand": -6.5432906000000015,
+          "right_hand": -5.671826099999999,
+          "left_grasp_reference_residual_mm": 5.385436074,
+          "right_grasp_reference_residual_mm": 7.200280543,
+          "rod_attitude_deg": 0.32472072373420224
+        },
+        {
+          "t": 1.9780000000000015,
+          "rod": -7.039275769999992,
+          "left_hand": -6.579975399999993,
+          "right_hand": -5.697955000000005,
+          "left_grasp_reference_residual_mm": 5.491975471,
+          "right_grasp_reference_residual_mm": 7.351358889999999,
+          "rod_attitude_deg": 0.36082636271385454
+        },
+        {
+          "t": 2.020000000000003,
+          "rod": -7.101348579999993,
+          "left_hand": -6.608099999999978,
+          "right_hand": -5.6971180000000015,
+          "left_grasp_reference_residual_mm": 5.593537345,
+          "right_grasp_reference_residual_mm": 7.406929702999999,
+          "rod_attitude_deg": 0.37123899209293953
+        },
+        {
+          "t": 2.0799999999999983,
+          "rod": -7.153878869999998,
+          "left_hand": -6.65211089999998,
+          "right_hand": -5.71258890000001,
+          "left_grasp_reference_residual_mm": 5.799389679,
+          "right_grasp_reference_residual_mm": 7.620709584999999,
+          "rod_attitude_deg": 0.3401703765384057
+        },
+        {
+          "t": 2.118000000000002,
+          "rod": -7.188170109999996,
+          "left_hand": -6.658522599999994,
+          "right_hand": -5.72952069999999,
+          "left_grasp_reference_residual_mm": 5.853904286,
+          "right_grasp_reference_residual_mm": 7.616734544000001,
+          "rod_attitude_deg": 0.306276769108681
+        },
+        {
+          "t": 2.1799999999999997,
+          "rod": -7.241247329999992,
+          "left_hand": -6.683256899999989,
+          "right_hand": -5.74545970000001,
+          "left_grasp_reference_residual_mm": 5.894853937000001,
+          "right_grasp_reference_residual_mm": 7.721992177,
+          "rod_attitude_deg": 0.34112119723862794
+        },
+        {
+          "t": 2.216000000000001,
+          "rod": -7.282475279999992,
+          "left_hand": -6.679466899999986,
+          "right_hand": -5.7513201000000125,
+          "left_grasp_reference_residual_mm": 5.881333687000001,
+          "right_grasp_reference_residual_mm": 7.753627376,
+          "rod_attitude_deg": 0.3578432868322255
+        },
+        {
+          "t": 2.280000000000001,
+          "rod": -7.321108229999998,
+          "left_hand": -6.685697699999993,
+          "right_hand": -5.782379100000012,
+          "left_grasp_reference_residual_mm": 5.841113818,
+          "right_grasp_reference_residual_mm": 7.896650319,
+          "rod_attitude_deg": 0.3573490018627127
+        },
+        {
+          "t": 2.3400000000000034,
+          "rod": -7.344683909999997,
+          "left_hand": -6.7011190999999855,
+          "right_hand": -5.795013399999993,
+          "left_grasp_reference_residual_mm": 5.957210559,
+          "right_grasp_reference_residual_mm": 7.891750177,
+          "rod_attitude_deg": 0.35690229118892036
+        },
+        {
+          "t": 2.3800000000000026,
+          "rod": -7.372225639999994,
+          "left_hand": -6.719314699999979,
+          "right_hand": -5.816662599999995,
+          "left_grasp_reference_residual_mm": 5.965737863999999,
+          "right_grasp_reference_residual_mm": 7.984025537000001,
+          "rod_attitude_deg": 0.3489666576241503
+        },
+        {
+          "t": 2.4399999999999977,
+          "rod": -7.409183629999997,
+          "left_hand": -6.721687599999998,
+          "right_hand": -5.830624499999992,
+          "left_grasp_reference_residual_mm": 5.980094278,
+          "right_grasp_reference_residual_mm": 8.005693386999999,
+          "rod_attitude_deg": 0.3578785521917261
+        },
+        {
+          "t": 2.475999999999999,
+          "rod": -7.451522119999998,
+          "left_hand": -6.723485399999979,
+          "right_hand": -5.8624633999999896,
+          "left_grasp_reference_residual_mm": 5.977480026,
+          "right_grasp_reference_residual_mm": 8.037017801,
+          "rod_attitude_deg": 0.3692024077771985
+        },
+        {
+          "t": 2.538000000000004,
+          "rod": -7.471372869999993,
+          "left_hand": -6.735183799999989,
+          "right_hand": -5.872476900000007,
+          "left_grasp_reference_residual_mm": 6.000429814,
+          "right_grasp_reference_residual_mm": 8.138894196,
+          "rod_attitude_deg": 0.3708956438136043
+        },
+        {
+          "t": 2.5799999999999983,
+          "rod": -7.509089089999997,
+          "left_hand": -6.764011199999976,
+          "right_hand": -5.881215800000006,
+          "left_grasp_reference_residual_mm": 6.095192214,
+          "right_grasp_reference_residual_mm": 8.111390838999998,
+          "rod_attitude_deg": 0.3630853063817294
+        },
+        {
+          "t": 2.6400000000000006,
+          "rod": -7.550145759999995,
+          "left_hand": -6.765913799999995,
+          "right_hand": -5.888759699999996,
+          "left_grasp_reference_residual_mm": 6.132703416,
+          "right_grasp_reference_residual_mm": 8.10041119,
+          "rod_attitude_deg": 0.3748526789187971
+        },
+        {
+          "t": 2.6779999999999973,
+          "rod": -7.5838956599999925,
+          "left_hand": -6.76944639999999,
+          "right_hand": -5.914449799999999,
+          "left_grasp_reference_residual_mm": 6.092086868,
+          "right_grasp_reference_residual_mm": 8.130687199,
+          "rod_attitude_deg": 0.381411627649798
+        },
+        {
+          "t": 2.740000000000002,
+          "rod": -7.621699649999994,
+          "left_hand": -6.766859299999983,
+          "right_hand": -5.931247500000014,
+          "left_grasp_reference_residual_mm": 6.059345990000001,
+          "right_grasp_reference_residual_mm": 8.233656746,
+          "rod_attitude_deg": 0.38220215403391206
+        },
+        {
+          "t": 2.780000000000001,
+          "rod": -7.641116769999997,
+          "left_hand": -6.797477099999977,
+          "right_hand": -5.943561399999991,
+          "left_grasp_reference_residual_mm": 6.217736218,
+          "right_grasp_reference_residual_mm": 8.276261672,
+          "rod_attitude_deg": 0.37976312602535506
+        },
+        {
+          "t": 2.8400000000000034,
+          "rod": -7.667558639999996,
+          "left_hand": -6.804033299999984,
+          "right_hand": -5.98026530000001,
+          "left_grasp_reference_residual_mm": 6.266604977,
+          "right_grasp_reference_residual_mm": 8.33735536,
+          "rod_attitude_deg": 0.372441281081985
+        },
+        {
+          "t": 2.8800000000000026,
+          "rod": -7.700591679999993,
+          "left_hand": -6.810563999999991,
+          "right_hand": -5.993440500000002,
+          "left_grasp_reference_residual_mm": 6.236796243,
+          "right_grasp_reference_residual_mm": 8.471878012000001,
+          "rod_attitude_deg": 0.3765221286409705
+        },
+        {
+          "t": 2.9399999999999977,
+          "rod": -7.759127399999996,
+          "left_hand": -6.847898299999988,
+          "right_hand": -6.021377699999997,
+          "left_grasp_reference_residual_mm": 6.324660527,
+          "right_grasp_reference_residual_mm": 8.666045295,
+          "rod_attitude_deg": 0.36752872363072214
+        }
+      ],
+      "completed": true,
+      "sample": "B3"
+    }
+  ],
+  "group_ranges": {
+    "A": {
+      "rod_world_delta_z_mm": {
+        "min": -1.4900003700000082,
+        "median": -0.2521398900000027,
+        "max": 0.7223352300000097
+      },
+      "left_grasp_reference_residual_increment_mm": {
+        "min": 3.804871767,
+        "median": 5.173545798000001,
+        "max": 5.624819741
+      },
+      "right_grasp_reference_residual_increment_mm": {
+        "min": 4.179549915000001,
+        "median": 4.677436706,
+        "max": 4.947563774
+      },
+      "left_rod_hand_norm_mm": {
+        "min": 3.966048582816884,
+        "median": 5.352033788390444,
+        "max": 5.6050196891523045
+      },
+      "right_rod_hand_norm_mm": {
+        "min": 4.4436221410227255,
+        "median": 4.835148920424934,
+        "max": 5.174277592616126
+      },
+      "rod_attitude_deg": {
+        "min": 0.39992458970019507,
+        "median": 0.510410307670259,
+        "max": 0.5471622104840799
+      },
+      "completed": 3
+    },
+    "B": {
+      "rod_world_delta_z_mm": {
+        "min": -8.868544420000006,
+        "median": -8.475954419999994,
+        "max": -7.759127399999996
+      },
+      "left_grasp_reference_residual_increment_mm": {
+        "min": 3.206608785,
+        "median": 3.7566030230000003,
+        "max": 5.571087624
+      },
+      "right_grasp_reference_residual_increment_mm": {
+        "min": 4.998153146,
+        "median": 5.080662511000001,
+        "max": 5.919664691
+      },
+      "left_rod_hand_norm_mm": {
+        "min": 4.054378657629058,
+        "median": 4.5956756054037005,
+        "max": 6.082899154634381
+      },
+      "right_rod_hand_norm_mm": {
+        "min": 4.956250834895598,
+        "median": 5.179959150844548,
+        "max": 5.903528756243422
+      },
+      "rod_attitude_deg": {
+        "min": 0.33284231153077304,
+        "median": 0.36752872363072214,
+        "max": 0.43764535080427625
+      },
+      "completed": 3
+    }
+  }
+}

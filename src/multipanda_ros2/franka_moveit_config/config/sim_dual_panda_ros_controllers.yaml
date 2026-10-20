@@ -24,6 +24,12 @@ controller_manager:
     force_torque_sensor_broadcaster_right:
       type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster
 
+joint_state_broadcaster:
+  ros__parameters:
+    # Keep raw arm feedback separate so the global aggregator can merge it with
+    # the simulated finger topics without subscribing to its own output.
+    use_local_topics: true
+
 dual_panda_arm_controller:
   ros__parameters:
     command_interfaces:

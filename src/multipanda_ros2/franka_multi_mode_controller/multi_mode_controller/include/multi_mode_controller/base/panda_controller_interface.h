@@ -26,6 +26,11 @@ class PandaControllerInterface {
   bool hasError() const {
     return error_.load(std::memory_order_acquire);
   }
+  virtual std::string faultSource() const { return hasError() ? "controller_error" : ""; }
+  virtual std::uint64_t faultSequence() const { return hasError() ? 1 : 0; }
+  virtual std::uint64_t faultSteadyTimeNs() const { return 0; }
+  virtual std::uint64_t referenceSequence() const { return 0; }
+  virtual std::uint64_t referenceSteadyTimeNs() const { return 0; }
   bool hasOffset() {
     return hasOffset_();
   }

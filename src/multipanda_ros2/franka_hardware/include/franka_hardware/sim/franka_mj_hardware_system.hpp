@@ -186,6 +186,26 @@ class FrankaMjHardwareSystem : public mujoco_ros2_control::MujocoRos2SystemInter
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr weld_state_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr adaptive_pub_;
   rclcpp::Node::SharedPtr weld_node_;
+  // One experiment-only +X pulse on the rod, scheduled by the physics thread.
+  // The ROS callback only changes the request flag; all xfrc_applied writes,
+  // timing and CSV events stay in write().
+  bool rod_force_enabled_{false};
+  int rod_force_body_id_{-1};
+  std::atomic<bool> rod_force_arm_requested_{false};
+  bool rod_force_armed_{false};
+  bool rod_force_consumed_{false};
+  bool rod_force_applied_{false};
+  std::atomic<bool> rod_force_applied_status_{false};
+  std::atomic<bool> rod_force_armed_status_{false};
+  double rod_force_arm_sim_time_{0.0};
+  double rod_force_start_sim_time_{0.0};
+  // Applied duration, in simulation seconds. Default 0.2 preserves the
+  // previously reported pulse; the long-pulse directional experiment sets
+  // CONTACT_PROBE_ROD_FORCE_DURATION_SEC=1.0.
+  double rod_force_duration_sec_{0.2};
+  std::ofstream rod_force_events_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr rod_force_arm_sub_;
+  void updateRodForcePulse();
   void updateWeldRelpose();       // 计算左手→铝棒 relpose
   void updateWeldRelposeRight();  // 计算右手→铝棒 relpose
 

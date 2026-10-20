@@ -251,6 +251,7 @@ def generate_launch_description():
             moveit_controllers,
             planning_scene_monitor_parameters,
             chomp_planning_yaml,
+            {'use_sim_time': True},
         ],
     )
 
@@ -282,7 +283,7 @@ def generate_launch_description():
         executable='robot_state_publisher',
         # name='robot_state_publisher',
         output='both',
-        parameters=[robot_description],
+        parameters=[robot_description, {'use_sim_time': True}],
     )
 
     ros2_controllers_path = os.path.join(
@@ -332,7 +333,11 @@ def generate_launch_description():
     )
 
     # Joint state publisher setup
-    jsp_source_list = [concatenate_ns('', 'joint_states', True)]
+    # The broadcaster publishes raw arm state on its controller-local topic;
+    # the aggregator owns the canonical /joint_states output. Feeding the
+    # canonical output back into the aggregator creates a self-subscription and
+    # allows wall-clock stamps to overwrite simulation-time feedback.
+    jsp_source_list = [concatenate_ns('', 'joint_state_broadcaster/joint_states', True)]
     if(load_gripper):
         # The gripper servers publish on ~/joint_states, i.e.
         # /mj_<side>_gripper_sim_node/joint_states. The previous doubled
@@ -348,7 +353,8 @@ def generate_launch_description():
             namespace= '',
             parameters=[
                 {'source_list': jsp_source_list,
-                 'rate': 30}],
+                 'rate': 30,
+                 'use_sim_time': True}],
     )
 
     # Launch arguments    

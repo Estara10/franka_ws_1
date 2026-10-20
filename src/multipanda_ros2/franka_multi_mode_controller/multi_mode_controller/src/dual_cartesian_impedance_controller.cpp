@@ -69,11 +69,16 @@ bool Controller::desiredPoseCallbackImpl(Pose& p_d,
                         msg.l_twist.angular.x, msg.l_twist.angular.y, msg.l_twist.angular.z;
   p_d.poses[1].twist << msg.r_twist.linear.x, msg.r_twist.linear.y, msg.r_twist.linear.z,
                         msg.r_twist.angular.x, msg.r_twist.angular.y, msg.r_twist.angular.z;
-  if (!p_d.poses[0].twist.allFinite() || !p_d.poses[1].twist.allFinite()) {
+  // Explicit payload feedforward, already expressed in each arm's link0
+  // (zero-Jacobian) frame. Zero is the disabled/default branch.
+  p_d.poses[0].ff_force = Vector3d(msg.l_ff_force.x, msg.l_ff_force.y, msg.l_ff_force.z);
+  p_d.poses[1].ff_force = Vector3d(msg.r_ff_force.x, msg.r_ff_force.y, msg.r_ff_force.z);
+  if (!p_d.poses[0].twist.allFinite() || !p_d.poses[1].twist.allFinite() ||
+      !p_d.poses[0].ff_force.allFinite() || !p_d.poses[1].ff_force.allFinite()) {
     auto& clk = *PandaControllerBase<Parameters, Pose>::node_->get_clock();
     const auto& logger = PandaControllerBase<Parameters, Pose>::node_->get_logger();
     RCLCPP_WARN_THROTTLE(logger, clk, 1000,
-        "dual_cartesian_impedance_controller: Discarding goal with a non-finite twist.");
+        "dual_cartesian_impedance_controller: Discarding goal with a non-finite twist or feedforward force.");
     return false;
   }
   return true;

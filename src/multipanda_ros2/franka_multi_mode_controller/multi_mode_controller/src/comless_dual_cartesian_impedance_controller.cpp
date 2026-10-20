@@ -79,6 +79,10 @@ void Controller::computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
     const Vector6d spring_force = -p.params[i].stiffness * error;
     const Vector6d damping_force = D * (reference_twist - current_twist);
     tau_task << jacobian.transpose() * (spring_force + damping_force);
+    // Explicit payload feedforward. `desired.ff_force` is in the same base
+    // (zero-Jacobian) frame as the pose error, so this is J_linear^T F. It is
+    // added to the raw torque BEFORE the shared magnitude/rate limits below.
+    const Vector7d tau_payload_ff = jacobian.topRows<3>().transpose() * desired.ff_force;
     tau_nullspace <<
         getDynamicallyConsistentNullspaceProjection<7>(inertia, jacobian) *
         (p.params[i].nullspace_stiffness * (desired.q_n - current.q_n) -
@@ -86,7 +90,7 @@ void Controller::computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
     // coriolis is the only feed-forward term: MuJoCo runs this model with
     // body gravcomp=1, so gravity is already cancelled by the simulator and
     // adding a gravity term here would compensate it twice.
-    tau_d << tau_task + tau_nullspace + coriolis + tau_collision + tau_manipulability;
+    tau_d << tau_task + tau_payload_ff + tau_nullspace + coriolis + tau_collision + tau_manipulability;
 
     const TorqueLimitResult limited = applyTorqueLimits(
         tau_d, previous_tau_[i], dt, panda_limits::tau_max, panda_limits::tauD_max);

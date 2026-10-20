@@ -1,5 +1,6 @@
 #pragma once
 #include <moveit/collision_detection/collision_matrix.h>
+#include <multi_mode_control_msgs/srv/get_robot_states.hpp>
 #include "carry_task_context.hpp"
 
 // A1 P2a/P2b: the verification model, world and ACM that produced the static
@@ -57,9 +58,12 @@ struct MujocoRodTruth {
 class DualArmController {
     DualArmCarryTask* ctx_;
     A1VerifyContext a1_verify_;
+    rclcpp::Service<multi_mode_control_msgs::srv::GetRobotStates>::SharedPtr robot_state_service_;
 public:
     DualArmController(DualArmCarryTask* ctx) : ctx_(ctx) {}
     void initialize();
+    bool ensureTaskRobotStatesService();
+    bool runMmcStartupPreflight(std::string& reason);
     void diagnoseCollision();
     void initializeCollisionMatrix();
     void allow_gripper_collision(bool allow);

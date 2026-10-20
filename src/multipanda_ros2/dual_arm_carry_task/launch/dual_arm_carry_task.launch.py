@@ -127,6 +127,7 @@ def launch_setup(context, *args, **kwargs):
             'contact_hover_only': LaunchConfiguration('contact_hover_only'),
             'contact_hover_height_m': LaunchConfiguration('contact_hover_height_m'),
             'contact_hover_hold_seconds': LaunchConfiguration('contact_hover_hold_seconds'),
+            'contact_hover_control_mode': LaunchConfiguration('contact_hover_control_mode'),
             'contact_plan_compare': LaunchConfiguration('contact_plan_compare'),
             'contact_transport_plan_only':
                 LaunchConfiguration('contact_transport_plan_only'),
@@ -478,6 +479,9 @@ def generate_launch_description():
     contact_hover_hold_seconds_arg = DeclareLaunchArgument(
         'contact_hover_hold_seconds', default_value='3.0',
         description='contact_hover_only 悬空保持时间（秒）')
+    contact_hover_control_mode_arg = DeclareLaunchArgument(
+        'contact_hover_control_mode', default_value='jtc',
+        description='contact_hover_only 保持控制器：jtc（默认）或 mmc_hold（仅静止保持）')
     contact_plan_compare_arg = DeclareLaunchArgument(
         'contact_plan_compare', default_value='false',
         description='P4/S2 phase 1: 抬升/保持/重建立之后不执行运输，改为对照当前物体空间路径与 '
@@ -793,6 +797,7 @@ def generate_launch_description():
         contact_hover_only_arg,
         contact_hover_height_arg,
         contact_hover_hold_seconds_arg,
+        contact_hover_control_mode_arg,
         contact_plan_compare_arg,
         contact_transport_plan_only_arg,
         descent_steps_arg,

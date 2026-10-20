@@ -85,12 +85,12 @@ controller_interface::return_type MultiModeController::update(
       RCLCPP_ERROR(
           get_node()->get_logger(),
           "MultiModeController: active control reported a latched fault; "
-          "last valid command will be retained");
+          "returning ERROR once while continuing the last-target control law");
       return controller_interface::return_type::ERROR;
     }
-    // The fault remains latched in the inner controller and its torque
-    // command remains under closed-loop control.  Do not make the manager
-    // print the same ERROR once per real-time update cycle.
+    // The fault remains latched in the inner controller.  Do not make the
+    // manager print the same ERROR once per real-time update cycle; the
+    // orchestration layer reads the structured status service instead.
     return controller_interface::return_type::OK;
   }
   return controller_interface::return_type::OK;
@@ -424,12 +424,25 @@ bool MultiModeController::setControllersCallback(const SetControllers::Request::
 
 bool MultiModeController::getControllersCallback(__attribute_maybe_unused__ GetControllers::Request::SharedPtr req, 
                                                        const GetControllers::Response::SharedPtr res){
-  //Skeleton
+  std::shared_lock<std::shared_mutex> lock(control_mtx_);
+  const auto now = std::chrono::steady_clock::now().time_since_epoch();
+  res->status_steady_time_ns = static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
   for (const auto& controller : active_control_set_) {
     multi_mode_control_msgs::msg::Controller c;
     c.name = controller.info.name;
     c.resources.push_back(controller.info.resource);
     res->controllers.push_back(c);
+    if (controller.ptrs.control->hasError() && !res->faulted) {
+      res->faulted = true;
+      res->fault_source = controller.ptrs.control->faultSource();
+      res->fault_sequence = controller.ptrs.control->faultSequence();
+      res->fault_steady_time_ns = controller.ptrs.control->faultSteadyTimeNs();
+    }
+    res->reference_sequence = std::max(
+        res->reference_sequence, controller.ptrs.control->referenceSequence());
+    res->reference_steady_time_ns = std::max(
+        res->reference_steady_time_ns, controller.ptrs.control->referenceSteadyTimeNs());
   }
   return true;
 }

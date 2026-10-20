@@ -23,6 +23,10 @@
 
 ## 离线分析
 
+- `analyze_hover_ab.py`：重建固定场景 JTC/MMC 3 s HOLD 的逐次指标与图表。杆/手 ΔZ 为相对窗口入口的世界坐标位移；旧 task `*_slip_m` 字段在输出中标作抓取参考残差，不是局部接触滑移。
+- `plot_mmc_directional_perturbation.py`：从六次固定/方向性 MMC 扰动运行生成 pulse-aligned 原始图、施力前局部线性漂移扣除图和逐次汇总 CSV。去趋势结果依赖局部线性趋势延续假设。
+- `plot_s2_offline_summary.py`：生成 S2 单个重建离线样本的几何目标与连续时间 jerk RMS 前后图；没有重复运行范围，也没有执行数据。
+
 - `plot_experiment_results.py`：读取最新实验 CSV 或 task-metrics 同步样本，生成整周期分析图；
   一键脚本会在任务结束后自动调用。
 - `compare_task_metrics.py`：比较两份 task-metrics 汇总 CSV，输出阈值判断 CSV/Markdown；

@@ -75,7 +75,12 @@ CONTACT_HOLD_DIAGNOSTIC_ONLY="${CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY:-0}"
 CONTACT_HOVER_ONLY="${CONTACT_PROBE_HOVER_ONLY:-0}"
 CONTACT_HOVER_HEIGHT_M="${CONTACT_PROBE_HOVER_HEIGHT_M:-0.05}"
 CONTACT_HOVER_HOLD_SECONDS="${CONTACT_PROBE_HOVER_HOLD_SECONDS:-3.0}"
+CONTACT_HOVER_CONTROL_MODE="${CONTACT_PROBE_HOVER_CONTROL_MODE:-jtc}"
 CONTACT_PROBE_ADAPTIVE_FORCE_HOLD="${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD:-false}"
+CONTACT_PROBE_MMC_CONTROL_VARIANT="${CONTACT_PROBE_MMC_CONTROL_VARIANT:-fixed}"
+CONTACT_PROBE_ROD_DISTURBANCE="${CONTACT_PROBE_ROD_DISTURBANCE:-0}"
+CONTACT_PROBE_PAYLOAD_FEEDFORWARD="${CONTACT_PROBE_PAYLOAD_FEEDFORWARD:-0}"
+CONTACT_PROBE_ROD_FORCE_DURATION_SEC="${CONTACT_PROBE_ROD_FORCE_DURATION_SEC:-0.2}"
 if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" != "0" && "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" != "1" ]]; then
   echo "error: CONTACT_PROBE_HOLD_DIAGNOSTIC_ONLY must be 0 or 1" >&2
   exit 2
@@ -88,11 +93,40 @@ if [[ "${CONTACT_HOVER_ONLY}" -eq 1 && "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]
   echo "error: hover-only and fixed-arm diagnostic modes are mutually exclusive" >&2
   exit 2
 fi
+case "${CONTACT_HOVER_CONTROL_MODE}" in
+  jtc|mmc_hold) ;;
+  *) echo "error: CONTACT_PROBE_HOVER_CONTROL_MODE must be jtc or mmc_hold" >&2; exit 2 ;;
+esac
+if [[ "${CONTACT_HOVER_ONLY}" -ne 1 && "${CONTACT_HOVER_CONTROL_MODE}" != "jtc" ]]; then
+  echo "error: mmc_hold requires CONTACT_PROBE_HOVER_ONLY=1" >&2; exit 2
+fi
+export CONTACT_HOVER_CONTROL_MODE
 case "${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD}" in
   true|false|1|0) ;;
   *) echo "error: CONTACT_PROBE_ADAPTIVE_FORCE_HOLD must be true/false/1/0" >&2; exit 2 ;;
 esac
 export CONTACT_PROBE_ADAPTIVE_FORCE_HOLD
+case "${CONTACT_PROBE_MMC_CONTROL_VARIANT}" in
+  fixed|directional) ;;
+  *) echo "error: CONTACT_PROBE_MMC_CONTROL_VARIANT must be fixed or directional" >&2; exit 2 ;;
+esac
+if [[ "${CONTACT_PROBE_ROD_DISTURBANCE}" != "0" && "${CONTACT_PROBE_ROD_DISTURBANCE}" != "1" ]]; then
+  echo "error: CONTACT_PROBE_ROD_DISTURBANCE must be 0 or 1" >&2; exit 2
+fi
+if [[ "${CONTACT_PROBE_ROD_DISTURBANCE}" == "1" && "${CONTACT_HOVER_CONTROL_MODE}" != "mmc_hold" ]]; then
+  echo "error: rod disturbance requires CONTACT_HOVER_CONTROL_MODE=mmc_hold" >&2; exit 2
+fi
+if [[ "${CONTACT_PROBE_PAYLOAD_FEEDFORWARD}" != "0" && "${CONTACT_PROBE_PAYLOAD_FEEDFORWARD}" != "1" ]]; then
+  echo "error: CONTACT_PROBE_PAYLOAD_FEEDFORWARD must be 0 or 1" >&2; exit 2
+fi
+if [[ "${CONTACT_PROBE_PAYLOAD_FEEDFORWARD}" == "1" && "${CONTACT_HOVER_CONTROL_MODE}" != "mmc_hold" ]]; then
+  echo "error: payload feedforward requires CONTACT_HOVER_CONTROL_MODE=mmc_hold" >&2; exit 2
+fi
+if ! awk -v d="${CONTACT_PROBE_ROD_FORCE_DURATION_SEC}" 'BEGIN { exit !(d > 0 && d <= 5) }'; then
+  echo "error: CONTACT_PROBE_ROD_FORCE_DURATION_SEC must be in (0, 5] s" >&2; exit 2
+fi
+export CONTACT_PROBE_MMC_CONTROL_VARIANT CONTACT_PROBE_ROD_DISTURBANCE
+export CONTACT_PROBE_PAYLOAD_FEEDFORWARD CONTACT_PROBE_ROD_FORCE_DURATION_SEC
 
 if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
   RUN_ID="${CONTACT_PROBE_RUN_ID:-lidio_contact_probe_compliant_$(date +%Y%m%d_%H%M%S)}"
@@ -114,9 +148,10 @@ if [[ -e "${ROS_LOG_DIR}" ]]; then
   exit 2
 fi
 mkdir -p "${ROS_LOG_DIR}"
+export CONTACT_PROBE_RUN_DIR="${RUN_DIR}"
 
 if [[ "${CONTACT_HOVER_ONLY}" -eq 1 ]]; then
-  echo "contact_probe: RIGID suspended hover, lift=${CONTACT_HOVER_HEIGHT_M}m hold=${CONTACT_HOVER_HOLD_SECONDS}s; no transport"
+  echo "contact_probe: RIGID suspended hover, lift=${CONTACT_HOVER_HEIGHT_M}m hold=${CONTACT_HOVER_HOLD_SECONDS}s mode=${CONTACT_HOVER_CONTROL_MODE}; no transport"
 elif [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
   echo "contact_probe: HOLD-MECHANISM diagnostic only at (0.50, 0.00, +10 deg); no lift"
 else
@@ -155,7 +190,8 @@ if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
 fi
 if [[ "${CONTACT_HOVER_ONLY}" -eq 1 ]]; then
   RUN_ARGS+=(--contact-hover-only --contact-hover-height "${CONTACT_HOVER_HEIGHT_M}"
-             --contact-hover-hold-sec "${CONTACT_HOVER_HOLD_SECONDS}")
+             --contact-hover-hold-sec "${CONTACT_HOVER_HOLD_SECONDS}"
+             --contact-hover-control-mode "${CONTACT_HOVER_CONTROL_MODE}")
 fi
 if [[ "${OBSERVE_ON_ERROR}" -eq 1 ]]; then
   RUN_ARGS+=(--observe-on-error)
