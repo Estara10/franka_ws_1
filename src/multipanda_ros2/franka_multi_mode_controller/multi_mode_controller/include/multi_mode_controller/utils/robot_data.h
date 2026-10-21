@@ -34,7 +34,10 @@ class RobotData {
   const Eigen::Matrix<double, 6, 7>& eeZeroJacobian();
   const Eigen::Matrix<double, 6, 7>& eeBodyJacobian();
   const Eigen::Matrix<double, 7, 7>& mass();
-  const franka::RobotState& state();
+  // Return a snapshot. Returning a reference after releasing update_mutex_
+  // lets the controller update thread tear a 16-element O_T_EE matrix while
+  // SwitchEngine serializes it into a ROS service response.
+  franka::RobotState state();
 
   bool init(std::string robot_model_interface_name, std::string robot_state_interface_name);
   bool initialize_model();

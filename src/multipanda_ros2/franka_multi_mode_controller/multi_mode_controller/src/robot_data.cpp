@@ -31,7 +31,7 @@ const Eigen::Matrix<double, 7, 7>& RobotData::mass() {
   return mass_;
 }
 
-const franka::RobotState& RobotData::state() {
+franka::RobotState RobotData::state() {
   std::lock_guard<std::mutex> lock(update_mutex_);
   return state_;
 }

@@ -4,6 +4,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -18,6 +19,45 @@ struct MmcStateValidation
   bool valid{false};
   std::string reason{"invalid_response"};
 };
+
+inline bool validMmcTransform(const Eigen::Matrix4d& transform)
+{
+  const Eigen::Matrix3d rotation = transform.block<3, 3>(0, 0);
+  const Eigen::Quaterniond quaternion(rotation);
+  return transform.allFinite() &&
+      std::abs(transform(3, 0)) <= 1e-6 &&
+      std::abs(transform(3, 1)) <= 1e-6 &&
+      std::abs(transform(3, 2)) <= 1e-6 &&
+      std::abs(transform(3, 3) - 1.0) <= 1e-6 &&
+      quaternion.coeffs().allFinite() && quaternion.norm() >= 0.99 &&
+      quaternion.norm() <= 1.01 &&
+      (rotation.transpose() * rotation - Eigen::Matrix3d::Identity()).norm() <= 1e-3 &&
+      std::abs(rotation.determinant() - 1.0) <= 1e-3;
+}
+
+// FrankaState/O_T_EE is conventionally column-major, but the simulated
+// controller service in older launch paths has emitted the same 16 values in
+// row-major order. Accept either representation and let the caller use the
+// decoded matrix consistently.
+inline bool decodeMmcTransform(const std::array<double, 16>& values,
+                               Eigen::Matrix4d& transform, bool& row_major)
+{
+  const Eigen::Matrix4d column =
+      Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::ColMajor>>(values.data());
+  if (validMmcTransform(column)) {
+    transform = column;
+    row_major = false;
+    return true;
+  }
+  const Eigen::Matrix4d row =
+      Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>>(values.data());
+  if (validMmcTransform(row)) {
+    transform = row;
+    row_major = true;
+    return true;
+  }
+  return false;
+}
 
 inline MmcStateValidation validateJointSampleFreshness(
     double sample_simulation_time, double current_simulation_time,
@@ -85,15 +125,9 @@ inline MmcStateValidation validateMmcRobotStates(
         !std::all_of(state.q.begin(), state.q.end(),
                      [](double value) { return std::isfinite(value); }))
       return {false, "invalid_non_finite_pose_or_q"};
-    const Eigen::Matrix4d transform = Eigen::Matrix4d::Map(state.o_t_ee.data());
-    const Eigen::Matrix3d rotation = transform.block<3, 3>(0, 0);
-    const Eigen::Quaterniond quaternion(rotation);
-    if (!transform.allFinite() || std::abs(transform(3, 0)) > 1e-6 ||
-        std::abs(transform(3, 1)) > 1e-6 || std::abs(transform(3, 2)) > 1e-6 ||
-        std::abs(transform(3, 3) - 1.0) > 1e-6 || !quaternion.coeffs().allFinite() ||
-        quaternion.norm() < 0.99 || quaternion.norm() > 1.01 ||
-        (rotation.transpose() * rotation - Eigen::Matrix3d::Identity()).norm() > 1e-3 ||
-        std::abs(rotation.determinant() - 1.0) > 1e-3)
+    Eigen::Matrix4d transform;
+    bool row_major = false;
+    if (!decodeMmcTransform(state.o_t_ee, transform, row_major))
       return {false, "invalid_transform_or_quaternion"};
   }
   return {true, "ok"};

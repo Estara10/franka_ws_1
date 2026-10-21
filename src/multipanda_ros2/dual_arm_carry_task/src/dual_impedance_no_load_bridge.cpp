@@ -247,34 +247,87 @@ public:
     if (!waitForStartGate(fault_reason)) {
       return fail("MMC start gate: " + fault_reason);
     }
+    const bool direct_controller_state_source =
+        robot_states_service_.find("mj_left_and_mj_right") != std::string::npos;
     health_expect_mmc_active_ = true;
 
     std::array<ArmReference, 2> start;
-    // The initial reference must be captured immediately before the strict
-    // switch; the pre-lift probe (and any earlier bridge state) is never reused.
-    if (!readArms(start, std::chrono::duration<double>(state_read_budget_seconds_), "post-lift-before-switch"))
-      return fail(last_state_read_error_);
-    RCLCPP_INFO(get_logger(), "[MMC_HOLD_ENTRY] state_read=success service=%s source=task_joint_feedback_MoveIt_FK "
-                "reference_frame=mj_left_link0,mj_right_link0 elapsed_wall_sec=%.6f",
-                robot_states_client_->get_service_name(), last_state_read_elapsed_);
-    reference_start_ = start;
-    RCLCPP_INFO(get_logger(), "[NO_LOAD] initial left=(%.4f,%.4f,%.4f) right=(%.4f,%.4f,%.4f)",
-                start[0].position.x(), start[0].position.y(), start[0].position.z(),
-                start[1].position.x(), start[1].position.y(), start[1].position.z());
-
-    constexpr auto kFirstReferenceBudget = std::chrono::milliseconds(1500);
+    dual_arm_carry_task::MmcActivationResult activation_result =
+        dual_arm_carry_task::MmcActivationResult::FIRST_REFERENCE_TIMEOUT;
     const auto activation_started = std::chrono::steady_clock::now();
-    const auto activation_deadline = activation_started + kFirstReferenceBudget;
     activation_started_ = activation_started;
-    auto hooks = makeActivationHooks(start, fault_reason);
-    const auto activation_result = dual_arm_carry_task::activateAndPrimeMmc(hooks, activation_deadline);
+    const double activation_budget_sec = direct_controller_state_source ? 3.0 : 1.5;
+    if (direct_controller_state_source) {
+      // The standalone bridge talks to SwitchEngine's state service. That
+      // service reads RobotData, whose hardware snapshot is populated when
+      // MultiModeController activates. Capture the pose after the strict
+      // switch for this source; the task-owned MoveIt-FK service already has
+      // a valid pre-switch snapshot and keeps the legacy ordering below.
+      const auto deadline = activation_started + std::chrono::seconds(3);
+      if (!switchControllers({mmc_controller_}, {jtc_controller_}, deadline, "activate-mmc-direct"))
+        return fail("MMC direct activation switch failed");
+      if (!controllerStates(true, deadline))
+        return fail("MMC direct activation state is not exclusive");
+      while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline &&
+             goal_pub_->get_subscription_count() == 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      if (goal_pub_->get_subscription_count() == 0)
+        return fail("MMC direct goal subscriber did not appear");
+      if (!readArms(start, std::chrono::duration<double>(state_read_budget_seconds_),
+                    "post-switch-direct-state"))
+        return fail(last_state_read_error_);
+      reference_start_ = start;
+      RCLCPP_INFO(get_logger(),
+                  "[MMC_HOLD_ENTRY] state_read=success service=%s source=SwitchEngine_after_activation "
+                  "reference_frame=mj_left_link0,mj_right_link0 elapsed_wall_sec=%.6f",
+                  robot_states_client_->get_service_name(), last_state_read_elapsed_);
+      RCLCPP_INFO(get_logger(), "[NO_LOAD] initial left=(%.4f,%.4f,%.4f) right=(%.4f,%.4f,%.4f)",
+                  start[0].position.x(), start[0].position.y(), start[0].position.z(),
+                  start[1].position.x(), start[1].position.y(), start[1].position.z());
+      std::uint64_t baseline_sequence = 0;
+      if (!getReferenceSequence(deadline, baseline_sequence))
+        return fail("MMC direct status unavailable before first reference");
+      publishGoal(start, 0.0, 0.0, 0.0);
+      ++first_reference_publish_count_;
+      first_reference_publish_wall_ = std::chrono::steady_clock::now();
+      bool accepted = false;
+      while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+        if (!checkControllerHealth(fault_reason)) return fail("MMC direct health: " + fault_reason);
+        std::uint64_t sequence = baseline_sequence;
+        if (getReferenceSequence(deadline, sequence) && sequence > baseline_sequence) {
+          accepted = true;
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      activation_result = accepted ? dual_arm_carry_task::MmcActivationResult::ACCEPTED :
+                                      dual_arm_carry_task::MmcActivationResult::FIRST_REFERENCE_TIMEOUT;
+      if (accepted)
+        RCLCPP_INFO(get_logger(), "[MMC_FIRST_REFERENCE_SENT] direct activation accepted");
+    } else {
+      // The task-owned MoveIt-FK service is valid before the switch.
+      if (!readArms(start, std::chrono::duration<double>(state_read_budget_seconds_),
+                    "post-lift-before-switch"))
+        return fail(last_state_read_error_);
+      RCLCPP_INFO(get_logger(), "[MMC_HOLD_ENTRY] state_read=success service=%s source=task_joint_feedback_MoveIt_FK "
+                  "reference_frame=mj_left_link0,mj_right_link0 elapsed_wall_sec=%.6f",
+                  robot_states_client_->get_service_name(), last_state_read_elapsed_);
+      reference_start_ = start;
+      RCLCPP_INFO(get_logger(), "[NO_LOAD] initial left=(%.4f,%.4f,%.4f) right=(%.4f,%.4f,%.4f)",
+                  start[0].position.x(), start[0].position.y(), start[0].position.z(),
+                  start[1].position.x(), start[1].position.y(), start[1].position.z());
+      constexpr auto kFirstReferenceBudget = std::chrono::milliseconds(1500);
+      const auto activation_deadline = activation_started + kFirstReferenceBudget;
+      auto hooks = makeActivationHooks(start, fault_reason);
+      activation_result = dual_arm_carry_task::activateAndPrimeMmc(hooks, activation_deadline);
+    }
     const double activation_elapsed = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - activation_started).count();
     RCLCPP_INFO(get_logger(), "[MMC_FIRST_REFERENCE] result=%s accepted_seq=%llu elapsed_wall_sec=%.6f "
                 "budget_sec=%.3f watchdog_startup_grace_sec=2.000",
                 activation_result == dual_arm_carry_task::MmcActivationResult::ACCEPTED ? "accepted" : "failed",
                 static_cast<unsigned long long>(last_reference_sequence_), activation_elapsed,
-                std::chrono::duration<double>(kFirstReferenceBudget).count());
+                activation_budget_sec);
     if (activation_result == dual_arm_carry_task::MmcActivationResult::ACCEPTED) {
       RCLCPP_INFO(get_logger(), "[MMC_REFERENCE_RECEIVED] accepted_seq=%llu publications=%llu "
                   "callback_after_first_publish_ms=%.3f",
@@ -1263,13 +1316,27 @@ private:
     if (joint_received == std::chrono::steady_clock::time_point{} ||
         std::chrono::steady_clock::now() - joint_received > std::chrono::milliseconds(500))
       return fail_read("stale_joint_state_source");
-    const double joint_sim_time = rclcpp::Time(joint_sample.header.stamp).seconds();
+    // The service response is the authoritative synchronized pair for this
+    // read. Its FrankaState.time values are generated by the same task-side
+    // feedback service; comparing them against /joint_states or this node's
+    // independently advancing /clock can reject a fresh response at the
+    // controller-switch boundary. The response header wall age above still
+    // enforces freshness, while the validator checks the fields and frames.
+    if (response->states.size() != 2 ||
+        !std::isfinite(response->states[0].time) ||
+        !std::isfinite(response->states[1].time))
+      return fail_read("invalid_response_time");
+    const double response_sim_time = response->states[0].time;
     const auto validation=dual_arm_carry_task::validateMmcRobotStates(
-        response->states, joint_sim_time, dual_arm_carry_task::systemWallNowNs());
+        response->states, response_sim_time, dual_arm_carry_task::systemWallNowNs());
     if (!validation.valid) return fail_read(validation.reason.c_str());
     for (int i = 0; i < 2; ++i) {
       const auto& state = response->states[static_cast<std::size_t>(i)];
-      const Eigen::Matrix4d transform = Eigen::Matrix4d::Map(state.o_t_ee.data());
+      Eigen::Matrix4d transform;
+      bool row_major = false;
+      if (!dual_arm_carry_task::decodeMmcTransform(state.o_t_ee, transform, row_major))
+        return fail_read("invalid_transform_or_quaternion");
+      (void)row_major;
       const Eigen::Quaterniond raw(transform.block<3, 3>(0, 0));
       out[static_cast<std::size_t>(i)].position = transform.block<3, 1>(0, 3);
       out[static_cast<std::size_t>(i)].orientation = raw.normalized();
@@ -1285,7 +1352,7 @@ private:
                 "wall_age_max_ms<=500 sample_lag_max_s<=0.5 elapsed_wall_sec=%.6f",
                 service.c_str(), stage, response->states[0].header.frame_id.c_str(),
                 response->states[1].header.frame_id.c_str(), response->states[0].time,
-                response->states[1].time, joint_sim_time, last_state_read_elapsed_);
+                response->states[1].time, response_sim_time, last_state_read_elapsed_);
     return true;
   }
 
