@@ -30,7 +30,16 @@ void Controller::computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
   // std::vector<std::array<double,7>> taus_(2);
   // measurement setup
 
-  Pose current_poses = getCurrentPose();
+  const std::array<RobotDataSnapshot, 2> samples{{
+      robot_data_[0]->snapshot(), robot_data_[1]->snapshot()}};
+  Pose current_poses;
+  for (int i = 0; i < 2; ++i) {
+    const auto& state = samples[i].state;
+    Eigen::Affine3d transform(Eigen::Matrix4d::Map(state.O_T_EE.data()));
+    current_poses.poses[i].position = transform.translation();
+    current_poses.poses[i].orientation = Eigen::Quaterniond(transform.linear());
+    current_poses.poses[i].q_n = Eigen::Map<const Vector7d>(state.q.data());
+  }
   Eigen::VectorXd right_left_qs(17);
   right_left_qs << 0, 0, 0, current_poses.poses[1].q_n, current_poses.poses[0].q_n;
   // Vector14d Q = ... 
@@ -39,11 +48,11 @@ void Controller::computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
     auto& desired = desired_poses.poses[i];
     auto& current = current_poses.poses[i];
     current.position -= getOffset().poses[i].position;
-    Eigen::Map<const Matrix7d> inertia(robot_data_[i]->mass().data());
-    Eigen::Map<const Vector7d> coriolis(robot_data_[i]->coriolis().data());
-    Eigen::Map<const Eigen::Matrix<double, 6, 7>> jacobian(
-        robot_data_[i]->eeZeroJacobian().data());
-    Eigen::Map<const Vector7d> qD(robot_data_[i]->state().dq.data());
+    const auto& sample = samples[i];
+    const Matrix7d& inertia = sample.mass;
+    const Vector7d& coriolis = sample.coriolis;
+    const Eigen::Matrix<double, 6, 7>& jacobian = sample.ee_zero_jacobian;
+    const Vector7d qD = Eigen::Map<const Vector7d>(sample.state.dq.data());
     Vector6d error;
     error.head(3) << current.position - desired.position;
     if (desired.orientation.coeffs().dot(current.orientation.coeffs()) < 0.0) {
@@ -76,9 +85,16 @@ void Controller::computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
     // treated as if it were stationary.
     const Vector6d reference_twist = desired.twist;
     const Vector6d current_twist = jacobian * qD;
-    const Vector6d spring_force = -p.params[i].stiffness * error;
-    const Vector6d damping_force = D * (reference_twist - current_twist);
-    tau_task << jacobian.transpose() * (spring_force + damping_force);
+    if (desired.use_cooperative_wrench) {
+      // The outer task computes one object wrench plus a zero-resultant
+      // internal relative wrench. Do not superimpose the independent arm
+      // spring/damper: doing so would count a second task controller.
+      tau_task << jacobian.transpose() * desired.cooperative_wrench;
+    } else {
+      const Vector6d spring_force = -p.params[i].stiffness * error;
+      const Vector6d damping_force = D * (reference_twist - current_twist);
+      tau_task << jacobian.transpose() * (spring_force + damping_force);
+    }
     // Explicit payload feedforward. `desired.ff_force` is in the same base
     // (zero-Jacobian) frame as the pose error, so this is J_linear^T F. It is
     // added to the raw torque BEFORE the shared magnitude/rate limits below.
@@ -102,6 +118,7 @@ void Controller::computeTauImpl(const std::vector<std::array<double, 7>*>& tau,
       (*tau[i])[j] = limited.tau[j];
     }
     last_raw_tau_[i] = tau_d;
+    last_applied_tau_[i] = limited.tau;
   }
   if (++limit_log_cycle_ % 500 == 0) {
     RCLCPP_INFO_STREAM_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
@@ -151,9 +168,10 @@ Params Controller::defaultParameters() {
 Pose Controller::getCurrentPoseImpl() {
   Pose p;
   for(int i = 0; i < 2; i++){
-    Eigen::Map<const Vector7d> q(robot_data_[i]->state().q.data());
+    const auto robot_state = robot_data_[i]->state();
+    Eigen::Map<const Vector7d> q(robot_state.q.data());
     Eigen::Affine3d transform(
-        Eigen::Matrix4d::Map(robot_data_[i]->state().O_T_EE.data()));
+        Eigen::Matrix4d::Map(robot_state.O_T_EE.data()));
     p.poses[i].position = transform.translation();
     p.poses[i].orientation = Eigen::Quaterniond(transform.linear());
     p.poses[i].q_n = q;
@@ -167,6 +185,7 @@ void Controller::startImpl() {
   for (int i = 0; i < 2; ++i) {
     previous_tau_[i].setZero();
     last_raw_tau_[i].setZero();
+    last_applied_tau_[i].setZero();
   }
   previous_time_ = 0.0;
   have_previous_time_ = false;

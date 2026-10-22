@@ -468,7 +468,9 @@ void DualArmController::initialize()
             return;
         }
 
-        if (ctx_->contact_hover_control_mode_ == "mmc_hold" && !ensureTaskRobotStatesService()) {
+        if ((ctx_->contact_hover_control_mode_ == "mmc_hold" ||
+             ctx_->contact_abcd_group_ == "C" || ctx_->contact_abcd_group_ == "D") &&
+            !ensureTaskRobotStatesService()) {
             RCLCPP_ERROR(ctx_->get_logger(), "[MMC_STARTUP_PREFLIGHT] result=failed reason=state_source_creation_failed");
             ctx_->current_state_ = TaskState::ERROR;
             return;
@@ -1098,7 +1100,8 @@ bool DualArmController::prepareFromA1Truth()
             return false;
         }
 
-        if (ctx_->contact_hover_control_mode_ == "mmc_hold") {
+        if (ctx_->contact_hover_control_mode_ == "mmc_hold" ||
+            ctx_->contact_abcd_group_ == "C" || ctx_->contact_abcd_group_ == "D") {
             std::string preflight_error;
             if (!runMmcStartupPreflight(preflight_error)) {
                 RCLCPP_ERROR(ctx_->get_logger(), "  ✗ [A1] %s", preflight_error.c_str());
@@ -2720,11 +2723,7 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
     // the existing live and criterion models.
     DualArmCarryTask::JointFeedback fresh_feedback;
     const bool have_fresh_feedback = ctx_->latestJointFeedback(fresh_feedback);
-    const double feedback_now_steady_sec = std::chrono::duration<double>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-    const double feedback_age_sec = have_fresh_feedback
-        ? feedback_now_steady_sec - fresh_feedback.recv_steady_sec
-        : std::numeric_limits<double>::infinity();
+    double feedback_age_sec = std::numeric_limits<double>::infinity();
     std::string safe_run_id = ctx_->expected_run_id_.empty() ? "p2b_diagnostic" : ctx_->expected_run_id_;
     for (char& ch : safe_run_id) {
         if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_' && ch != '-') ch = '_';
@@ -2763,6 +2762,11 @@ bool DualArmController::runP2bPathCheck(a1v::SampleValidation& out)
     DualArmCarryTask::GripperContactFeedback right_finger_feedback;
     const bool have_left_finger = ctx_->latestGripperContact("mj_left", left_finger_feedback);
     const bool have_right_finger = ctx_->latestGripperContact("mj_right", right_finger_feedback);
+    const double feedback_now_steady_sec = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    feedback_age_sec = have_fresh_feedback
+        ? feedback_now_steady_sec - fresh_feedback.recv_steady_sec
+        : std::numeric_limits<double>::infinity();
     const double left_finger_age = have_left_finger
         ? feedback_now_steady_sec - left_finger_feedback.recv_steady_sec
         : std::numeric_limits<double>::infinity();

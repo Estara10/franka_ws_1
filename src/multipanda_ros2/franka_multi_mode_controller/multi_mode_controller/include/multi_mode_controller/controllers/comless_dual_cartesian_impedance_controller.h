@@ -21,6 +21,8 @@ struct PandaCartesianImpedanceControllerPose {
   // zero Jacobian. It is mapped through J_linear^T and added before the
   // shared magnitude/rate limits. Zero keeps the original law.
   Eigen::Vector3d ff_force = Eigen::Vector3d::Zero();
+  bool use_cooperative_wrench = false;
+  Eigen::Matrix<double, 6, 1> cooperative_wrench = Eigen::Matrix<double, 6, 1>::Zero();
 };
 
 struct PandaCartesianImpedanceControllerParams {
@@ -67,6 +69,7 @@ class ComlessDualCartesianImpedanceController :
   unsigned long long rate_limited_cycles_{0};
   unsigned long long limit_log_cycle_{0};
   Eigen::Matrix<double, 7, 1> last_raw_tau_[2];
+  Eigen::Matrix<double, 7, 1> last_applied_tau_[2];
 };
 
 }

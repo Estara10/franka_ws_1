@@ -76,6 +76,7 @@ CONTACT_HOVER_ONLY="${CONTACT_PROBE_HOVER_ONLY:-0}"
 CONTACT_HOVER_HEIGHT_M="${CONTACT_PROBE_HOVER_HEIGHT_M:-0.05}"
 CONTACT_HOVER_HOLD_SECONDS="${CONTACT_PROBE_HOVER_HOLD_SECONDS:-3.0}"
 CONTACT_HOVER_CONTROL_MODE="${CONTACT_PROBE_HOVER_CONTROL_MODE:-jtc}"
+CONTACT_PROBE_ABCD_GROUP="${CONTACT_PROBE_ABCD_GROUP:-none}"
 CONTACT_PROBE_ADAPTIVE_FORCE_HOLD="${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD:-false}"
 CONTACT_PROBE_MMC_CONTROL_VARIANT="${CONTACT_PROBE_MMC_CONTROL_VARIANT:-fixed}"
 CONTACT_PROBE_ROD_DISTURBANCE="${CONTACT_PROBE_ROD_DISTURBANCE:-0}"
@@ -100,7 +101,17 @@ esac
 if [[ "${CONTACT_HOVER_ONLY}" -ne 1 && "${CONTACT_HOVER_CONTROL_MODE}" != "jtc" ]]; then
   echo "error: mmc_hold requires CONTACT_PROBE_HOVER_ONLY=1" >&2; exit 2
 fi
+case "${CONTACT_PROBE_ABCD_GROUP}" in
+  none|A|B|C|D) ;;
+  *) echo "error: CONTACT_PROBE_ABCD_GROUP must be none, A, B, C or D" >&2; exit 2 ;;
+esac
+if [[ "${CONTACT_PROBE_ABCD_GROUP}" != "none" &&
+      ( "${CONTACT_HOVER_ONLY}" -eq 1 || "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ) ]]; then
+  echo "error: ABCD mode is exclusive with hover and hold diagnostics" >&2
+  exit 2
+fi
 export CONTACT_HOVER_CONTROL_MODE
+export CONTACT_PROBE_ABCD_GROUP
 case "${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD}" in
   true|false|1|0) ;;
   *) echo "error: CONTACT_PROBE_ADAPTIVE_FORCE_HOLD must be true/false/1/0" >&2; exit 2 ;;
@@ -155,12 +166,15 @@ if [[ "${CONTACT_HOVER_ONLY}" -eq 1 ]]; then
 elif [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
   echo "contact_probe: HOLD-MECHANISM diagnostic only at (0.50, 0.00, +10 deg); no lift"
 else
-  echo "contact_probe: full fixed initial pose (0.50, 0.00, +10 deg), current default profile"
+  echo "contact_probe: full fixed initial pose (${CONTACT_PROBE_START_X:-0.50}, ${CONTACT_PROBE_START_Y:-0.0}, +${CONTACT_PROBE_START_YAW_DEG:-10.0} deg), current default profile"
 fi
 if [[ "${INTERNAL_COMPLIANCE}" -eq 1 ]]; then
   echo "contact_probe profile: COMPLIANT (internal compliance enabled; CONTACT_PROBE_RIGID=false)"
 else
   echo "contact_probe profile: RIGID (internal compliance disabled; CONTACT_PROBE_RIGID=true)"
+fi
+if [[ "${CONTACT_PROBE_ABCD_GROUP}" != "none" ]]; then
+  echo "ABCD group: ${CONTACT_PROBE_ABCD_GROUP}; full lift/transport/lower/release/retreat"
 fi
 echo "MuJoCo: ${MUJOCO_DIR}"
 echo "ROS_DOMAIN_ID: ${ROS_DOMAIN_ID}"
@@ -178,13 +192,18 @@ RUN_ARGS=(
   --domain-id "${ROS_DOMAIN_ID}" \
   --prepare-mode \
   --grasp-model contact_probe \
-  --x 0.50 --y 0.0 --yaw-deg 10.0 \
+  --x "${CONTACT_PROBE_START_X:-0.50}" --y "${CONTACT_PROBE_START_Y:-0.0}"
+  --yaw-deg "${CONTACT_PROBE_START_YAW_DEG:-10.0}" \
   "${DISPLAY_FLAG}" \
   --ready-timeout 120 \
   --task-timeout 300 \
   --hold-sec 360 \
   --node-timeout 360
 )
+if [[ -n "${CONTACT_PROBE_TARGET_X:-}" && -n "${CONTACT_PROBE_TARGET_Y:-}" && -n "${CONTACT_PROBE_TARGET_YAW_DEG:-}" ]]; then
+  RUN_ARGS+=(--target-x "${CONTACT_PROBE_TARGET_X}" --target-y "${CONTACT_PROBE_TARGET_Y}"
+             --target-yaw-deg "${CONTACT_PROBE_TARGET_YAW_DEG}")
+fi
 if [[ "${CONTACT_HOLD_DIAGNOSTIC_ONLY}" -eq 1 ]]; then
   RUN_ARGS+=(--contact-hold-diagnostic-only)
 fi

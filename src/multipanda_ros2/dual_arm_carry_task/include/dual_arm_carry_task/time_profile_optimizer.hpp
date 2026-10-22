@@ -177,6 +177,14 @@ bool evaluateExported(const std::vector<TrajectoryPoint>& points,
                       TrajectoryMetrics& out,
                       std::string& error);
 
+// Evaluate the same piecewise quintic used by JointTrajectoryController at
+// an absolute trajectory time. Used to derive MMC Cartesian pose/twist
+// references from the final, already-checked joint trajectory.
+bool interpolateQuintic(const std::vector<TrajectoryPoint>& points,
+                         double time,
+                         TrajectoryPoint& out,
+                         std::string& error);
+
 // Metrics of the continuous composition q(s(tau)) without any export. Used to
 // separate "the optimisation worked" from "the export kept it".
 bool evaluateContinuous(const ContinuousPath& path,

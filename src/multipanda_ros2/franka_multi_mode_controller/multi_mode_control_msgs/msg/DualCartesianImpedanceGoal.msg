@@ -9,3 +9,9 @@ float64[7] r_q_n
 # unchanged.
 geometry_msgs/Vector3 l_ff_force
 geometry_msgs/Vector3 r_ff_force
+# Optional task-space wrench supplied by the contact task's cooperative object controller.
+# Wrench is [force; torque] in each arm's link0 frame, applied at that hand endpoint.
+# When enabled it replaces the per-arm Cartesian spring/damper; legacy goals default false.
+bool use_cooperative_wrench
+geometry_msgs/Wrench l_cooperative_wrench
+geometry_msgs/Wrench r_cooperative_wrench

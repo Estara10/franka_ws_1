@@ -109,6 +109,22 @@ TEST(TimeProfileOptimizer, TimeMapIsMonotoneAndHitsBothEnds)
   }
 }
 
+TEST(TimeProfileOptimizer, QuinticInterpolationMatchesJtcBoundaryDerivatives)
+{
+  const auto points = linearTrajectory();
+  tpo::TrajectoryPoint sample;
+  std::string error;
+  ASSERT_TRUE(tpo::interpolateQuintic(points, 0.73, sample, error)) << error;
+  ASSERT_EQ(sample.q.size(), kDim);
+  for (int j = 0; j < kDim; ++j)
+  {
+    EXPECT_NEAR(sample.q[j], 0.1 * j + 0.5 * 0.73, 1e-12);
+    EXPECT_NEAR(sample.v[j], 0.5, 1e-12);
+    EXPECT_NEAR(sample.a[j], 0.0, 1e-12);
+  }
+  EXPECT_FALSE(tpo::interpolateQuintic(points, -0.01, sample, error));
+}
+
 TEST(TimeProfileOptimizer, ChainRuleMatchesFiniteDifferences)
 {
   tpo::ContinuousPath path;

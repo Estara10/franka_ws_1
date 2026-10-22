@@ -59,6 +59,22 @@ TEST(S1TimeScaling, UsesDirectionalNegativeLimits)
   EXPECT_NEAR(report.scale, (0.5 / 0.30) * 1.01, 1e-12);
 }
 
+TEST(S1TimeScaling, AppliesRequestedUniformStretchAndPreservesPositions)
+{
+  auto points = validPoints();
+  const auto original = points;
+  std::string error;
+  ASSERT_TRUE(s1::applyUniformTimeScale(points, 1.5, error)) << error;
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    EXPECT_EQ(points[i].positions, original[i].positions);
+    EXPECT_NEAR(points[i].time, original[i].time * 1.5, 1e-12);
+    EXPECT_NEAR(points[i].velocities[0], original[i].velocities[0] / 1.5, 1e-12);
+    EXPECT_NEAR(points[i].accelerations[0], original[i].accelerations[0] / 2.25, 1e-12);
+  }
+  EXPECT_DOUBLE_EQ(points.back().time - points.front().time,
+                   (original.back().time - original.front().time) * 1.5);
+}
+
 TEST(S1TimeScaling, RejectsNonFiniteValuesAndIllegalTime)
 {
   s1::TimeScalingReport report;

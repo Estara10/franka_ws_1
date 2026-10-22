@@ -4,6 +4,8 @@
 #pragma once
 
 #include <chrono>
+#include <algorithm>
+#include <future>
 #include <memory>
 #include <optional>
 
@@ -11,6 +13,32 @@ namespace dual_arm_carry_task
 {
 
 enum class AsyncServiceStatus { IDLE, PENDING, READY, TIMEOUT };
+
+// For preflight/state reads, not the reference publishing loop. A discovered
+// DDS service may still lose its first reply; retry within the caller's one
+// deadline, removing timed-out requests instead of accumulating them.
+template<class ClientT, class Running>
+typename ClientT::SharedResponse requestServiceUntil(
+    ClientT& client, std::chrono::steady_clock::time_point deadline,
+    std::chrono::milliseconds attempt_budget, Running running,
+    std::size_t& attempts)
+{
+  attempts = 0;
+  if (attempt_budget.count() <= 0) return {};
+  while (running() && std::chrono::steady_clock::now() < deadline) {
+    auto future = client.async_send_request(std::make_shared<typename ClientT::Request>());
+    ++attempts;
+    const auto attempt_deadline = std::min(
+        deadline, std::chrono::steady_clock::now() + attempt_budget);
+    if (future.wait_until(attempt_deadline) == std::future_status::ready) {
+      auto response = future.get();
+      if (!running() || std::chrono::steady_clock::now() >= deadline) return {};
+      return response;
+    }
+    client.remove_pending_request(future);
+  }
+  return {};
+}
 
 // One outstanding service request per query object.
 //

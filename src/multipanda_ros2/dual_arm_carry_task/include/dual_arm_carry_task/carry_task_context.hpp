@@ -183,6 +183,9 @@ public:
     double contact_hover_height_m_ {0.05};
     double contact_hover_hold_seconds_ {3.0};
     std::string contact_hover_control_mode_ {"jtc"};
+    // Optional complete-carry comparison group: A/B use JTC, C/D use MMC.
+    // "none" preserves the established contact_probe entry point.
+    std::string contact_abcd_group_ {"none"};
     // P4/S2 phase 1: compare the current object-space transport plan with a
     // MoveIt CHOMP plan to the same joint target. Planning only unless the
     // CHOMP plan also passes the closed-chain/collision/limit checks.
@@ -191,6 +194,7 @@ public:
     // compare the baseline path with the closed-chain projected path. Planning
     // only -- never closes the gripper, never sends a motion target.
     bool contact_transport_plan_only_ {false};
+    double contact_transport_max_distance_m_ {0.20};
     std::atomic<bool> weld_state_received_ {false};
     std::atomic<bool> weld_state_active_ {false};
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr weld_state_sub_;

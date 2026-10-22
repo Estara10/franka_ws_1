@@ -10,6 +10,8 @@
 | 杆重前馈对照 | `docs/figures/s2s3_extended_20261020/feedforward_hover_comparison.png` | `s2s3_extended_20261020/feedforward_summary.csv` | 可用；n=3/组 |
 | 方向性长脉冲 | `docs/figures/s2s3_extended_20261020/directional_pulse_comparison.png` | `directional_summary.csv` | 可用；n=3/组 |
 | S2/S3 规划比较 | `docs/figures/s2s3_extended_20261020/transport_plan_comparison.png` | `transport_plan_comparison.csv` | 可用；仅规划 |
+| S2 位置×方法规划指标（2026-10-22） | `docs/figures/s2_time_tradeoff_20261022/s2_position_method_metrics.png` | `s2_time_tradeoff_20261022/s2_time_tradeoff.csv` | 可用；P1/P2及既有长平移；仅规划 |
+| S2 时间—jerk 取舍（2026-10-22） | `docs/figures/s2_time_tradeoff_20261022/s2_time_jerk_tradeoff.png` | 同上 | 可用；共同时间与1.0/1.1/1.2伸缩 |
 | 历史方向性脉冲 | `experiment_results/reports/hover_directional_perturbation_20261020/mmc_directional_perturbation_comparison.png` | `run_summary.csv` | 可用；原始曲线含漂移 |
 
 ## 数据缺口

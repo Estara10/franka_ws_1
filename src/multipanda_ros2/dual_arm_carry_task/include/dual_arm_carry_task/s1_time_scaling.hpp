@@ -37,6 +37,24 @@ struct TimeScalingReport
   double duration_after{0.0};
 };
 
+inline bool applyUniformTimeScale(std::vector<TimedJointPoint>& points,
+                                  const double scale,
+                                  std::string& error)
+{
+  error.clear();
+  if (points.empty() || !std::isfinite(scale) || scale <= 0.0) {
+    error = "invalid uniform time scale";
+    return false;
+  }
+  const double scale_sq = scale * scale;
+  for (auto& point : points) {
+    point.time *= scale;
+    for (auto& velocity : point.velocities) velocity /= scale;
+    for (auto& acceleration : point.accelerations) acceleration /= scale_sq;
+  }
+  return true;
+}
+
 inline bool scaleTimedTrajectory(std::vector<TimedJointPoint>& points,
                                  const std::vector<DirectionalJointLimits>& limits,
                                  const double velocity_scale,
@@ -116,12 +134,7 @@ inline bool scaleTimedTrajectory(std::vector<TimedJointPoint>& points,
     return false;
   }
   if (report.scale > 1.0) {
-    const double scale_sq = report.scale * report.scale;
-    for (auto& point : points) {
-      point.time *= report.scale;
-      for (auto& velocity : point.velocities) velocity /= report.scale;
-      for (auto& acceleration : point.accelerations) acceleration /= scale_sq;
-    }
+    if (!applyUniformTimeScale(points, report.scale, error)) return false;
   }
 
   report.duration_after = points.back().time - points.front().time;

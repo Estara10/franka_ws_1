@@ -302,6 +302,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_mmc_activation_handshake test/test_mmc_activation_handshake.cpp)
 
+  ament_add_gtest(test_cooperative_impedance test/test_cooperative_impedance.cpp)
+  target_link_libraries(test_cooperative_impedance Eigen3::Eigen)
+
   # Interface test: the production client driven against a minimal ROS fake
   # action server. Not a helper test.
   ament_add_gtest(test_gripper_client_faults test/test_gripper_client_faults.cpp)

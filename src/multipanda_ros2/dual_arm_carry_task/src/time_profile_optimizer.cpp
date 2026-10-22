@@ -78,6 +78,60 @@ void accumulateMetrics(const Eigen::VectorXd& q, const Eigen::VectorXd& v, const
 }
 }  // namespace
 
+bool interpolateQuintic(const std::vector<TrajectoryPoint>& points,
+                         double time,
+                         TrajectoryPoint& out,
+                         std::string& error)
+{
+  if (points.size() < 2 || !std::isfinite(time))
+  {
+    error = "quintic interpolation needs two points and a finite time";
+    return false;
+  }
+  if (time < points.front().time - 1e-12 || time > points.back().time + 1e-12)
+  {
+    error = "quintic interpolation time is outside trajectory";
+    return false;
+  }
+  std::size_t segment = points.size() - 2;
+  for (std::size_t i = 1; i < points.size(); ++i)
+  {
+    if (time <= points[i].time)
+    {
+      segment = i - 1;
+      break;
+    }
+  }
+  const auto& a = points[segment];
+  const auto& b = points[segment + 1];
+  const double duration = b.time - a.time;
+  if (!(duration > 0.0) || a.q.size() == 0 || a.q.size() != b.q.size() ||
+      a.v.size() != a.q.size() || b.v.size() != b.q.size() ||
+      a.a.size() != a.q.size() || b.a.size() != b.q.size())
+  {
+    error = "quintic interpolation point dimensions or times are invalid";
+    return false;
+  }
+  const double u = std::clamp((time - a.time) / duration, 0.0, 1.0);
+  out.time = time;
+  out.q.resize(a.q.size());
+  out.v.resize(a.q.size());
+  out.a.resize(a.q.size());
+  for (Eigen::Index i = 0; i < a.q.size(); ++i)
+  {
+    const Quintic curve(a.q[i], a.v[i], a.a[i], b.q[i], b.v[i], b.a[i], duration);
+    out.q[i] = curve.q(u);
+    out.v[i] = curve.v(u, duration);
+    out.a[i] = curve.a(u, duration * duration);
+  }
+  if (!out.q.allFinite() || !out.v.allFinite() || !out.a.allFinite())
+  {
+    error = "quintic interpolation produced non-finite values";
+    return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------- time map
 
 BernsteinTimeMap::BernsteinTimeMap(int degree)

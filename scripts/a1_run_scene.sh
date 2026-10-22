@@ -71,6 +71,7 @@ CONTACT_HOVER_ONLY=0
 CONTACT_HOVER_HEIGHT_M="${CONTACT_PROBE_HOVER_HEIGHT_M:-0.05}"
 CONTACT_HOVER_HOLD_SECONDS="${CONTACT_PROBE_HOVER_HOLD_SECONDS:-3.0}"
 CONTACT_HOVER_CONTROL_MODE="${CONTACT_HOVER_CONTROL_MODE:-jtc}"
+CONTACT_ABCD_GROUP="${CONTACT_PROBE_ABCD_GROUP:-none}"
 DESCENT_NEGATIVE_FINAL=""
 DESCENT_NEGATIVE_TRUTH=""
 # A1 P3a-2a: gripper interface check -- one empty-load open/close/open cycle.
@@ -604,7 +605,11 @@ if [[ "${GRASP_MODEL}" == "contact_probe" ]]; then
   echo "[contact_probe] adaptive normal-force hold: ${CONTACT_PROBE_ADAPTIVE_FORCE_HOLD}"
   CONTACT_PROBE_PAYLOAD_FEEDFORWARD="${CONTACT_PROBE_PAYLOAD_FEEDFORWARD:-0}"
   export CONTACT_PROBE_PAYLOAD_FEEDFORWARD
-  echo "[contact_probe] rod payload feedforward: ${CONTACT_PROBE_PAYLOAD_FEEDFORWARD} (MMC hold only; default 0)"
+  if [[ "${CONTACT_ABCD_GROUP}" == "C" || "${CONTACT_ABCD_GROUP}" == "D" ]]; then
+    echo "[contact_probe] ABCD MMC payload feedforward: enabled, 0.64 kg split per arm, 0.5 s ramp"
+  else
+    echo "[contact_probe] rod payload feedforward: ${CONTACT_PROBE_PAYLOAD_FEEDFORWARD} (MMC hover hold; default 0)"
+  fi
   CONTACT_PROBE_ROD_FORCE_DURATION_SEC="${CONTACT_PROBE_ROD_FORCE_DURATION_SEC:-0.2}"
   export CONTACT_PROBE_ROD_FORCE_DURATION_SEC
   if [[ "${CONTACT_PROBE_ROD_DISTURBANCE:-0}" == "1" ]]; then
@@ -678,7 +683,7 @@ fi
 echo "[sim] services available"
 timeout "${HELPER_TIMEOUT}" ros2 service list 2>/dev/null | sort > "${RUN_DIR}/services_seen.txt" || true
 
-if [[ "${CONTACT_HOVER_CONTROL_MODE}" == "mmc_hold" ]]; then
+if [[ "${CONTACT_HOVER_CONTROL_MODE}" == "mmc_hold" || "${CONTACT_ABCD_GROUP}" == "C" || "${CONTACT_ABCD_GROUP}" == "D" ]]; then
   echo "[mmc] loading sim_multi_mode_controller inactive; JTC remains the only active arm controller"
   if ! timeout 40 ros2 run controller_manager spawner sim_multi_mode_controller --inactive \
       --controller-manager-timeout 30 --service-call-timeout 30 \
@@ -687,9 +692,17 @@ if [[ "${CONTACT_HOVER_CONTROL_MODE}" == "mmc_hold" ]]; then
     record_status "E_MMC_INACTIVE_LOAD" "controller spawner failed before task motion" "startup"
     exit 2
   fi
-  timeout "${HELPER_TIMEOUT}" ros2 control list_controllers > "${RUN_DIR}/controllers.txt" 2>&1 || true
-  if ! grep -q 'sim_multi_mode_controller.*inactive' "${RUN_DIR}/controllers.txt" ||
-     ! grep -q 'dual_panda_arm_controller.*active' "${RUN_DIR}/controllers.txt"; then
+  CONTROLLER_PRESTATE_READY=0
+  for attempt in $(seq 1 30); do
+    if timeout 3 ros2 control list_controllers > "${RUN_DIR}/controllers.txt" 2>&1 &&
+       grep -q 'sim_multi_mode_controller.*inactive' "${RUN_DIR}/controllers.txt" &&
+       grep -q 'dual_panda_arm_controller.*active' "${RUN_DIR}/controllers.txt"; then
+      CONTROLLER_PRESTATE_READY=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "${CONTROLLER_PRESTATE_READY}" -ne 1 ]]; then
     echo "[mmc] expected inactive MMC and active JTC not confirmed" >&2
     record_status "E_MMC_CONTROLLER_PRESTATE" "JTC/MMC pre-motion state is not mutually exclusive" "startup"
     exit 2
@@ -709,7 +722,7 @@ fi
 # In the MMC hover run, verify the clock and merged joint-state path with no
 # task or robot command active. The saved JSON records per-source stamps,
 # publisher node identities, joint contents, and their offset from /clock.
-if [[ "${CONTACT_HOVER_CONTROL_MODE}" == "mmc_hold" ]]; then
+if [[ "${CONTACT_HOVER_CONTROL_MODE}" == "mmc_hold" || "${CONTACT_ABCD_GROUP}" == "C" || "${CONTACT_ABCD_GROUP}" == "D" ]]; then
   echo "[joint-states] observing raw arm, finger, and merged topics for 2.5 s (no motion)"
   {
     for node in /joint_state_publisher /controller_manager /move_group /robot_state_publisher \
@@ -853,6 +866,7 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
                contact_hover_height_m:="${CONTACT_HOVER_HEIGHT_M}" \
                contact_hover_hold_seconds:="${CONTACT_HOVER_HOLD_SECONDS}" \
                contact_hover_control_mode:="${CONTACT_HOVER_CONTROL_MODE}")
+    P2A_ARGS+=(contact_abcd_group:="${CONTACT_ABCD_GROUP}")
     # P4/S2 phase 1: planner comparison. Gated by an explicit environment
     # variable so the ordinary contact-probe path never changes.
     if [[ "${CONTACT_PLAN_COMPARE:-0}" -eq 1 ]]; then
@@ -865,6 +879,9 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
     if [[ "${TASK_TARGET_FIELDS}" -eq 3 ]]; then
       P2A_ARGS+=(rod_target_x:="${TASK_TARGET_X}" rod_target_y:="${TASK_TARGET_Y}"
                  rod_target_yaw_deg:="${TASK_TARGET_YAW_DEG}")
+    fi
+    if [[ -n "${CONTACT_TRANSPORT_MAX_DISTANCE_M:-}" ]]; then
+      P2A_ARGS+=(contact_transport_max_distance_m:="${CONTACT_TRANSPORT_MAX_DISTANCE_M}")
     fi
     # Verification-only injections. ros2 launch rejects an empty value
     # ("name:="), so these are only passed when actually set.
@@ -949,7 +966,11 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
       echo "[prepare] S1 ideal_weld complete; rigid ideal grasp only (friction/slip unverified)"
     elif [[ "${TASK_STATE}" == "DONE" && "${GRASP_MODEL}" == "contact_probe" ]]; then
       RC=0
-      echo "[prepare] contact_probe complete: no-weld lift/hold/lower/release only; full transport unverified"
+      if [[ "${CONTACT_ABCD_GROUP:-none}" != "none" ]]; then
+        echo "[prepare] ABCD ${CONTACT_ABCD_GROUP} complete: no-weld contact lift/transport/lower/release/retreat"
+      else
+        echo "[prepare] contact_probe complete: no-weld lift/hold/lower/release only; full transport unverified"
+      fi
     elif [[ "${TASK_STATE}" == "CONTACT_HOLD_MECHANISM_PASS" ]]; then
       RC=0
       echo "[prepare] contact hold mechanism only: fixed-arm hold and release passed; no lift/load claim"

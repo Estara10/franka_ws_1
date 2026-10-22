@@ -36,6 +36,11 @@ franka::RobotState RobotData::state() {
   return state_;
 }
 
+RobotDataSnapshot RobotData::snapshot() {
+  std::lock_guard<std::mutex> lock(update_mutex_);
+  return {state_, coriolis_, ee_zero_jacobian_, mass_};
+}
+
 // Eigen::Matrix<double, 7, 1> RobotData::getCoriolis() {
 //   std::lock_guard<std::mutex> lock(update_mutex_);
 //   return coriolis_;

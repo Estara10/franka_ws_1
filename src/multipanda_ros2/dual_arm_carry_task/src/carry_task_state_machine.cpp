@@ -119,8 +119,10 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         this->declare_parameter<double>("contact_hover_height_m", 0.05);
         this->declare_parameter<double>("contact_hover_hold_seconds", 3.0);
         this->declare_parameter<std::string>("contact_hover_control_mode", "jtc");
+        this->declare_parameter<std::string>("contact_abcd_group", "none");
         this->declare_parameter<bool>("contact_plan_compare", false);
         this->declare_parameter<bool>("contact_transport_plan_only", false);
+        this->declare_parameter<double>("contact_transport_max_distance_m", 0.20);
         this->declare_parameter<int>("descent_steps", 20);
         this->declare_parameter<double>("descent_max_xy_dev_m", 0.002);
         this->declare_parameter<double>("descent_max_angle_dev_deg", 1.0);
@@ -214,18 +216,23 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         contact_hover_height_m_ = this->get_parameter("contact_hover_height_m").as_double();
         contact_hover_hold_seconds_ = this->get_parameter("contact_hover_hold_seconds").as_double();
         contact_hover_control_mode_ = this->get_parameter("contact_hover_control_mode").as_string();
+        contact_abcd_group_ = this->get_parameter("contact_abcd_group").as_string();
         contact_plan_compare_ = this->get_parameter("contact_plan_compare").as_bool();
         contact_transport_plan_only_ =
             this->get_parameter("contact_transport_plan_only").as_bool();
+        contact_transport_max_distance_m_ =
+            this->get_parameter("contact_transport_max_distance_m").as_double();
         RCLCPP_INFO(this->get_logger(),
                     "[P3A2C_CONFIG] grasp_contact_close=%s (parameter default=false), grasp_descent=%s, "
-                    "contact_hold_diagnostic_only=%s, contact_hover_only=%s, hover_control_mode=%s, contact_plan_compare=%s, "
+                    "contact_hold_diagnostic_only=%s, contact_hover_only=%s, hover_control_mode=%s, "
+                    "abcd_group=%s, contact_plan_compare=%s, "
                     "contact_transport_plan_only=%s",
                     grasp_contact_close_ ? "true" : "false",
                     grasp_descent_ ? "true" : "false",
                     contact_hold_diagnostic_only_ ? "true" : "false",
                     contact_hover_only_ ? "true" : "false",
                     contact_hover_control_mode_.c_str(),
+                    contact_abcd_group_.c_str(),
                     contact_plan_compare_ ? "true" : "false",
                     contact_transport_plan_only_ ? "true" : "false");
         RCLCPP_INFO(this->get_logger(), "[S1_CONFIG] grasp_model=%s (default=none)", grasp_model_.c_str());
@@ -501,6 +508,22 @@ void publish_stage(const rclcpp::Publisher<std_msgs::msg::String>::SharedPtr& pu
         }
         if (contact_hover_control_mode_ == "mmc_hold" && !contact_hover_only_) {
             RCLCPP_ERROR(this->get_logger(), "✗ mmc_hold is available only with contact_hover_only");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (contact_abcd_group_ != "none" && contact_abcd_group_ != "A" &&
+            contact_abcd_group_ != "B" && contact_abcd_group_ != "C" && contact_abcd_group_ != "D") {
+            RCLCPP_ERROR(this->get_logger(), "✗ contact_abcd_group must be none, A, B, C or D");
+            setCurrentState(TaskState::ERROR);
+            publish_stage(task_stage_pub_, getCurrentState());
+            return;
+        }
+        if (contact_abcd_group_ != "none" &&
+            (grasp_model_ != "contact_probe" || contact_hover_only_ || contact_hold_diagnostic_only_ ||
+             contact_transport_plan_only_ || contact_plan_compare_)) {
+            RCLCPP_ERROR(this->get_logger(),
+                         "✗ A/B/C/D requires full contact_probe carry and is exclusive with diagnostics");
             setCurrentState(TaskState::ERROR);
             publish_stage(task_stage_pub_, getCurrentState());
             return;

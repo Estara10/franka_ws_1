@@ -73,12 +73,23 @@ bool Controller::desiredPoseCallbackImpl(Pose& p_d,
   // (zero-Jacobian) frame. Zero is the disabled/default branch.
   p_d.poses[0].ff_force = Vector3d(msg.l_ff_force.x, msg.l_ff_force.y, msg.l_ff_force.z);
   p_d.poses[1].ff_force = Vector3d(msg.r_ff_force.x, msg.r_ff_force.y, msg.r_ff_force.z);
+  p_d.poses[0].use_cooperative_wrench = msg.use_cooperative_wrench;
+  p_d.poses[1].use_cooperative_wrench = msg.use_cooperative_wrench;
+  p_d.poses[0].cooperative_wrench <<
+      msg.l_cooperative_wrench.force.x, msg.l_cooperative_wrench.force.y,
+      msg.l_cooperative_wrench.force.z, msg.l_cooperative_wrench.torque.x,
+      msg.l_cooperative_wrench.torque.y, msg.l_cooperative_wrench.torque.z;
+  p_d.poses[1].cooperative_wrench <<
+      msg.r_cooperative_wrench.force.x, msg.r_cooperative_wrench.force.y,
+      msg.r_cooperative_wrench.force.z, msg.r_cooperative_wrench.torque.x,
+      msg.r_cooperative_wrench.torque.y, msg.r_cooperative_wrench.torque.z;
   if (!p_d.poses[0].twist.allFinite() || !p_d.poses[1].twist.allFinite() ||
-      !p_d.poses[0].ff_force.allFinite() || !p_d.poses[1].ff_force.allFinite()) {
+      !p_d.poses[0].ff_force.allFinite() || !p_d.poses[1].ff_force.allFinite() ||
+      !p_d.poses[0].cooperative_wrench.allFinite() || !p_d.poses[1].cooperative_wrench.allFinite()) {
     auto& clk = *PandaControllerBase<Parameters, Pose>::node_->get_clock();
     const auto& logger = PandaControllerBase<Parameters, Pose>::node_->get_logger();
     RCLCPP_WARN_THROTTLE(logger, clk, 1000,
-        "dual_cartesian_impedance_controller: Discarding goal with a non-finite twist or feedforward force.");
+        "dual_cartesian_impedance_controller: Discarding goal with a non-finite twist or wrench.");
     return false;
   }
   return true;

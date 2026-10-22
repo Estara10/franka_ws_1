@@ -92,9 +92,9 @@ def launch_setup(context, *args, **kwargs):
                 'enable_rotate': LaunchConfiguration('enable_rotate'),
                 'control_mode': LaunchConfiguration('control_mode'),
                 'use_vision': LaunchConfiguration('use_vision'),
-                'rod_target_x': LaunchConfiguration('rod_target_x'),
-                'rod_target_y': LaunchConfiguration('rod_target_y'),
-                'rod_target_yaw_deg': LaunchConfiguration('rod_target_yaw_deg'),
+                'rod_target_x': ParameterValue(LaunchConfiguration('rod_target_x'), value_type=float),
+                'rod_target_y': ParameterValue(LaunchConfiguration('rod_target_y'), value_type=float),
+                'rod_target_yaw_deg': ParameterValue(LaunchConfiguration('rod_target_yaw_deg'), value_type=float),
                 'rod_pose_source': LaunchConfiguration('rod_pose_source'),
                 'expected_run_id': LaunchConfiguration('expected_run_id'),
                 'prepare_only': LaunchConfiguration('prepare_only'),
@@ -128,9 +128,12 @@ def launch_setup(context, *args, **kwargs):
             'contact_hover_height_m': LaunchConfiguration('contact_hover_height_m'),
             'contact_hover_hold_seconds': LaunchConfiguration('contact_hover_hold_seconds'),
             'contact_hover_control_mode': LaunchConfiguration('contact_hover_control_mode'),
+                'contact_abcd_group': LaunchConfiguration('contact_abcd_group'),
             'contact_plan_compare': LaunchConfiguration('contact_plan_compare'),
             'contact_transport_plan_only':
                 LaunchConfiguration('contact_transport_plan_only'),
+            'contact_transport_max_distance_m':
+                LaunchConfiguration('contact_transport_max_distance_m'),
             'descent_steps': LaunchConfiguration('descent_steps'),
             'descent_max_xy_dev_m': LaunchConfiguration('descent_max_xy_dev_m'),
             'descent_max_angle_dev_deg': LaunchConfiguration('descent_max_angle_dev_deg'),
@@ -482,6 +485,9 @@ def generate_launch_description():
     contact_hover_control_mode_arg = DeclareLaunchArgument(
         'contact_hover_control_mode', default_value='jtc',
         description='contact_hover_only 保持控制器：jtc（默认）或 mmc_hold（仅静止保持）')
+    contact_abcd_group_arg = DeclareLaunchArgument(
+        'contact_abcd_group', default_value='none',
+        description='完整接触搬运比较组：none（既有入口）| A/B（JTC）| C/D（MMC）')
     contact_plan_compare_arg = DeclareLaunchArgument(
         'contact_plan_compare', default_value='false',
         description='P4/S2 phase 1: 抬升/保持/重建立之后不执行运输，改为对照当前物体空间路径与 '
@@ -492,6 +498,9 @@ def generate_launch_description():
         description='S2: 用重建的标称抓取/抬升状态生成运输段，比较基线路径与闭链零空间投影路径；'
                     '只规划、不运动（不闭合夹爪、不下发任何目标），输出 transport_path_compare.csv。'
                     '需要 grasp_model=contact_probe、prepare_only、a1_truth 与 p2a_check')
+    contact_transport_max_distance_m_arg = DeclareLaunchArgument(
+        'contact_transport_max_distance_m', default_value='0.20',
+        description='运输研究路径允许的最大水平距离（米）；实际规划仍检查 IK、限位、闭链与碰撞')
     descent_steps_arg = DeclareLaunchArgument(
         'descent_steps', default_value='20',
         description='下降轨迹的分段数（目标点 = 分段数 + 1，含两端）')
@@ -798,8 +807,10 @@ def generate_launch_description():
         contact_hover_height_arg,
         contact_hover_hold_seconds_arg,
         contact_hover_control_mode_arg,
+        contact_abcd_group_arg,
         contact_plan_compare_arg,
         contact_transport_plan_only_arg,
+        contact_transport_max_distance_m_arg,
         descent_steps_arg,
         descent_max_xy_dev_m_arg,
         descent_max_angle_dev_deg_arg,

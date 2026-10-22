@@ -152,6 +152,7 @@ public:
     hold_only_ = declare_parameter("hold_only", false);
     trace_csv_ = declare_parameter("trace_csv", std::string());
     control_variant_ = declare_parameter("control_variant", std::string("fixed"));
+    rotational_stiffness_ = declare_parameter("rotational_stiffness", 20.0);
     rod_disturbance_enabled_ = declare_parameter("rod_disturbance_enabled", false);
     // Explicit rod-weight feedforward, off by default. The disabled branch
     // sends zero and the controller law is unchanged.
@@ -162,6 +163,8 @@ public:
     state_read_budget_seconds_ = declare_parameter("state_read_budget_seconds", 3.0);
     start_gate_file_ = declare_parameter("start_gate_file", std::string());
     start_gate_timeout_seconds_ = declare_parameter("start_gate_timeout_seconds", 60.0);
+    external_reference_mode_ = declare_parameter("external_reference_mode", false);
+    completion_gate_file_ = declare_parameter("completion_gate_file", std::string());
 
     goal_pub_ = create_publisher<GoalMsg>(goal_topic_, rclcpp::QoS(10));
     robot_states_client_ = create_client<GetRobotStates>(robot_states_service_);
@@ -240,6 +243,20 @@ public:
     // strict switch. JTC is still active, so the expected state is MMC=inactive.
     if (!runHealthContinuityProbe(1.0, fault_reason)) {
       return fail("MMC health continuity probe: " + fault_reason);
+    }
+    if (!start_gate_file_.empty()) {
+      // Warm up the very same state client that will be used after the lift.
+      // The task waits for this result, rather than spawning another bridge.
+      std::array<ArmReference, 2> pre_lift;
+      if (!readArms(pre_lift, std::chrono::duration<double>(state_read_budget_seconds_),
+                    "armed-before-lift"))
+        return fail(last_state_read_error_);
+      std::ofstream ready(start_gate_file_ + ".ready", std::ios::out | std::ios::trunc);
+      ready << "state_service_ready\n";
+      ready.flush();
+      if (!ready) return fail("could not notify task of bridge readiness");
+      RCLCPP_INFO(get_logger(), "[MMC_BRIDGE_READY] state_service=%s no_controller_switch=true",
+                  robot_states_client_->get_service_name());
     }
     // The bridge may be armed before the grasp/lift. Keep health queries and
     // discovery alive while waiting, then capture the start reference only
@@ -344,6 +361,44 @@ public:
 
     if (!configureDirectionalParameters())
       return fail("directional impedance parameter service failed before HOLD");
+
+    if (external_reference_mode_) {
+      if (completion_gate_file_.empty()) return fail("external reference mode requires completion_gate_file");
+      const std::string active_path = start_gate_file_ + ".active";
+      std::ofstream active(active_path, std::ios::out | std::ios::trunc);
+      active << "mmc_active\n";
+      active.flush();
+      if (!active) return fail("could not notify task that MMC is active");
+      RCLCPP_INFO(get_logger(),
+                  "[MMC_EXTERNAL_REFERENCE] active=true awaiting task trajectory; health polling remains asynchronous");
+      const auto deadline = std::chrono::steady_clock::now() +
+          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+              std::chrono::duration<double>(wall_timeout_seconds_));
+      while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+        if (!pollControllerHealthNonBlocking(fault_reason))
+          return fail("MMC status: " + fault_reason);
+        if (std::ifstream(completion_gate_file_).good()) break;
+        rclcpp::sleep_for(std::chrono::milliseconds(10));
+      }
+      if (!rclcpp::ok() || !std::ifstream(completion_gate_file_).good())
+        return fail("external reference completion gate timeout");
+      std::string completion_reason;
+      {
+        std::ifstream completion(completion_gate_file_);
+        std::getline(completion, completion_reason);
+      }
+      if (!checkControllerHealth(fault_reason)) return fail("MMC status: " + fault_reason);
+      const auto switch_back_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+      if (!switchControllers({jtc_controller_}, {mmc_controller_}, switch_back_deadline,
+                              "switch-back-jtc-after-external-reference"))
+        return fail("switch back after external reference");
+      if (!controllerStates(false, std::chrono::steady_clock::now() + std::chrono::seconds(2)))
+        return fail("JTC active/MMC inactive state not confirmed after external switchback");
+      if (!seedJtcFromCurrentState()) return fail("seed trajectory controller from current state");
+      RCLCPP_INFO(get_logger(), "[MMC_EXTERNAL_REFERENCE] result=%s; returned to JTC from measured state",
+                  completion_reason == "abort" ? "aborted_and_stopped" : "completed");
+      return true;
+    }
 
     const auto began = std::chrono::steady_clock::now();
     const double sim_began = now().seconds();
@@ -627,6 +682,10 @@ private:
         return ready;
       },
       [this, &start]() {
+        // External-reference tasks own the only publisher for their complete
+        // motion stream, including this activation handshake. Other bridge
+        // modes prime their own hold reference here.
+        if (external_reference_mode_) return;
         // First reference: zero feedforward; the 0.5 s ramp starts here.
         publishGoal(start, 0.0, 0.0, 0.0);
         ++first_reference_publish_count_;
@@ -1154,6 +1213,25 @@ private:
   bool fail(const std::string& what)
   {
     cancelRodForceRequest("bridge_failure");
+    if (external_reference_mode_) {
+      // If an error ends the bridge before the task writes its completion gate,
+      // return control to JTC from the measured state before the sole reference
+      // publisher disappears. All waits are bounded; the controller watchdog
+      // remains the fallback if state or switch services are unavailable.
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+      bool recovered = false;
+      if (controllerStates(true, deadline)) {
+        const auto switch_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        recovered = switchControllers({jtc_controller_}, {mmc_controller_}, switch_deadline,
+                                      "failure-switchback-jtc-after-external-reference") &&
+                    controllerStates(false, std::chrono::steady_clock::now() + std::chrono::seconds(2)) &&
+                    seedJtcFromCurrentState();
+      } else if (controllerStates(false, std::chrono::steady_clock::now() + std::chrono::seconds(2))) {
+        recovered = seedJtcFromCurrentState();
+      }
+      RCLCPP_ERROR(get_logger(), "[MMC_EXTERNAL_REFERENCE_FAILURE] controller_recovered=%s",
+                   recovered ? "true" : "false");
+    }
     goal_pub_.reset();
     RCLCPP_ERROR(get_logger(), "[NO_LOAD] failed: %s", what.c_str());
     return false;
@@ -1171,7 +1249,25 @@ private:
   bool configureDirectionalParameters()
   {
     if (control_variant_ == "fixed") {
-      RCLCPP_INFO(get_logger(), "[MMC_CONTROL_VARIANT] fixed defaults retained");
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+      while (rclcpp::ok() && !impedance_parameters_client_->service_is_ready() &&
+             std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      if (!impedance_parameters_client_->service_is_ready()) return false;
+      auto request = std::make_shared<SetCartesianImpedance::Request>();
+      request->stiffness.fill(0.0);
+      request->stiffness[0] = request->stiffness[7] = request->stiffness[14] = 400.0;
+      request->stiffness[21] = request->stiffness[28] = request->stiffness[35] = rotational_stiffness_;
+      request->damping_ratio.fill(0.8);
+      request->nullspace_stiffness = 10.0;
+      auto future = impedance_parameters_client_->async_send_request(request);
+      if (future.wait_for(std::chrono::milliseconds(500)) != std::future_status::ready) return false;
+      future.get();
+      RCLCPP_INFO(get_logger(),
+                  "[MMC_CONTROL_VARIANT] fixed service=%s arms=left,right Kdiag=(400,400,400,%.1f,%.1f,%.1f) "
+                  "damping_ratio=0.8 nullspace=10 D=online_sqrtDesign_operational_inertia applied",
+                  impedance_parameters_client_->get_service_name(), rotational_stiffness_, rotational_stiffness_,
+                  rotational_stiffness_);
       return true;
     }
     if (control_variant_ != "directional") {
@@ -1294,18 +1390,19 @@ private:
            !robot_states_client_->wait_for_service(std::chrono::milliseconds(0)))
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
     if (!robot_states_client_->service_is_ready()) return fail_read("service_not_discovered");
-    auto future = robot_states_client_->async_send_request(
-        std::make_shared<GetRobotStates::Request>());
-    const auto left = remaining();
-    if (left.count() <= 0 || future.wait_for(left) != std::future_status::ready)
-      return fail_read("request_timeout");
     GetRobotStates::Response::SharedPtr response;
+    std::size_t attempts = 0;
     try {
-      response = future.get();
+      response = dual_arm_carry_task::requestServiceUntil(
+          *robot_states_client_, deadline, std::chrono::milliseconds(100),
+          []() { return rclcpp::ok(); }, attempts);
     } catch (const std::exception& error) {
       return fail_read((std::string("service_response_failed: ") + error.what()).c_str());
     }
-    if (!response) return fail_read("service_response_failed");
+    if (!response) return fail_read("request_timeout");
+    if (attempts > 1)
+      RCLCPP_INFO(get_logger(), "[MMC_STATE_READ] response_received_after_retry stage=%s attempts=%zu",
+                  stage, attempts);
     sensor_msgs::msg::JointState joint_sample;
     std::chrono::steady_clock::time_point joint_received;
     {
@@ -1504,6 +1601,7 @@ private:
   bool hold_only_{false};
   std::string trace_csv_;
   std::string control_variant_;
+  double rotational_stiffness_{20.0};
   bool rod_disturbance_enabled_{false};
   bool payload_feedforward_enabled_{false};
   double payload_mass_kg_{0.64};
@@ -1512,6 +1610,8 @@ private:
   double state_read_budget_seconds_{3.0};
   std::string start_gate_file_;
   double start_gate_timeout_seconds_{60.0};
+  bool external_reference_mode_{false};
+  std::string completion_gate_file_;
   std::string last_state_read_error_{"state_read_failed"};
   double last_state_read_elapsed_{0.0};
   std::uint64_t last_reference_sequence_{0};

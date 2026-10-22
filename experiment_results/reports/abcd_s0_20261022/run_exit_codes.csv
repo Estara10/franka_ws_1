@@ -1,0 +1,13 @@
+run_id,group,round,runner_exit_code
+abcd_s0_Ar1_20261022,A,r1,0
+abcd_s0_Cr1_20261022,C,r1,0
+abcd_s0_Br1_20261022,B,r1,2
+abcd_s0_Dr1_20261022,D,r1,0
+abcd_s0_Dr2_20261022,D,r2,0
+abcd_s0_Br2_20261022,B,r2,2
+abcd_s0_Cr2_20261022,C,r2,0
+abcd_s0_Ar2_20261022,A,r2,0
+abcd_s0_Br3_20261022,B,r3,2
+abcd_s0_Ar3_20261022,A,r3,0
+abcd_s0_Dr3_20261022,D,r3,0
+abcd_s0_Cr3_20261022,C,r3,0

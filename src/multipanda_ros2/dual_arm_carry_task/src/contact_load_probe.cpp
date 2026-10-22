@@ -6,6 +6,7 @@
 #include "dual_arm_carry_task/bilateral_snapshot_gate.hpp"
 #include "dual_arm_carry_task/bridge_process.hpp"
 #include "dual_arm_carry_task/async_truth_guard.hpp"
+#include "dual_arm_carry_task/cooperative_impedance.hpp"
 #include "dual_arm_carry_task/mmc_state_validation.hpp"
 #include "dual_arm_carry_task/s1_time_scaling.hpp"
 #include <moveit/trajectory_processing/iterative_time_parameterization.h>
@@ -14,13 +15,16 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <cstdint>
 #include <fstream>
 #include <functional>
 #include <future>
 #include <iomanip>
+#include <mutex>
 #include <ament_index_cpp/get_package_prefix.hpp>
 #include <mujoco_ros_msgs/srv/get_body_state.hpp>
 #include <multi_mode_control_msgs/srv/get_robot_states.hpp>
+#include <multi_mode_control_msgs/msg/dual_cartesian_impedance_goal.hpp>
 #include <franka_msgs/msg/franka_state.hpp>
 
 namespace {
@@ -44,6 +48,20 @@ double steadySeconds() {
 double rotationError(const Transform& a,const Transform& b) {
     return Eigen::AngleAxisd(a.linear().transpose()*b.linear()).angle();
 }
+
+using MmcGoal = multi_mode_control_msgs::msg::DualCartesianImpedanceGoal;
+using CooperativeWrench = dual_arm_carry_task::CooperativeWrench;
+struct AbcdMmcReferenceStream {
+    std::mutex mutex;
+    MmcGoal goal;
+    bool running{false};
+    bool mmc_active{false};
+    bool failure_stop{false};
+    double payload_start_sim{0.0};
+    std::chrono::steady_clock::time_point last_publish{};
+    double max_publish_interval_sec{0.0};
+    std::uint64_t publications{0};
+};
 
 }
 
@@ -247,10 +265,18 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     // near 12.5 N. A 50 N step needs a force-actuator change and is out of
     // scope for the contact-probe run.
     constexpr double force=10.0, height=0.40, hold_seconds=2.0;
+    const auto& abcd_group_name = ctx_->contact_abcd_group_;
+    const bool abcd_group = abcd_group_name == "A" || abcd_group_name == "B" ||
+                            abcd_group_name == "C" || abcd_group_name == "D";
+    const bool abcd_mmc = abcd_group_name == "C" || abcd_group_name == "D";
     // Project acceptance is a 45 mm rod rise, independent of the commanded lift
     // height. With ~7-9 mm vertical slip, a 6 cm lift is needed to clear it.
     constexpr double rod_rise_target=0.045;
     constexpr double pos_tol=0.005, angle_tol=2.0*M_PI/180.0;
+    // User-defined ABCD research criterion: up to 5 degrees of hand/rod
+    // relative rotation during carrying. Keep planning and legacy checks
+    // separate; all four experimental groups use this same carrying limit.
+    const double carrying_angle_tol = abcd_group ? 5.0*M_PI/180.0 : angle_tol;
     // B (creep hold) was implemented and tested: it made the rod slide 7.6 mm
     // during the hold and timed out, so it is kept but disabled. The static
     // hold with the recorded duty warning is the working configuration.
@@ -265,6 +291,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     const std::array<std::string,2> arms{{"mj_left","mj_right"}};
     std::array<DualArmCarryTask::GripperContactFeedback,2> fingers;
     bool force_hold_may_be_active=false;
+    std::function<void()> stopAbcdMmc = []() {};
     auto logSnapshot=[&](const char* reason) {
         for (int i=0;i<2;++i) {
             DualArmCarryTask::GripperContactFeedback sample;
@@ -291,6 +318,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     };
     auto fail=[&](const std::string& reason) {
         detail=reason;
+        stopAbcdMmc();
         logSnapshot(reason.c_str());
         RCLCPP_ERROR(ctx_->get_logger(),"[CONTACT_PROBE_FAILURE] %s",reason.c_str());
         if (force_hold_may_be_active) {
@@ -406,16 +434,16 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         "nominal_tendon_actuator_command=%.1f N (0.90*2F; nominal per-branch generalized force=%.1f N) "
         "runtime_tendon_force_cap=+/-%.1f N; actual actuator_force is in contact_probe_contacts.csv, "
         "actual pad normal force is in contact_probe.csv; mode=%s lift=%.3fm hold=%.1fs "
-        "lift_slip_limit=%.1fmm(user-authorized)/2deg; grasp_slip_tol=%.1fmm; rod_rise_target=%.0fmm; "
+        "lift_slip_limit=%.1fmm/%.1fdeg(user-authorized); grasp_slip_tol=%.1fmm; rod_rise_target=%.0fmm; "
         "acceptance hold=%.1fs; lift_velocity_scale=%.2f lift_acceleration_scale=%.2f weld=OFF; "
         "model/friction/mass unchanged",
         force, -2.0*force*0.90, -force*0.90, force,
         hold_diagnostic_only ? "fixed-arm-mechanism-diagnostic" :
             (ctx_->contact_hover_only_ ? "rigid-hover-only" : "full-load-probe"),
         ctx_->contact_hover_only_ ? ctx_->contact_hover_height_m_ : height,
-        ctx_->contact_hover_only_ ? ctx_->contact_hover_hold_seconds_ : hold_seconds,
-        lift_slip_tol*1000.0, pos_tol*1000.0, rod_rise_target*1000.0,
-        hold_seconds, lift_velocity_scale, lift_acceleration_scale);
+        ctx_->contact_hover_only_ ? ctx_->contact_hover_hold_seconds_ : (abcd_group ? 0.0 : hold_seconds),
+        lift_slip_tol*1000.0, carrying_angle_tol*180.0/M_PI, pos_tol*1000.0, rod_rise_target*1000.0,
+        abcd_group ? 0.0 : hold_seconds, lift_velocity_scale, lift_acceleration_scale);
     // S2 transport plan-only evaluation builds its sample without touching the
     // gripper or the arms, so the whole grasp sequence below is skipped.
     const std::array<std::string,2> eefs{{a1_verify_.left_eef,a1_verify_.right_eef}};
@@ -425,6 +453,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     if (ctx_->contact_hover_control_mode_ == "mmc_hold" && !robot_state_service_)
         return fail("E_MMC_STATE_SOURCE_NOT_READY");
     std::array<Transform,2> object_to_hand{{Transform::Identity(),Transform::Identity()}};
+    std::array<Transform,2> cooperative_grasp{{Transform::Identity(),Transform::Identity()}};
     Transform object=Transform::Identity();
     MujocoRodTruth initial_truth;
     auto initial_truth_received = std::chrono::steady_clock::time_point{};
@@ -457,6 +486,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         rotationError(object,rodTransform(before))>angle_tol) return fail("E_CONTACT_ROD_MOVED_DURING_CLOSE");
     object_to_hand[0]=object.inverse()*start.getGlobalLinkTransform(eefs[0]);
     object_to_hand[1]=object.inverse()*start.getGlobalLinkTransform(eefs[1]);
+    cooperative_grasp=object_to_hand;
     // Preserve the descent arrival limits after closing.
     const std::array<a1v::ArmTarget,2> grasp{{a1_verify_.grasp_target.left,a1_verify_.grasp_target.right}};
     for (int i=0;i<2;++i) {
@@ -482,23 +512,29 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     // two hands' inferred rod poses can already differ there, so the creep plan
     // skips only the dual-residual check (collision/support/limits remain).
     bool relax_dual_residual = false;
-    auto valid=[&](const moveit::core::RobotState& live) {
+    bool rod_released = false;
+    Transform released_rod_pose = Transform::Identity();
+    auto valid=[&](const moveit::core::RobotState& live, bool carrying_transition=false) {
         moveit::core::RobotState criterion(criterion_model);
         for (const auto& name:criterion_model->getVariableNames()) criterion.setVariablePosition(name,live.getVariablePosition(name));
         criterion.update();
         if (!criterion.satisfiesBounds(criterion_dual,1e-4)) { detail="E_CONTACT_JOINT_BOUNDS"; return false; }
         const Transform inferred=live.getGlobalLinkTransform(eefs[0])*object_to_hand[0].inverse();
         const Transform inferred_right=live.getGlobalLinkTransform(eefs[1])*object_to_hand[1].inverse();
+        const double residual_pos_tol=carrying_transition?lift_slip_tol:pos_tol;
+        const double residual_angle_tol=carrying_transition?carrying_angle_tol:angle_tol;
         if (!relax_dual_residual &&
-            ((inferred.translation()-inferred_right.translation()).norm()>pos_tol ||
-             rotationError(inferred,inferred_right)>angle_tol)) {
+            ((inferred.translation()-inferred_right.translation()).norm()>residual_pos_tol ||
+             rotationError(inferred,inferred_right)>residual_angle_tol)) {
             detail="E_CONTACT_DUAL_GRASP_RESIDUAL"; return false;
         }
-        // Tilt-aware physical box height. Support contact only near the start plane.
-        const double extent=0.5*(std::abs(inferred.linear()(2,0))*truth.size.x+
-            std::abs(inferred.linear()(2,1))*truth.size.y+std::abs(inferred.linear()(2,2))*truth.size.z);
-        const double clearance=inferred.translation().z()-extent-ctx_->p2a_support_z_;
-        if (clearance < -0.0001 || !updateRod(inferred)) { detail="E_CONTACT_ROD_SUPPORT_PENETRATION"; return false; }
+        // After release the rod stays at its measured world pose; the virtual
+        // object used to coordinate the retreating hands must not move it.
+        const Transform& collision_rod = rod_released ? released_rod_pose : inferred;
+        const double extent=0.5*(std::abs(collision_rod.linear()(2,0))*truth.size.x+
+            std::abs(collision_rod.linear()(2,1))*truth.size.y+std::abs(collision_rod.linear()(2,2))*truth.size.z);
+        const double clearance=collision_rod.translation().z()-extent-ctx_->p2a_support_z_;
+        if (clearance < -0.0001 || !updateRod(collision_rod)) { detail="E_CONTACT_ROD_SUPPORT_PENETRATION"; return false; }
         auto local_acm=acm;
         local_acm.setEntry(a1_verify_.rod_id,a1_verify_.support_id,clearance<=0.003);
         collision_detection::CollisionRequest req; req.contacts=true; req.max_contacts=20;
@@ -532,7 +568,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                       double min_total,
                       double dyaw=0.0,
                       bool optimize_path=false,
-                      std::vector<moveit::core::RobotState>* path_out=nullptr) {
+                      std::vector<moveit::core::RobotState>* path_out=nullptr,
+                      double duration_multiplier=1.0) {
         if (!valid(origin)) return false;
         {
             const auto& finger_names=a1v::fingerJointNames();
@@ -554,7 +591,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         // pad-contact loss and impulsive re-contact before the rod could leave
         // the support surface.
         const int kPathSteps = std::max({20,
-            static_cast<int>(std::ceil(delta.norm()/0.005)),
+            static_cast<int>(std::ceil(delta.norm()/(rod_released ? 0.0025 : 0.005))),
             static_cast<int>(std::ceil(std::abs(dyaw)/0.01))});
         // Joint-space interpolation between two waypoints is not on the closed
         // chain, so every interpolated sample is checked against the same 5 mm /
@@ -564,7 +601,18 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                                   const moveit::core::RobotState& next,int seg) {
             std::vector<double> a,b; prev.copyJointGroupPositions(dual,a); next.copyJointGroupPositions(dual,b);
             const double jump=a1v::maxAbsJointDelta(a,b);
-            if (!std::isfinite(jump) || jump>0.15) { detail="E_CONTACT_IK_BRANCH_JUMP"; return false; }
+            if (!std::isfinite(jump) || jump>0.15) {
+                detail="E_CONTACT_IK_BRANCH_JUMP";
+                for (std::size_t ji=0;ji<a.size();++ji) {
+                    if (!std::isfinite(b[ji]-a[ji]) || std::abs(b[ji]-a[ji])>0.15) {
+                        RCLCPP_ERROR(ctx_->get_logger(),
+                            "[CONTACT_IK_BRANCH_JUMP] label=%s waypoint=%d joint=%s "
+                            "previous=%.9f candidate=%.9f delta=%.9f limit=0.15 rad",
+                            label,seg,dual->getVariableNames()[ji].c_str(),a[ji],b[ji],b[ji]-a[ji]);
+                    }
+                }
+                return false;
+            }
             const auto n=std::max<std::size_t>(1,a1v::subdivisionsFor(jump,0.01));
             for (std::size_t j=1;j<=n;++j) {
                 const double alpha=double(j)/n;
@@ -585,8 +633,22 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             for (int k=1;k<=kPathSteps;++k) {
                 const Transform target=expectedObject(static_cast<double>(k)/kPathSteps);
                 moveit::core::RobotState next(seed);
-                if (!next.setFromIK(left,target*object_to_hand[0],eefs[0],0.05) ||
-                    !next.setFromIK(right,target*object_to_hand[1],eefs[1],0.05)) { detail="E_CONTACT_IK"; return false; }
+                const std::array<const moveit::core::JointModelGroup*,2> groups{{left,right}};
+                for (std::size_t side=0;side<groups.size();++side) {
+                    // A redundant IK solver can return a distant solution even
+                    // when seeded from the previous waypoint. For the released
+                    // retreat, ask it to search inside the existing jump bound
+                    // instead of accepting that solution and rejecting it later.
+                    const bool solved = rod_released ?
+                        next.setFromIK(groups[side],target*object_to_hand[side],eefs[side],
+                            std::vector<double>(groups[side]->getVariableCount(),0.15),0.05) :
+                        next.setFromIK(groups[side],target*object_to_hand[side],eefs[side],0.05);
+                    if (!solved) {
+                        detail="E_CONTACT_IK label="+std::string(label)+" side="+arms[side]+
+                            " waypoint="+std::to_string(k);
+                        return false;
+                    }
+                }
                 next.update();
                 for (int side=0;side<2;++side) {
                     const auto actual=next.getGlobalLinkTransform(eefs[side])*object_to_hand[side].inverse();
@@ -734,17 +796,18 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         }
         const char* binding = stretch<=1.0+1e-9 ? "none" :
             (stretch_segment>stretch_min_total+1e-9 ? "segment" : "min_total");
+        const double total_stretch = stretch * duration_multiplier;
         RCLCPP_INFO(ctx_->get_logger(),
-            "[CONTACT_PLAN_TIMING] label=%s points=%zu t_scaled=%.4f scale=%.4f "
+            "[CONTACT_PLAN_TIMING] label=%s points=%zu t_scaled=%.4f scale=%.4f duration_multiplier=%.2f "
             "stretch_abs=%.4f stretch_rel=%.4f stretch_min_total=%.4f "
             "stretch_segment=%.4f stretch=%.4f final=%.4f binding=%s",
-            label,points.size(),t_scaled,report.scale,stretch_abs,stretch_rel,
-            stretch_min_total,stretch_segment,stretch,t_scaled*stretch,binding);
+            label,points.size(),t_scaled,report.scale,duration_multiplier,stretch_abs,stretch_rel,
+            stretch_min_total,stretch_segment,total_stretch,t_scaled*total_stretch,binding);
+        if (!s1::applyUniformTimeScale(points,total_stretch,detail)) return false;
         for (std::size_t j=0;j<points.size();++j) {
-            joint.points[j].time_from_start=rclcpp::Duration::from_seconds(points[j].time*stretch);
-            joint.points[j].velocities=points[j].velocities; joint.points[j].accelerations=points[j].accelerations;
-            for (auto& v:joint.points[j].velocities) v/=stretch;
-            for (auto& a:joint.points[j].accelerations) a/=(stretch*stretch);
+            joint.points[j].time_from_start=rclcpp::Duration::from_seconds(points[j].time);
+            joint.points[j].velocities=points[j].velocities;
+            joint.points[j].accelerations=points[j].accelerations;
         }
         // JTC receives position/velocity/acceleration, hence interpolates quintics.
         // Check that actual interpolation too, after timing (20 ms samples).
@@ -1157,9 +1220,14 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         while (transport_dyaw<-M_PI) transport_dyaw+=2.0*M_PI;
         const Eigen::Vector3d transport_delta(ctx_->rod_target_x_-held_object.translation().x(),
                                               ctx_->rod_target_y_-held_object.translation().y(),0.0);
+        const double transport_distance=transport_delta.norm();
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[TRANSPORT_DISTANCE_CHECK] dx=%.9f dy=%.9f distance=%.9f max=%.9f",
+            transport_delta.x(),transport_delta.y(),transport_distance,
+            ctx_->contact_transport_max_distance_m_);
         if (!std::isfinite(transport_delta.x()) || !std::isfinite(transport_delta.y()) ||
-            !std::isfinite(transport_dyaw) || transport_delta.norm()<0.001 ||
-            transport_delta.norm()>0.20 || std::abs(transport_dyaw)>0.6)
+            !std::isfinite(transport_dyaw) || transport_distance<0.001 ||
+            transport_distance>ctx_->contact_transport_max_distance_m_+1e-6 || std::abs(transport_dyaw)>0.6)
             return planFail("E_TRANSPORT_OPT_DELTA");
         // Same transport stretch rule as the live probe (env, default 2.0). The
         // frozen comparison baseline uses CONTACT_TRANSPORT_STRETCH=1.0.
@@ -1408,7 +1476,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     moveit::planning_interface::MoveGroupInterface::Plan lift;
 
     if (!ctx_->contact_hover_only_ && !hold_diagnostic_only &&
-        !makePlan(start,Eigen::Vector3d(0,0,height),lift,"lift",1.0,0.4,1.0)) return fail(detail);
+        !makePlan(start,Eigen::Vector3d(0,0,height),lift,"lift",1.0,0.4,1.0,
+                  0.0,false,nullptr,abcd_group?1.5:1.0)) return fail(detail);
     // Give the bounded force-hold drive a short static settling window before
     // the first lift command. This does not count as load validation; it only
     // avoids starting the lift while the tendon force is still ramping or the
@@ -1537,7 +1606,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         last_truth_request_elapsed=truth_guard.requestElapsed(std::chrono::steady_clock::now());
         return latest.ok;
     };
-    auto refreshTruthBeforeLift = [&]() {
+    auto refreshTruthBeforeLift = [&](const char* phase="pre_lift_refresh") {
         const auto refresh_started=std::chrono::steady_clock::now();
         const auto deadline=refresh_started+
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -1549,7 +1618,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             }
             if (!truth_client->service_is_ready()) {
                 detail="E_CONTACT_TRUTH_SERVICE_DISCOVERY_TIMEOUT service="+truth_service+
-                    " phase=pre_lift_refresh elapsed_wall_sec="+
+                    " phase="+phase+" elapsed_wall_sec="+
                     std::to_string(std::chrono::duration<double>(
                         std::chrono::steady_clock::now()-refresh_started).count());
                 return false;
@@ -1566,9 +1635,9 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             if (!advanceTruthRequest(true)) return false;
             if (!truth_guard.inFlight()) {
                 RCLCPP_INFO(ctx_->get_logger(),
-                    "[CONTACT_TRUTH_PRE_LIFT_REFRESH] service=%s result=fresh "
-                    "request_elapsed_wall_sec=%.6f age_wall_sec=%.6f; existing grasp/height guards rechecked",
-                    truth_service.c_str(), last_truth_request_elapsed, last_truth_age);
+                    "[CONTACT_TRUTH_REFRESH] phase=%s service=%s result=fresh "
+                    "request_elapsed_wall_sec=%.6f age_wall_sec=%.6f",
+                    phase, truth_service.c_str(), last_truth_request_elapsed, last_truth_age);
                 return true;
             }
             std::this_thread::sleep_for(10ms);
@@ -1577,7 +1646,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         if (!truth_guard.faulted()) truth_guard.observe(now);
         if (detail.empty() || detail.find("E_CONTACT_TRUTH_")!=0) {
             detail="E_CONTACT_TRUTH_REFRESH_TIMEOUT service="+truth_service+
-                " phase=pre_lift_refresh request_elapsed_wall_sec="+
+                " phase="+phase+" request_elapsed_wall_sec="+
                 std::to_string(truth_guard.requestElapsed(now));
         }
         return false;
@@ -1660,7 +1729,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             hover_csv.flush();
             if (!hover_csv) { detail="E_CONTACT_HOVER_CSV_WRITE"; return false; }
         }
-        if (max_slip>lift_slip_tol || max_angle>angle_tol) { detail="E_CONTACT_SLIP_OR_DROP"; return false; }
+        if (max_slip>lift_slip_tol || max_angle>carrying_angle_tol) { detail="E_CONTACT_SLIP_OR_DROP"; return false; }
         // Keep the full probe's original continuous height requirement.
         if (require_height && latest.position.z<initial_truth.position.z+rod_rise_target) {
             detail="E_CONTACT_ROD_NOT_LIFTED"; return false;
@@ -1673,8 +1742,701 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         }
         return true;
     };
+    dual_arm_carry_task::BridgeProcess abcd_bridge;
+    bool abcd_bridge_started = false;
+    bool abcd_activation_requested = false;
+    std::string abcd_gate_path, abcd_complete_path;
+    std::shared_ptr<AbcdMmcReferenceStream> abcd_reference_stream;
+    rclcpp::TimerBase::SharedPtr abcd_reference_timer;
+    rclcpp::Publisher<MmcGoal>::SharedPtr abcd_reference_publisher;
+    bool abcd_jacobian_conversion_verified = false;
+    stopAbcdMmc = [&]() {
+        auto stopExternalWrench = [&](MmcGoal& goal) {
+            goal.use_cooperative_wrench = true;
+            goal.l_cooperative_wrench = geometry_msgs::msg::Wrench();
+            goal.r_cooperative_wrench = geometry_msgs::msg::Wrench();
+            goal.l_ff_force = geometry_msgs::msg::Vector3();
+            goal.r_ff_force = geometry_msgs::msg::Vector3();
+            goal.l_twist = geometry_msgs::msg::Twist();
+            goal.r_twist = geometry_msgs::msg::Twist();
+            DualArmCarryTask::JointFeedback feedback_sample;
+            const bool received = ctx_->latestJointFeedback(feedback_sample);
+            const double feedback_age = received ? steadySeconds() - feedback_sample.recv_steady_sec :
+                std::numeric_limits<double>::infinity();
+            bool fresh = received && feedback_sample.stamp_valid && std::isfinite(feedback_age) &&
+                feedback_age >= 0.0 && feedback_age <= 0.25;
+            std::array<double, 14> measured_q{};
+            if (fresh) {
+                for (std::size_t joint = 0; joint < 7; ++joint) {
+                    const auto left_it = feedback_sample.positions.find("mj_left_joint" + std::to_string(joint + 1));
+                    const auto right_it = feedback_sample.positions.find("mj_right_joint" + std::to_string(joint + 1));
+                    if (left_it == feedback_sample.positions.end() || right_it == feedback_sample.positions.end() ||
+                        !std::isfinite(left_it->second) || !std::isfinite(right_it->second)) {
+                        fresh = false;
+                        break;
+                    }
+                    measured_q[joint] = left_it->second;
+                    measured_q[7 + joint] = right_it->second;
+                }
+            }
+            if (fresh) {
+                for (std::size_t joint = 0; joint < 7; ++joint) {
+                    goal.l_q_n[joint] = measured_q[joint];
+                    goal.r_q_n[joint] = measured_q[7 + joint];
+                }
+            }
+            return fresh;
+        };
+        bool switched_back = false;
+        if (abcd_activation_requested && abcd_bridge_started && abcd_bridge.poll() == -1) {
+            bool nullspace_anchored = false;
+            if (abcd_reference_stream) {
+                std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+                abcd_reference_stream->failure_stop = true;
+                nullspace_anchored = stopExternalWrench(abcd_reference_stream->goal);
+            }
+            RCLCPP_WARN(ctx_->get_logger(),
+                "[ABCD_MMC_FAILURE_STOP] cooperative_wrench=zero payload_ff=zero twist=zero "
+                "nullspace_anchor=%s",
+                nullspace_anchored ? "fresh_measured_joints" : "last_reference");
+            std::ofstream abort_gate(abcd_complete_path, std::ios::out | std::ios::trunc);
+            abort_gate << "abort\n";
+            abort_gate.flush();
+            const auto deadline = std::chrono::steady_clock::now() + 12s;
+            int status = -1;
+            while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline && status == -1) {
+                status = abcd_bridge.poll();
+                if (status == -1) std::this_thread::sleep_for(10ms);
+            }
+            switched_back = status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+            if (!switched_back) {
+                const bool stopped = abcd_bridge.stop();
+                RCLCPP_ERROR(ctx_->get_logger(),
+                    "[ABCD_MMC_ABORT] switchback=unconfirmed bridge_status=%d bridge_stopped=%d; "
+                    "0.5s controller watchdog remains responsible for stopping stale references",
+                    status, stopped ? 1 : 0);
+            } else {
+                RCLCPP_WARN(ctx_->get_logger(),
+                    "[ABCD_MMC_ABORT] switchback=confirmed JTC=active MMC=inactive; failure remains recorded");
+            }
+        } else if (abcd_bridge_started && abcd_bridge.poll() == -1) {
+            const bool stopped = abcd_bridge.stop();
+            RCLCPP_WARN(ctx_->get_logger(), "[ABCD_MMC_ABORT] activation_not_confirmed bridge_stopped=%d",
+                        stopped ? 1 : 0);
+        } else if (abcd_activation_requested) {
+            if (abcd_reference_stream && abcd_reference_publisher) {
+                MmcGoal stopped_goal;
+                bool nullspace_anchored = false;
+                {
+                    std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+                    abcd_reference_stream->failure_stop = true;
+                    nullspace_anchored = stopExternalWrench(abcd_reference_stream->goal);
+                    stopped_goal = abcd_reference_stream->goal;
+                }
+                abcd_reference_publisher->publish(stopped_goal);
+                RCLCPP_WARN(ctx_->get_logger(),
+                    "[ABCD_MMC_FAILURE_STOP] bridge_exited=true one_zero_reference_published=1 "
+                    "cooperative_wrench=zero payload_ff=zero twist=zero nullspace_anchor=%s",
+                    nullspace_anchored ? "fresh_measured_joints" : "last_reference");
+            }
+            RCLCPP_ERROR(ctx_->get_logger(),
+                "[ABCD_MMC_ABORT] bridge_already_exited; controller_state_unconfirmed; "
+                "0.5s controller watchdog remains responsible for stopping stale references");
+        }
+        if (abcd_reference_stream) {
+            double max_publish_interval = 0.0;
+            std::uint64_t publication_count = 0;
+            bool mmc_active = false;
+            {
+                std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+                max_publish_interval = abcd_reference_stream->max_publish_interval_sec;
+                publication_count = abcd_reference_stream->publications;
+                mmc_active = abcd_reference_stream->mmc_active;
+                abcd_reference_stream->running = false;
+            }
+            RCLCPP_WARN(ctx_->get_logger(),
+                "[ABCD_MMC_STREAM_STOP] reason=failure mmc_active=%d max_publish_interval_sec=%.6f "
+                "cumulative_publications=%llu",
+                mmc_active ? 1 : 0, max_publish_interval,
+                static_cast<unsigned long long>(publication_count));
+            if (abcd_reference_timer) abcd_reference_timer->cancel();
+        }
+        abcd_activation_requested = false;
+    };
+    auto executeMmcReference = [&](const moveit::planning_interface::MoveGroupInterface::Plan& plan,
+                                   const char* phase, double start_tolerance_rad) {
+        const auto& jt = plan.trajectory_.joint_trajectory;
+        if (jt.points.size() < 2 || jt.joint_names.size() != dual->getVariableCount()) {
+            detail = "E_ABCD_MMC_TRAJECTORY_DIMENSION";
+            return false;
+        }
+        moveit::core::RobotState dispatch(live_model);
+        if (!measured(dispatch)) return false;
+        double max_start_delta = 0.0;
+        std::size_t max_start_joint = 0;
+        for (std::size_t j = 0; j < jt.joint_names.size(); ++j) {
+            const double delta = std::abs(dispatch.getVariablePosition(jt.joint_names[j]) -
+                                           jt.points.front().positions[j]);
+            if (delta > max_start_delta) { max_start_delta = delta; max_start_joint = j; }
+        }
+        if (max_start_delta > start_tolerance_rad) {
+            moveit::core::RobotState planned_start(live_model);
+            planned_start.setVariablePositions(jt.joint_names, jt.points.front().positions);
+            planned_start.update();
+            double max_hand_position_mm = 0.0;
+            double max_hand_angle_deg = 0.0;
+            for (const auto& eef : eefs) {
+                const Transform actual = dispatch.getGlobalLinkTransform(eef);
+                const Transform expected = planned_start.getGlobalLinkTransform(eef);
+                max_hand_position_mm = std::max(max_hand_position_mm,
+                                                 (actual.translation() - expected.translation()).norm() * 1000.0);
+                max_hand_angle_deg = std::max(max_hand_angle_deg,
+                                              rotationError(actual, expected) * 180.0 / M_PI);
+            }
+            RCLCPP_WARN(ctx_->get_logger(),
+                "[ABCD_MMC_DISPATCH_START] phase=%s max_joint_delta_rad=%.9f joint=%s "
+                "measured=%.9f planned=%.9f max_hand_delta=(%.3fmm,%.4fdeg) tolerance=%.9f",
+                phase, max_start_delta, jt.joint_names[max_start_joint].c_str(),
+                dispatch.getVariablePosition(jt.joint_names[max_start_joint]),
+                jt.points.front().positions[max_start_joint], max_hand_position_mm, max_hand_angle_deg,
+                start_tolerance_rad);
+            detail = "E_ABCD_MMC_DISPATCH_START_MOVED";
+            return false;
+        }
+        // MMC may move a few mrad under load while the next phase is planned.
+        // The accepted start offset is a real short joint-space connection to
+        // the checked plan; sample that connection with the same live grasp,
+        // support and collision validator before publishing its first target.
+        if (max_start_delta > 0.002) {
+            const auto samples = std::max(1, static_cast<int>(std::ceil(max_start_delta / 0.001)));
+            for (int sample_index = 0; sample_index <= samples; ++sample_index) {
+                const double alpha = static_cast<double>(sample_index) / samples;
+                moveit::core::RobotState connection(dispatch);
+                for (std::size_t j = 0; j < jt.joint_names.size(); ++j) {
+                    const double actual = dispatch.getVariablePosition(jt.joint_names[j]);
+                    const double planned = jt.points.front().positions[j];
+                    connection.setVariablePosition(jt.joint_names[j], actual + alpha * (planned - actual));
+                }
+                connection.update();
+                if (!valid(connection, abcd_mmc)) {
+                    RCLCPP_ERROR(ctx_->get_logger(),
+                        "[ABCD_MMC_START_CONNECTION_REJECTED] phase=%s sample=%d/%d "
+                        "max_joint_delta_rad=%.9f reason=%s",
+                        phase, sample_index, samples, max_start_delta, detail.c_str());
+                    return false;
+                }
+            }
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[ABCD_MMC_START_CONNECTION] phase=%s samples=%d max_joint_delta_rad=%.9f "
+                "residual_limit=(%.1fmm,%.1fdeg) modeled_collision_and_grasp_checks=passed",
+                phase, samples + 1, max_start_delta,
+                abcd_mmc ? lift_slip_tol * 1000.0 : pos_tol * 1000.0,
+                abcd_mmc ? carrying_angle_tol * 180.0 / M_PI : angle_tol * 180.0 / M_PI);
+        }
+        std::vector<tpo::TrajectoryPoint> points;
+        points.reserve(jt.points.size());
+        for (const auto& p : jt.points) {
+            tpo::TrajectoryPoint item;
+            item.time = rclcpp::Duration(p.time_from_start).seconds();
+            item.q = Eigen::Map<const Eigen::VectorXd>(p.positions.data(), static_cast<Eigen::Index>(p.positions.size()));
+            if (p.velocities.empty()) item.v = Eigen::VectorXd::Zero(item.q.size());
+            else item.v = Eigen::Map<const Eigen::VectorXd>(p.velocities.data(), static_cast<Eigen::Index>(p.velocities.size()));
+            if (p.accelerations.empty()) item.a = Eigen::VectorXd::Zero(item.q.size());
+            else item.a = Eigen::Map<const Eigen::VectorXd>(p.accelerations.data(), static_cast<Eigen::Index>(p.accelerations.size()));
+            points.push_back(std::move(item));
+        }
+        const auto* left_link = live_model->getLinkModel(eefs[0]);
+        const auto* right_link = live_model->getLinkModel(eefs[1]);
+        const auto* left_base = live_model->getLinkModel("mj_left_link0");
+        const auto* right_base = live_model->getLinkModel("mj_right_link0");
+        if (!left_link || !right_link || !left_base || !right_base) { detail = "E_ABCD_MMC_LINK_MODEL"; return false; }
+        const std::array<const moveit::core::LinkModel*, 2> links{{left_link, right_link}};
+        const std::array<const moveit::core::LinkModel*, 2> bases{{left_base, right_base}};
+        const std::array<const moveit::core::JointModelGroup*, 2> arm_groups{{left, right}};
+        const std::array<std::string, 2> prefixes{{"mj_left_joint", "mj_right_joint"}};
+        // Preserve 400/40 per-arm impedance in the common mode (two hands
+        // share the total object wrench) and in the relative mode (symmetric
+        // hand displacement is +/- half the relative coordinate).
+        constexpr double object_translation_stiffness = 800.0;
+        constexpr double object_rotation_stiffness = 80.0;
+        constexpr double relative_translation_stiffness = 200.0;
+        constexpr double relative_rotation_stiffness = 20.0;
+        constexpr double damping_ratio = 0.8;
+        constexpr double payload_mass = 0.64;
+        constexpr double object_yaw_inertia = 0.0192;
+        constexpr double relative_reduced_mass = 0.16;
+        constexpr double relative_reduced_yaw_inertia = 0.0048;
+        const double object_translation_damping = 2.0 * damping_ratio *
+            std::sqrt(object_translation_stiffness * payload_mass);
+        const double object_rotation_damping = 2.0 * damping_ratio *
+            std::sqrt(object_rotation_stiffness * object_yaw_inertia);
+        const double relative_translation_damping = 2.0 * damping_ratio *
+            std::sqrt(relative_translation_stiffness * relative_reduced_mass);
+        const double relative_rotation_damping = 2.0 * damping_ratio *
+            std::sqrt(relative_rotation_stiffness * relative_reduced_yaw_inertia);
+        Eigen::Vector3d previous_relative_position_error = Eigen::Vector3d::Zero();
+        Eigen::Vector3d previous_relative_rotation_error = Eigen::Vector3d::Zero();
+        auto previous_relative_sample = std::chrono::steady_clock::time_point{};
+        bool have_relative_sample = false;
+        auto makeGoal = [&](const tpo::TrajectoryPoint& sample, bool verify_jacobian,
+                            MmcGoal& goal) {
+            if (sample.q.size() != static_cast<Eigen::Index>(jt.joint_names.size()) ||
+                sample.v.size() != sample.q.size()) {
+                detail = "E_ABCD_MMC_REFERENCE_DIMENSION";
+                return false;
+            }
+            moveit::core::RobotState desired(live_model);
+            desired.setVariablePositions(jt.joint_names,
+                std::vector<double>(sample.q.data(), sample.q.data() + sample.q.size()));
+            desired.update();
+            std::array<Transform, 2> desired_hand{};
+            std::array<Transform, 2> desired_base{};
+            std::array<Eigen::VectorXd, 2> qdot_by_arm;
+            std::array<Eigen::VectorXd, 2> planned_twist{};
+            std::array<Eigen::MatrixXd, 2> jacobians{};
+            for (int arm = 0; arm < 2; ++arm) {
+                const auto* arm_group = arm_groups[arm];
+                if (!desired.getJacobian(arm_group, links[arm], Eigen::Vector3d::Zero(), jacobians[arm]) ||
+                    jacobians[arm].rows() != 6 || jacobians[arm].cols() != static_cast<Eigen::Index>(arm_group->getVariableCount())) {
+                    detail = "E_ABCD_MMC_JACOBIAN";
+                    return false;
+                }
+                qdot_by_arm[arm].resize(static_cast<Eigen::Index>(arm_group->getVariableCount()));
+                const auto& variables = arm_group->getVariableNames();
+                for (std::size_t j = 0; j < variables.size(); ++j) {
+                    const auto it = std::find(jt.joint_names.begin(), jt.joint_names.end(), variables[j]);
+                    if (it == jt.joint_names.end()) { detail = "E_ABCD_MMC_JOINT_ORDER"; return false; }
+                    qdot_by_arm[arm][static_cast<Eigen::Index>(j)] = sample.v[std::distance(jt.joint_names.begin(), it)];
+                }
+                planned_twist[arm] = jacobians[arm] * qdot_by_arm[arm];
+                desired_hand[arm] = desired.getGlobalLinkTransform(links[arm]);
+                desired_base[arm] = desired.getGlobalLinkTransform(bases[arm]);
+            }
+
+            // This run restores the independently controlled C12-C14 path.
+            // Keep the cooperative v2 implementation below intact for its
+            // historical comparison, but do not send its common/relative
+            // wrench in the current ABCD experiment.
+            constexpr bool use_cooperative_wrench = false;
+            if (!use_cooperative_wrench) {
+                goal.use_cooperative_wrench = false;
+                for (int arm = 0; arm < 2; ++arm) {
+                    const Transform target_local = desired_base[arm].inverse() * desired_hand[arm];
+                    if (arm == 0) goal.l_pose = poseMsg(target_local);
+                    else goal.r_pose = poseMsg(target_local);
+                    const Eigen::Vector3d local_linear =
+                        desired_base[arm].linear().transpose() * planned_twist[arm].head<3>();
+                    const Eigen::Vector3d local_angular =
+                        desired_base[arm].linear().transpose() * planned_twist[arm].tail<3>();
+                    auto& twist = arm == 0 ? goal.l_twist : goal.r_twist;
+                    twist.linear.x = local_linear.x();
+                    twist.linear.y = local_linear.y();
+                    twist.linear.z = local_linear.z();
+                    twist.angular.x = local_angular.x();
+                    twist.angular.y = local_angular.y();
+                    twist.angular.z = local_angular.z();
+                    auto& q_null = arm == 0 ? goal.l_q_n : goal.r_q_n;
+                    for (std::size_t j = 0; j < 7; ++j) {
+                        const auto it = std::find(jt.joint_names.begin(), jt.joint_names.end(),
+                                                  prefixes[arm] + std::to_string(j + 1));
+                        if (it == jt.joint_names.end()) {
+                            detail = "E_ABCD_MMC_NULLSPACE_JOINT";
+                            return false;
+                        }
+                        q_null[j] = sample.q[std::distance(jt.joint_names.begin(), it)];
+                    }
+                    if (verify_jacobian) {
+                        constexpr double epsilon = 1e-4;
+                        moveit::core::RobotState plus(desired), minus(desired);
+                        const auto& variables = arm_groups[arm]->getVariableNames();
+                        for (std::size_t j = 0; j < variables.size(); ++j) {
+                            const double q = desired.getVariablePosition(variables[j]);
+                            plus.setVariablePosition(variables[j], q + epsilon * qdot_by_arm[arm][static_cast<Eigen::Index>(j)]);
+                            minus.setVariablePosition(variables[j], q - epsilon * qdot_by_arm[arm][static_cast<Eigen::Index>(j)]);
+                        }
+                        plus.update();
+                        minus.update();
+                        const Transform plus_pose = plus.getGlobalLinkTransform(links[arm]);
+                        const Transform minus_pose = minus.getGlobalLinkTransform(links[arm]);
+                        const Eigen::Vector3d fd_linear =
+                            (plus_pose.translation() - minus_pose.translation()) / (2.0 * epsilon);
+                        const Eigen::AngleAxisd fd_rotation(plus_pose.linear() * minus_pose.linear().transpose());
+                        const Eigen::Vector3d fd_angular =
+                            fd_rotation.axis() * fd_rotation.angle() / (2.0 * epsilon);
+                        const double linear_error = (fd_linear - planned_twist[arm].head<3>()).norm();
+                        const double angular_error = (fd_angular - planned_twist[arm].tail<3>()).norm();
+                        RCLCPP_INFO(ctx_->get_logger(),
+                            "[ABCD_JACOBIAN_CHECK] arm=%s frame=MoveIt_model_to_link0 "
+                            "qdot_joint_name_mapped=1 linear_fd_error=%.9g angular_fd_error=%.9g",
+                            arm == 0 ? "left" : "right", linear_error, angular_error);
+                        if (linear_error > 1e-3 || angular_error > 1e-3) {
+                            detail = "E_ABCD_MMC_JACOBIAN_FRAME_OR_MAPPING";
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
+
+            // Each planned hand independently implies an object pose through
+            // the grasp transform fixed at contact. Average those two object
+            // poses in SE(3), then regenerate both hand targets from that one
+            // object reference so the arms never follow inconsistent rods.
+            const std::array<Transform, 2> object_estimate{{
+                desired_hand[0] * cooperative_grasp[0].inverse(),
+                desired_hand[1] * cooperative_grasp[1].inverse()}};
+            Transform object_reference = Transform::Identity();
+            object_reference.translation() = 0.5 *
+                (object_estimate[0].translation() + object_estimate[1].translation());
+            Eigen::Quaterniond object_q0(object_estimate[0].linear());
+            Eigen::Quaterniond object_q1(object_estimate[1].linear());
+            if (object_q0.coeffs().dot(object_q1.coeffs()) < 0.0) object_q1.coeffs() *= -1.0;
+            object_reference.linear() = object_q0.slerp(0.5, object_q1).normalized().toRotationMatrix();
+            Eigen::Vector3d object_angular_reference = Eigen::Vector3d::Zero();
+            for (const auto& twist : planned_twist) object_angular_reference += 0.5 * twist.tail<3>();
+            Eigen::Vector3d object_linear_reference = Eigen::Vector3d::Zero();
+            for (int arm = 0; arm < 2; ++arm) {
+                const Eigen::Vector3d arm_object_position = object_estimate[arm].translation();
+                object_linear_reference += 0.5 * (planned_twist[arm].head<3>() -
+                    planned_twist[arm].tail<3>().cross(desired_hand[arm].translation() - arm_object_position));
+            }
+
+            moveit::core::RobotState measured_state(live_model);
+            if (!measured(measured_state)) return false;
+            const Transform actual_object = rodTransform(latest);
+            const Eigen::Vector3d position_error = object_reference.translation() - actual_object.translation();
+            const Eigen::Vector3d rotation_error = dual_arm_carry_task::rotationVector(
+                object_reference.linear() * actual_object.linear().transpose());
+            CooperativeWrench object_wrench;
+            object_wrench.head<3>() = object_translation_stiffness * position_error + object_translation_damping *
+                (object_linear_reference - Eigen::Vector3d(latest.linear_velocity.x,
+                    latest.linear_velocity.y, latest.linear_velocity.z));
+            object_wrench.tail<3>() = object_rotation_stiffness * rotation_error + object_rotation_damping *
+                (object_angular_reference - Eigen::Vector3d(latest.angular_velocity.x,
+                    latest.angular_velocity.y, latest.angular_velocity.z));
+            std::array<Eigen::Vector3d, 2> actual_hand_positions{{
+                measured_state.getGlobalLinkTransform(links[0]).translation(),
+                measured_state.getGlobalLinkTransform(links[1]).translation()}};
+            const auto common_wrenches = dual_arm_carry_task::distributeObjectWrench(
+                object_wrench, actual_object.translation(), actual_hand_positions);
+
+            const Eigen::Vector3d expected_separation_object =
+                cooperative_grasp[1].translation() - cooperative_grasp[0].translation();
+            const Eigen::Vector3d relative_position_error =
+                object_reference.linear() * expected_separation_object -
+                (actual_hand_positions[1] - actual_hand_positions[0]);
+            const Eigen::Matrix3d expected_relative_rotation =
+                cooperative_grasp[0].linear().transpose() * cooperative_grasp[1].linear();
+            const auto actual_left = measured_state.getGlobalLinkTransform(links[0]);
+            const auto actual_right = measured_state.getGlobalLinkTransform(links[1]);
+            const Eigen::Matrix3d actual_relative_rotation =
+                actual_left.linear().transpose() * actual_right.linear();
+            const Eigen::Vector3d relative_rotation_error = actual_left.linear() *
+                dual_arm_carry_task::rotationVector(
+                    expected_relative_rotation * actual_relative_rotation.transpose());
+            const auto relative_now = std::chrono::steady_clock::now();
+            Eigen::Vector3d relative_position_rate = Eigen::Vector3d::Zero();
+            Eigen::Vector3d relative_rotation_rate = Eigen::Vector3d::Zero();
+            if (have_relative_sample) {
+                const double dt = std::chrono::duration<double>(relative_now - previous_relative_sample).count();
+                if (dt > 0.0) {
+                    relative_position_rate = (relative_position_error - previous_relative_position_error) / dt;
+                    relative_rotation_rate = (relative_rotation_error - previous_relative_rotation_error) / dt;
+                }
+            }
+            previous_relative_position_error = relative_position_error;
+            previous_relative_rotation_error = relative_rotation_error;
+            previous_relative_sample = relative_now;
+            have_relative_sample = true;
+            const Eigen::Vector3d force_on_right = relative_translation_stiffness * relative_position_error +
+                relative_translation_damping * relative_position_rate;
+            const Eigen::Vector3d torque_on_right = relative_rotation_stiffness * relative_rotation_error +
+                relative_rotation_damping * relative_rotation_rate;
+            RCLCPP_INFO_THROTTLE(ctx_->get_logger(), *ctx_->get_clock(), 1000,
+                "[ABCD_COOPERATIVE_ERRORS] method_version=cooperative_object_relative_v2 "
+                "object_pos_error_mm=%.3f object_angle_error_deg=%.4f "
+                "relative_pos_error_mm=%.3f relative_angle_error_deg=%.4f truth_age_sec=%.6f",
+                position_error.norm() * 1000.0, rotation_error.norm() * 180.0 / M_PI,
+                relative_position_error.norm() * 1000.0,
+                relative_rotation_error.norm() * 180.0 / M_PI, truth_guard.sampleAge(relative_now));
+            const auto relative_wrenches = dual_arm_carry_task::internalRelativeWrench(
+                force_on_right, torque_on_right, actual_object.translation(), actual_hand_positions);
+
+            auto writeWrench = [](const CooperativeWrench& world_wrench,
+                                  const Transform& base_pose, geometry_msgs::msg::Wrench& target) {
+                const CooperativeWrench local = dual_arm_carry_task::rotateWrench(world_wrench, base_pose.linear());
+                target.force.x = local[0]; target.force.y = local[1]; target.force.z = local[2];
+                target.torque.x = local[3]; target.torque.y = local[4]; target.torque.z = local[5];
+            };
+            goal.use_cooperative_wrench = true;
+            for (int arm = 0; arm < 2; ++arm) {
+                const Transform target_hand = object_reference * cooperative_grasp[arm];
+                const Transform target_local = desired_base[arm].inverse() * target_hand;
+                if (arm == 0) goal.l_pose = poseMsg(target_local);
+                else goal.r_pose = poseMsg(target_local);
+                const Eigen::Vector3d target_linear = object_linear_reference +
+                    object_angular_reference.cross(target_hand.translation() - object_reference.translation());
+                const Eigen::Vector3d local_linear = desired_base[arm].linear().transpose() * target_linear;
+                const Eigen::Vector3d local_angular = desired_base[arm].linear().transpose() * object_angular_reference;
+                auto& twist = arm == 0 ? goal.l_twist : goal.r_twist;
+                twist.linear.x = local_linear.x(); twist.linear.y = local_linear.y(); twist.linear.z = local_linear.z();
+                twist.angular.x = local_angular.x(); twist.angular.y = local_angular.y(); twist.angular.z = local_angular.z();
+                auto& q_null = arm == 0 ? goal.l_q_n : goal.r_q_n;
+                for (std::size_t j = 0; j < 7; ++j) {
+                    const auto it = std::find(jt.joint_names.begin(), jt.joint_names.end(),
+                                              prefixes[arm] + std::to_string(j + 1));
+                    if (it == jt.joint_names.end()) { detail = "E_ABCD_MMC_NULLSPACE_JOINT"; return false; }
+                    q_null[j] = sample.q[std::distance(jt.joint_names.begin(), it)];
+                }
+                CooperativeWrench total_wrench = common_wrenches[arm] + relative_wrenches[arm];
+                auto& message_wrench = arm == 0 ? goal.l_cooperative_wrench : goal.r_cooperative_wrench;
+                writeWrench(total_wrench, desired_base[arm], message_wrench);
+                if (verify_jacobian && qdot_by_arm[arm].norm() <= 1e-6) {
+                    detail = std::string("E_ABCD_MMC_JACOBIAN_CHECK_ZERO_QDOT arm=") +
+                        (arm == 0 ? "left" : "right");
+                    return false;
+                }
+                if (verify_jacobian) {
+                    constexpr double epsilon = 1e-4;
+                    moveit::core::RobotState plus(desired), minus(desired);
+                    const auto& variables = arm_groups[arm]->getVariableNames();
+                    for (std::size_t j = 0; j < variables.size(); ++j) {
+                        const double q = desired.getVariablePosition(variables[j]);
+                        plus.setVariablePosition(variables[j], q + epsilon * qdot_by_arm[arm][static_cast<Eigen::Index>(j)]);
+                        minus.setVariablePosition(variables[j], q - epsilon * qdot_by_arm[arm][static_cast<Eigen::Index>(j)]);
+                    }
+                    plus.update(); minus.update();
+                    const Transform plus_pose = plus.getGlobalLinkTransform(links[arm]);
+                    const Transform minus_pose = minus.getGlobalLinkTransform(links[arm]);
+                    const Eigen::Vector3d fd_linear = (plus_pose.translation() - minus_pose.translation()) / (2.0 * epsilon);
+                    const Eigen::AngleAxisd fd_rotation(plus_pose.linear() * minus_pose.linear().transpose());
+                    const Eigen::Vector3d fd_angular = fd_rotation.axis() * fd_rotation.angle() / (2.0 * epsilon);
+                    const double linear_error = (fd_linear - planned_twist[arm].head<3>()).norm();
+                    const double angular_error = (fd_angular - planned_twist[arm].tail<3>()).norm();
+                    RCLCPP_INFO(ctx_->get_logger(),
+                        "[ABCD_JACOBIAN_CHECK] arm=%s frame=MoveIt_model_to_link0 qdot_joint_name_mapped=1 "
+                        "linear_fd_error=%.9g angular_fd_error=%.9g",
+                        arm == 0 ? "left" : "right", linear_error, angular_error);
+                    if (linear_error > 1e-3 || angular_error > 1e-3) {
+                        detail = "E_ABCD_MMC_JACOBIAN_FRAME_OR_MAPPING";
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+        const double duration = points.back().time - points.front().time;
+        if (!abcd_jacobian_conversion_verified) {
+            tpo::TrajectoryPoint verification_sample;
+            std::string interpolation_error;
+            if (!tpo::interpolateQuintic(points, points.front().time + 0.5 * duration,
+                                         verification_sample, interpolation_error)) {
+                detail = "E_ABCD_MMC_JACOBIAN_CHECK_INTERPOLATION: " + interpolation_error;
+                return false;
+            }
+            MmcGoal verification_goal;
+            if (!makeGoal(verification_sample, true, verification_goal)) return false;
+            abcd_jacobian_conversion_verified = true;
+        }
+        if (!abcd_bridge_started) {
+            abcd_reference_publisher = ctx_->create_publisher<MmcGoal>(
+                "/mj_left_and_mj_right/dual_cartesian_impedance_controller/desired_pose", rclcpp::QoS(10));
+            abcd_reference_stream = std::make_shared<AbcdMmcReferenceStream>();
+            tpo::TrajectoryPoint initial_sample;
+            initial_sample.time = points.front().time;
+            initial_sample.q.resize(static_cast<Eigen::Index>(jt.joint_names.size()));
+            initial_sample.v = Eigen::VectorXd::Zero(initial_sample.q.size());
+            initial_sample.a = Eigen::VectorXd::Zero(initial_sample.q.size());
+            for (std::size_t j = 0; j < jt.joint_names.size(); ++j)
+                initial_sample.q[static_cast<Eigen::Index>(j)] = dispatch.getVariablePosition(jt.joint_names[j]);
+            MmcGoal initial_goal;
+            if (!makeGoal(initial_sample, false, initial_goal)) return false;
+            {
+                std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+                abcd_reference_stream->goal = initial_goal;
+                abcd_reference_stream->running = true;
+            }
+            const auto stream = abcd_reference_stream;
+            const auto publisher = abcd_reference_publisher;
+            const auto node = ctx_;
+            abcd_reference_timer = ctx_->create_wall_timer(10ms, [stream, publisher, node]() {
+                std::lock_guard<std::mutex> lock(stream->mutex);
+                if (!stream->running) return;
+                MmcGoal goal = stream->goal;
+                if (stream->mmc_active && !stream->failure_stop) {
+                    const double elapsed = std::max(0.0,
+                        node->get_clock()->now().seconds() - stream->payload_start_sim);
+                    const double force = 0.64 * 9.81 * 0.5 * std::min(1.0, elapsed / 0.5);
+                    goal.l_ff_force.z = force;
+                    goal.r_ff_force.z = force;
+                }
+                const auto now = std::chrono::steady_clock::now();
+                if (stream->last_publish != std::chrono::steady_clock::time_point{})
+                    stream->max_publish_interval_sec = std::max(stream->max_publish_interval_sec,
+                        std::chrono::duration<double>(now - stream->last_publish).count());
+                stream->last_publish = now;
+                ++stream->publications;
+                publisher->publish(goal);
+            });
+        }
+        if (!abcd_bridge_started) {
+            const std::string binary = ament_index_cpp::get_package_prefix("dual_arm_carry_task") +
+                "/lib/dual_arm_carry_task/dual_impedance_no_load_bridge";
+            abcd_gate_path = "experiment_results/a1_runs/" + run_id + "/abcd_mmc_start.gate";
+            abcd_complete_path = abcd_gate_path + ".complete";
+            std::string spawn_error;
+            const std::vector<std::string> args{
+                "--ros-args", "-p", "use_sim_time:=true", "-p", "external_reference_mode:=true",
+                "-p", "hold_only:=true", "-p", "payload_feedforward_enabled:=true", "-p",
+                "payload_mass_kg:=0.64", "-p", "feedforward_ramp_seconds:=0.5", "-p",
+                "control_variant:=fixed", "-p", "rotational_stiffness:=40.0", "-p",
+                "wall_timeout_seconds:=120.0", "-p",
+                "robot_states_service:=/dual_arm_carry_task/current_robot_states", "-p",
+                "start_gate_file:=" + abcd_gate_path, "-p", "completion_gate_file:=" + abcd_complete_path,
+                "-p", "start_gate_timeout_seconds:=30.0"};
+            if (!abcd_bridge.start(binary, args, spawn_error)) {
+                detail = "E_ABCD_MMC_BRIDGE_START: " + spawn_error;
+                return false;
+            }
+            abcd_bridge_started = true;
+            const auto ready_deadline = std::chrono::steady_clock::now() + 8s;
+            while (rclcpp::ok() && std::chrono::steady_clock::now() < ready_deadline &&
+                   !std::ifstream(abcd_gate_path + ".ready").good()) {
+                const int status = abcd_bridge.poll();
+                if (status != -1) { detail = "E_ABCD_MMC_BRIDGE_PREFLIGHT status=" + std::to_string(status); return false; }
+                std::this_thread::sleep_for(20ms);
+            }
+            if (!std::ifstream(abcd_gate_path + ".ready").good()) {
+                detail = "E_ABCD_MMC_BRIDGE_PREFLIGHT_TIMEOUT";
+                return false;
+            }
+            // Keep the task-owned hold publisher alive while refreshing. Do
+            // this immediately before activation so bridge startup cannot age
+            // the sample into a stale first MMC observation.
+            if (!refreshTruthBeforeLift()) return false;
+            abcd_activation_requested = true;
+            std::ofstream gate(abcd_gate_path, std::ios::out | std::ios::trunc);
+            gate << "contact_confirmed\n";
+            gate.flush();
+            if (!gate) { detail = "E_ABCD_MMC_START_GATE_WRITE"; return false; }
+            const auto active_deadline = std::chrono::steady_clock::now() + 10s;
+            while (rclcpp::ok() && std::chrono::steady_clock::now() < active_deadline &&
+                   !std::ifstream(abcd_gate_path + ".active").good()) {
+                const int status = abcd_bridge.poll();
+                if (status != -1) { detail = "E_ABCD_MMC_ACTIVATION status=" + std::to_string(status); return false; }
+                std::this_thread::sleep_for(10ms);
+            }
+            if (!std::ifstream(abcd_gate_path + ".active").good()) {
+                detail = "E_ABCD_MMC_ACTIVATION_TIMEOUT";
+                return false;
+            }
+            {
+                std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+                abcd_reference_stream->mmc_active = true;
+                abcd_reference_stream->payload_start_sim = ctx_->get_clock()->now().seconds();
+            }
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[ABCD_MMC_ACTIVE] group=%s phase=%s method_version=independent_cartesian_v1 "
+                "reference=per_arm_FK_Jacobian truth_source=%s feedback=asynchronous_MuJoCo_BodyState "
+                "age_sec=%.6f Kdiag=(400,400,400,40,40,40) damping_ratio=0.8 nullspace=10 "
+                "payload_kg=0.64 ramp_sec=0.5; cooperative_wrench=off; JTC inactive",
+                ctx_->contact_abcd_group_.c_str(), phase, truth_service.c_str(), last_truth_age);
+        } else if (!refreshTruthBeforeLift()) {
+            // Between MMC segments the timer continues sending the previous
+            // endpoint with zero twist while this bounded refresh completes.
+            return false;
+        }
+        const auto began = std::chrono::steady_clock::now();
+        const double phase_start_sim = ctx_->get_clock()->now().seconds();
+        while (rclcpp::ok()) {
+            const double phase_elapsed_sim = ctx_->get_clock()->now().seconds() - phase_start_sim;
+            const double t = std::clamp(phase_elapsed_sim, 0.0, duration);
+            if (abcd_bridge.poll() != -1) {
+                detail = "E_ABCD_MMC_BRIDGE_EXIT references_stopped=true; controller_state_unconfirmed";
+                RCLCPP_ERROR(ctx_->get_logger(),
+                    "[ABCD_MMC_ABORT] phase=%s no further Cartesian references; bridge exited and controller state is unconfirmed",
+                    phase);
+                return false;
+            }
+            tpo::TrajectoryPoint sample;
+            std::string interp_error;
+            if (!tpo::interpolateQuintic(points, points.front().time + std::min(t, duration), sample, interp_error)) {
+                detail = "E_ABCD_MMC_INTERPOLATION: " + interp_error;
+                return false;
+            }
+            MmcGoal goal;
+            if (!makeGoal(sample, false, goal)) return false;
+            if (t >= duration) {
+                goal.l_twist = geometry_msgs::msg::Twist();
+                goal.r_twist = geometry_msgs::msg::Twist();
+            }
+            {
+                std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+                abcd_reference_stream->goal = std::move(goal);
+            }
+            if (!observe(phase, false)) return false;
+            if (t >= duration) break;
+            std::this_thread::sleep_until(std::chrono::steady_clock::now() +
+                std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double>(0.01)));
+            if (std::chrono::steady_clock::now() - began > std::chrono::seconds(90)) {
+                detail = "E_ABCD_MMC_PHASE_TIMEOUT";
+                return false;
+            }
+        }
+        if (!rclcpp::ok()) { detail = "E_ABCD_MMC_SHUTDOWN"; return false; }
+        {
+            std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+            abcd_reference_stream->goal.l_twist = geometry_msgs::msg::Twist();
+            abcd_reference_stream->goal.r_twist = geometry_msgs::msg::Twist();
+        }
+        double max_publish_interval = 0.0;
+        std::uint64_t publication_count = 0;
+        {
+            std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+            max_publish_interval = abcd_reference_stream->max_publish_interval_sec;
+            publication_count = abcd_reference_stream->publications;
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+                    "[ABCD_MMC_PHASE_COMPLETE] group=%s phase=%s duration=%.3f nominal_rate_hz=100 "
+                    "max_publish_interval_sec=%.6f cumulative_publications=%llu",
+                    ctx_->contact_abcd_group_.c_str(), phase, duration, max_publish_interval,
+                    static_cast<unsigned long long>(publication_count));
+        return true;
+    };
+    auto holdAbcdMmcAtMeasuredState = [&](const moveit::core::RobotState& state,
+                                         const char* phase) {
+        if (!abcd_mmc) return true;
+        if (!abcd_reference_stream) {
+            detail = "E_ABCD_MMC_HOLD_REFERENCE_UNAVAILABLE";
+            return false;
+        }
+        MmcGoal goal;
+        goal.use_cooperative_wrench = false;
+        const std::array<std::string, 2> bases{{"mj_left_link0", "mj_right_link0"}};
+        const std::array<std::string, 2> prefixes{{"mj_left_joint", "mj_right_joint"}};
+        for (int arm = 0; arm < 2; ++arm) {
+            const Transform local = state.getGlobalLinkTransform(bases[arm]).inverse() *
+                                    state.getGlobalLinkTransform(eefs[arm]);
+            if (arm == 0) goal.l_pose = poseMsg(local);
+            else goal.r_pose = poseMsg(local);
+            auto& q_n = arm == 0 ? goal.l_q_n : goal.r_q_n;
+            for (std::size_t joint = 0; joint < 7; ++joint)
+                q_n[joint] = state.getVariablePosition(prefixes[arm] + std::to_string(joint + 1));
+        }
+        {
+            std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+            abcd_reference_stream->goal = std::move(goal);
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[ABCD_MMC_STAGE_HOLD] phase=%s source=measured_endpoint method_version=independent_cartesian_v1 "
+            "zero_twist=1 independent_spring=on cooperative_wrench=off payload_feedforward=continuous",
+            phase);
+        return true;
+    };
     auto execute=[&](const moveit::planning_interface::MoveGroupInterface::Plan& plan,const char* phase,
                      double start_tolerance_rad=0.002) {
+        if (abcd_mmc) return executeMmcReference(plan, phase, start_tolerance_rad);
         moveit::core::RobotState dispatch_start(live_model);
         if (!measured(dispatch_start)) return false;
         const auto& joint=plan.trajectory_.joint_trajectory;
@@ -1865,28 +2627,21 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                       hover_lift, "hover_lift", 1.0, 0.6, 0.5))
             return fail(detail);
         if (ctx_->contact_hover_control_mode_ == "mmc_hold") {
-            const std::string binary=ament_index_cpp::get_package_prefix("dual_arm_carry_task")+
-                "/lib/dual_arm_carry_task/dual_impedance_no_load_bridge";
-            std::string spawn_error;
-            dual_arm_carry_task::BridgeProcess preflight;
-            const std::vector<std::string> args{
-                "--ros-args", "-p", "use_sim_time:=true", "-p", "preflight_only:=true",
-                "-p", "state_read_budget_seconds:=3.0", "-p",
-                "robot_states_service:=/dual_arm_carry_task/current_robot_states"};
-            if (!preflight.start(binary,args,spawn_error))
-                return fail("E_MMC_STATE_PREFLIGHT_START: "+spawn_error);
+            // Reuse the armed bridge's state client. It confirms a fresh
+            // pre-lift response and later reads again after the lift.
             const auto deadline=std::chrono::steady_clock::now()+8s;
-            int status=-1;
-            while (rclcpp::ok() && std::chrono::steady_clock::now()<deadline && status==-1) {
-                status=preflight.poll();
-                if (status==-1) std::this_thread::sleep_for(20ms);
+            const std::string ready_path=mmc_gate_path+".ready";
+            while (rclcpp::ok() && std::chrono::steady_clock::now()<deadline &&
+                   !std::ifstream(ready_path).good()) {
+                const int status=mmc_bridge.poll();
+                if (status!=-1)
+                    return fail("E_MMC_BRIDGE_NOT_READY status="+std::to_string(status));
+                std::this_thread::sleep_for(20ms);
             }
-            if (status==-1) {
-                const bool stopped=preflight.stop();
-                return fail(std::string("E_MMC_STATE_PREFLIGHT_TIMEOUT child_stopped=")+(stopped?"true":"false"));
-            }
-            if (!WIFEXITED(status) || WEXITSTATUS(status)!=0)
-                return fail("E_MMC_STATE_PREFLIGHT_REJECTED status="+std::to_string(status));
+            if (!rclcpp::ok() || !std::ifstream(ready_path).good())
+                return fail("E_MMC_BRIDGE_READY_TIMEOUT");
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[MMC_PRE_LIFT_READY] armed bridge state query confirmed; no second bridge process");
         }
         if (!refreshTruthBeforeLift()) return fail(detail);
         if (!observe("PRE_HOVER_LIFT_TRUTH_REFRESH",false)) return fail(detail);
@@ -2120,7 +2875,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         return true;
     }
     if (!execute(lift,"LIFT")) return fail(detail);
-    if (!observe("HOLD",true)) return fail(detail);
+    if (!observe(abcd_mmc ? "LIFT" : "HOLD",true)) return fail(detail);
+    if (!abcd_group) {
     // B: creep hold. The static hold is where the soft friction lets the rod
     // creep and the pad contacts intermittently drop. Plan a slow 4 mm upward
     // creep and execute it while the same hold window is sampled, keeping a
@@ -2198,6 +2954,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     }
     RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_LOAD_VALIDATED] samples=%zu sim_hold=%.3fs lift=%.3fm max_slip=%.3fmm max_angle=%.3fdeg duty=(%.2f,%.2f,%.2f,%.2f) creep=%s weld_left=false weld_right=false rod_constraint=false",
         samples,std::min(fingers[0].simulation_time,fingers[1].simulation_time)-hold_start,latest.position.z-initial_truth.position.z,max_slip*1000,max_angle*180/M_PI,duty[0],duty[1],duty[2],duty[3],creep_started?"on":"off");
+    }
     // The load was validated with the frozen grasp reference (max_slip logged
     // above). Under load the two hands' inferred rod poses can drift apart; the
     // descent plan then fails E_CONTACT_DUAL_GRASP_RESIDUAL. Re-establish the
@@ -2213,8 +2970,35 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     RCLCPP_INFO(ctx_->get_logger(),
         "[CONTACT_PROBE_REFREEZE] descent reference re-established from measured state; "
         "lift/hold max_slip already logged=%.3f mm", max_slip*1000);
+    // Keep the JTC transport planner and the time-profile optimizer anchored
+    // to a settled measured state, using the same bounded settling rule as the
+    // post-transport lower planning path below.
+    if (!abcd_mmc) {
+        moveit::core::RobotState settle_prev(live_model);
+        if (!measured(settle_prev)) return fail(detail);
+        std::vector<double> prev_q,cur_q;
+        settle_prev.copyJointGroupPositions(dual,prev_q);
+        const double settle_start=steadySeconds();
+        bool settled=false;
+        while (steadySeconds()-settle_start<2.0) {
+            std::this_thread::sleep_for(100ms);
+            moveit::core::RobotState settle_cur(live_model);
+            if (!measured(settle_cur)) return fail(detail);
+            settle_cur.copyJointGroupPositions(dual,cur_q);
+            double max_delta=0.0;
+            for (std::size_t i=0;i<cur_q.size();++i)
+                max_delta=std::max(max_delta,std::abs(cur_q[i]-prev_q[i]));
+            if (max_delta<0.0005) { settled=true; break; }
+            prev_q=cur_q;
+        }
+        if (!settled) return fail("E_CONTACT_PRE_TRANSPORT_SETTLE");
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[CONTACT_POST_LIFT_SETTLE] controller=JTC stable_delta_rad_lt=0.0005 "
+            "sample_period_sec=0.1");
+    }
     moveit::core::RobotState lifted(live_model);
     if (!measured(lifted)) return fail(detail);
+    if (!holdAbcdMmcAtMeasuredState(lifted, "TRANSPORT_PLAN")) return fail(detail);
     // Forward transport in the fixed scene with the held yaw: move the rod to
     // the task target x while the real contact grip carries it. y and z are
     // kept; the slip monitor and the 45 mm height check run during this phase.
@@ -2227,7 +3011,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         ctx_->rod_target_y_ - held_object.translation().y(), 0.0);
     if (!std::isfinite(transport_delta.x()) || !std::isfinite(transport_delta.y()) ||
         !std::isfinite(transport_dyaw) || transport_delta.norm() < 0.001 ||
-        transport_delta.norm() > 0.20 || std::abs(transport_dyaw) > 0.6) {
+        transport_delta.norm() > ctx_->contact_transport_max_distance_m_ + 1e-6 || std::abs(transport_dyaw) > 0.6) {
         detail="E_CONTACT_TRANSPORT_DELTA"; return fail(detail);
     }
     RCLCPP_INFO(ctx_->get_logger(),
@@ -2249,6 +3033,9 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     const double transport_plan_start=steadySeconds();
     if (!makePlan(lifted, transport_delta, transport, "transport", 1.0, 0.3, transport_stretch, transport_dyaw)) return fail(detail);
     const double transport_plan_sec=steadySeconds()-transport_plan_start;
+    const std::string abcd_run_dir="experiment_results/a1_runs/"+run_id+"/";
+    if (abcd_group && !writeTrajectoryCsv(abcd_run_dir+"abcd_transport_baseline.csv",transport))
+        return fail("E_ABCD_BASELINE_TRAJECTORY_WRITE");
     // S2 extended-scenario execution pairing. When enabled, BOTH trajectories
     // are built from THIS run's measured transport start and saved; only the
     // requested one is dispatched. The baseline keeps the production planning
@@ -2256,7 +3043,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     // before it can be sent.
     const char* pairing_raw=std::getenv("CONTACT_TRANSPORT_PAIRING");
     const std::string pairing_choice=pairing_raw?pairing_raw:"0";
-    const bool pairing_enabled=!pairing_choice.empty() && pairing_choice!="0";
+    const bool pairing_enabled=!abcd_mmc && !pairing_choice.empty() && pairing_choice!="0";
     if (pairing_enabled) {
         // The pairing build/evaluation is a bounded planning phase outside the
         // monitoring loop. Discard the outstanding truth request instead of
@@ -2396,6 +3183,49 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             RCLCPP_INFO(ctx_->get_logger(),
                 "[TRANSPORT_PAIRING] dispatching the production baseline trajectory from the measured start");
         }
+    }
+    if (ctx_->contact_abcd_group_ == "B" || ctx_->contact_abcd_group_ == "D") {
+        if (!refreshTruthBeforeLift("before_transport_time_profile"))
+            return fail(detail.empty()?"E_CONTACT_TRUTH_BEFORE_TIME_PROFILE":detail);
+        TimeProfileCandidateInfo selected_time_profile;
+        if (!buildTimeProfileCandidate(transport, selected_time_profile) || !selected_time_profile.ok)
+            return fail("E_ABCD_TIME_PROFILE: " + selected_time_profile.detail);
+        transport = selected_time_profile.plan;
+        if (!writeTrajectoryCsv(abcd_run_dir+"abcd_transport_optimized.csv", transport))
+            return fail("E_ABCD_OPTIMIZED_TRAJECTORY_WRITE");
+        {
+            std::ofstream metrics(abcd_run_dir+"abcd_transport_time_profile.csv");
+            if (!metrics) return fail("E_ABCD_TIME_PROFILE_METRICS_OPEN");
+            metrics<<std::setprecision(12)
+                <<"plan,duration_s,solve_sec,continuous_jerk_rms,continuous_jerk_max,"
+                  "exported_jerk_rms,exported_jerk_max,max_export_deviation_rad,evaluations,parameters\n"
+                <<"baseline,"<<selected_time_profile.duration<<",0,"
+                <<selected_time_profile.baseline_continuous.jerk_rms<<','
+                <<selected_time_profile.baseline_continuous.jerk_max<<','
+                <<selected_time_profile.baseline_exported.jerk_rms<<','
+                <<selected_time_profile.baseline_exported.jerk_max<<",0,0,0\n"
+                <<"candidate,"<<selected_time_profile.duration<<','<<selected_time_profile.solve_sec<<','
+                <<selected_time_profile.candidate_continuous.jerk_rms<<','
+                <<selected_time_profile.candidate_continuous.jerk_max<<','
+                <<selected_time_profile.candidate_exported.jerk_rms<<','
+                <<selected_time_profile.candidate_exported.jerk_max<<','
+                <<selected_time_profile.max_export_deviation_rad<<','
+                <<selected_time_profile.evaluations<<','<<selected_time_profile.parameters<<'\n';
+            metrics.flush();
+            if (!metrics) return fail("E_ABCD_TIME_PROFILE_METRICS_WRITE");
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[ABCD_TRAJECTORY] group=%s source=fixed_geometry_time_profile duration=%.6f "
+            "continuous_jerk_rms=%.6f->%.6f exported_jerk_rms=%.6f->%.6f "
+            "max_export_deviation_rad=%.9f solve_sec=%.6f; baseline and candidate q/t/v/a saved",
+            ctx_->contact_abcd_group_.c_str(), selected_time_profile.duration,
+            selected_time_profile.baseline_continuous.jerk_rms,
+            selected_time_profile.candidate_continuous.jerk_rms,
+            selected_time_profile.baseline_exported.jerk_rms,
+            selected_time_profile.candidate_exported.jerk_rms,
+            selected_time_profile.max_export_deviation_rad,selected_time_profile.solve_sec);
+        if (!refreshTruthBeforeLift("after_transport_time_profile"))
+            return fail(detail.empty()?"E_CONTACT_TRUTH_AFTER_TIME_PROFILE":detail);
     }
     if (plan_compare) {
         // P4/S2 phase 1: compare the current object-space transport plan (A)
@@ -2649,23 +3479,116 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             "[PLAN_COMPARE] phase 2: executing the CHOMP transport from the same start state");
         transport=chomp_plan;
     }
-    // The pairing builds/evaluates both trajectories before dispatch. Under the
-    // contact hold the arms drift a few mrad during that bounded delay, which
-    // the normal 2 mrad guard was never intended to cover. Only this transport
-    // dispatch is allowed a 10 mrad start consistency bound; the trajectory,
-    // drop/slip/height protections and every later dispatch keep the default.
-    const double transport_dispatch_tol = pairing_enabled ? 0.010 : 0.002;
-    if (pairing_enabled)
+    // Planning runs while MMC keeps the measured endpoint under contact load.
+    // The time-profile solve can take several seconds; one measured D run
+    // drifted by 10.87 mrad / 6.05 mm before dispatch. Keep the existing
+    // collision/grasp checks on that start connection and allow 12 mrad here.
+    // Physical slip, attitude, collision and trajectory checks remain unchanged.
+    const double transport_dispatch_tol = (pairing_enabled || abcd_mmc) ? 0.012 : 0.002;
+    if (pairing_enabled || abcd_mmc)
         RCLCPP_INFO(ctx_->get_logger(),
-            "[CONTACT_DISPATCH_TOLERANCE] phase=TRANSPORT tolerance=%.5f rad reason=pairing_planning_delay "
-            "default=0.002 motion_and_drop_protections_unchanged", transport_dispatch_tol);
-    if (!execute(transport,"TRANSPORT",transport_dispatch_tol)) return fail(detail);
+            "[CONTACT_DISPATCH_TOLERANCE] phase=TRANSPORT tolerance=%.5f rad reason=%s "
+            "default=0.002 motion_and_drop_protections_unchanged", transport_dispatch_tol,
+            abcd_mmc ? "mmc_compliant_hold_during_planning" : "pairing_planning_delay");
+    auto transport_dispatch=transport;
+    double transport_connection_sec=0.0;
+    if (!abcd_mmc) {
+        const auto& original=transport.trajectory_.joint_trajectory;
+        moveit::core::RobotState dispatch(live_model);
+        if (!measured(dispatch)) return fail(detail);
+        double max_delta=0.0;
+        for (std::size_t j=0;j<original.joint_names.size();++j)
+            max_delta=std::max(max_delta,std::abs(dispatch.getVariablePosition(original.joint_names[j])-
+                                                   original.points.front().positions[j]));
+        if (max_delta>0.012) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                "[ABCD_JTC_START_CONNECTION] rejected max_joint_delta_rad=%.9f limit=0.012000",
+                max_delta);
+            return fail("E_ABCD_JTC_START_CONNECTION_TOO_LARGE");
+        }
+        transport_connection_sec=max_delta>1e-6?0.5:0.0;
+        if (transport_connection_sec>0.0) {
+            auto& connected=transport_dispatch.trajectory_.joint_trajectory;
+            const auto& bounds=original.joint_names;
+            std::vector<double> q0,v0,a0,q1,v1,a1;
+            const auto& first=original.points.front();
+            for (std::size_t index=0;index<bounds.size();++index) {
+                const auto& name=bounds[index];
+                q0.push_back(dispatch.getVariablePosition(name));
+                v0.push_back(dispatch.getVariableVelocity(name));
+                a0.push_back(0.0);
+                q1.push_back(first.positions.at(index));
+                v1.push_back(index<first.velocities.size()?first.velocities[index]:0.0);
+                a1.push_back(index<first.accelerations.size()?first.accelerations[index]:0.0);
+            }
+            const double T=transport_connection_sec;
+            const int samples=std::max(2,static_cast<int>(std::ceil(T/0.01)));
+            connected.points.clear();
+            for (int sample=0;sample<=samples;++sample) {
+                const double t=T*static_cast<double>(sample)/samples,u=t/T;
+                trajectory_msgs::msg::JointTrajectoryPoint point;
+                point.positions.resize(q0.size()); point.velocities.resize(q0.size());
+                point.accelerations.resize(q0.size());
+                point.time_from_start=rclcpp::Duration::from_seconds(t);
+                for (std::size_t j=0;j<q0.size();++j) {
+                    const double c0=q0[j],c1=v0[j]*T,c2=0.5*a0[j]*T*T;
+                    const double D=q1[j]-c0-c1-c2,V=v1[j]*T-c1-2*c2,A=a1[j]*T*T-2*c2;
+                    const double c3=10*D-4*V+0.5*A,c4=-15*D+7*V-A,c5=6*D-3*V+0.5*A;
+                    point.positions[j]=c0+u*(c1+u*(c2+u*(c3+u*(c4+u*c5))));
+                    point.velocities[j]=(c1+u*(2*c2+u*(3*c3+u*(4*c4+u*5*c5))))/T;
+                    point.accelerations[j]=(2*c2+u*(6*c3+u*(12*c4+u*20*c5)))/(T*T);
+                    const auto& limit=live_model->getVariableBounds(bounds[j]);
+                    if (!std::isfinite(point.positions[j]) || !std::isfinite(point.velocities[j]) ||
+                        !std::isfinite(point.accelerations[j]) ||
+                        point.velocities[j]<limit.min_velocity_-1e-9 || point.velocities[j]>limit.max_velocity_+1e-9 ||
+                        point.accelerations[j]<limit.min_acceleration_-1e-9 ||
+                        point.accelerations[j]>limit.max_acceleration_+1e-9)
+                        return fail("E_ABCD_JTC_START_CONNECTION_LIMIT");
+                }
+                moveit::core::RobotState sample_state(live_model);
+                sample_state.setVariablePositions(bounds,point.positions); applyTransportFingers(sample_state);
+                sample_state.update();
+                if (!valid(sample_state,abcd_group)) return fail("E_ABCD_JTC_START_CONNECTION_INVALID: "+detail);
+                connected.points.push_back(std::move(point));
+            }
+            // Drop the old t=0 sample (the connection endpoint is exactly the
+            // original trajectory start) and preserve every original q/v/a.
+            for (std::size_t i=1;i<original.points.size();++i) {
+                auto point=original.points[i];
+                point.time_from_start=rclcpp::Duration::from_seconds(
+                    rclcpp::Duration(point.time_from_start).seconds()+T);
+                connected.points.push_back(std::move(point));
+            }
+            moveit::core::robotStateToRobotStateMsg(dispatch,transport_dispatch.start_state_);
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[ABCD_JTC_START_CONNECTION] samples=%d duration_sec=%.3f max_joint_delta_rad=%.9f "
+                "quintic_boundary_qva=continuous limits_collision_closed_chain=passed",
+                samples+1,T,max_delta);
+        }
+    }
+    if (abcd_group) {
+        if (!writeTrajectoryCsv(abcd_run_dir+"abcd_transport_dispatch.csv",transport_dispatch))
+            return fail("E_ABCD_DISPATCH_TRAJECTORY_WRITE");
+        if (transport_connection_sec>0.0) {
+            auto connection_plan=transport_dispatch;
+            auto& points=connection_plan.trajectory_.joint_trajectory.points;
+            points.erase(std::remove_if(points.begin(),points.end(),[&](const auto& p) {
+                return rclcpp::Duration(p.time_from_start).seconds()>transport_connection_sec+1e-9;
+            }),points.end());
+            if (!writeTrajectoryCsv(abcd_run_dir+"abcd_transport_start_connection.csv",connection_plan))
+                return fail("E_ABCD_CONNECTION_TRAJECTORY_WRITE");
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[ABCD_DISPATCH_TRAJECTORY] group=%s connection_sec=%.6f main_qtva_preserved=1",
+            ctx_->contact_abcd_group_.c_str(),transport_connection_sec);
+    }
+    if (!execute(transport_dispatch,"TRANSPORT",transport_dispatch_tol)) return fail(detail);
     if (!observe("TRANSPORT", true)) return fail(detail);
     // The 1x transport leaves the arm servos settling after the action returns.
     // Wait for a stable measured joint state before re-freezing and planning the
     // lower; otherwise the measured state can drift >2 mrad between planning and
     // dispatch and execute() rejects the lower with E_CONTACT_DISPATCH_START_MOVED.
-    {
+    if (!abcd_mmc) {
         moveit::core::RobotState settle_prev(live_model);
         if (!measured(settle_prev)) return fail(detail);
         std::vector<double> prev_q,cur_q;
@@ -2687,6 +3610,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     }
     moveit::core::RobotState after_transport(live_model);
     if (!measured(after_transport)) return fail(detail);
+    if (!holdAbcdMmcAtMeasuredState(after_transport, "LOWER_PLAN")) return fail(detail);
     const auto after_truth = readMujocoRodTruth();
     if (!after_truth.ok) return fail("E_CONTACT_TRANSPORT_TRUTH");
     // The lateral move can make the two hands' inferred rod poses drift apart
@@ -2715,13 +3639,134 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         "[CONTACT_PROBE_LOWER] descend=%.3f m (commanded lift=%.3f m, tilt-aware extent=%.3f m); "
         "targeting support at the transported pose", lower_delta, height, extent_after);
     if (!makePlan(after_transport, Eigen::Vector3d(0,0,-lower_delta), lower,"lower",1.0,0.8,0.5)) return fail(detail);
-    if (!execute(lower,"LOWER")) return fail(detail);
+    if (abcd_mmc)
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[CONTACT_DISPATCH_TOLERANCE] phase=LOWER tolerance=0.01200 rad "
+            "reason=mmc_compliant_hold_during_planning default=0.002 motion_and_drop_protections_unchanged");
+    if (!execute(lower,"LOWER",abcd_mmc?0.012:0.002)) return fail(detail);
+    if (abcd_mmc) {
+        const auto settle_started = std::chrono::steady_clock::now();
+        auto logLowerSettleSnapshot = [&](const char* sample) {
+            if (!abcd_reference_stream) {
+                detail = "E_ABCD_MMC_LOWER_SETTLE_REFERENCE_UNAVAILABLE";
+                return false;
+            }
+            moveit::core::RobotState actual(live_model);
+            if (!measured(actual)) return false;
+            MmcGoal reference;
+            {
+                std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+                reference = abcd_reference_stream->goal;
+            }
+            const Transform physical = rodTransform(latest);
+            const double extent = 0.5*(std::abs(physical.linear()(2,0))*truth.size.x+
+                std::abs(physical.linear()(2,1))*truth.size.y+
+                std::abs(physical.linear()(2,2))*truth.size.z);
+            const double bottom_gap_mm = 1000.0 *
+                (latest.position.z - extent - ctx_->p2a_support_z_);
+            const auto left = actual.getGlobalLinkTransform(eefs[0]);
+            const auto right = actual.getGlobalLinkTransform(eefs[1]);
+            const Eigen::Quaterniond left_q(left.linear()), right_q(right.linear());
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[ABCD_MMC_LOWER_SETTLE] sample=%s elapsed_sec=%.3f "
+                "left_target_link0_p=(%.6f,%.6f,%.6f)_q=(%.6f,%.6f,%.6f,%.6f) "
+                "left_actual_world_p=(%.6f,%.6f,%.6f)_q=(%.6f,%.6f,%.6f,%.6f) "
+                "right_target_link0_p=(%.6f,%.6f,%.6f)_q=(%.6f,%.6f,%.6f,%.6f) "
+                "right_actual_world_p=(%.6f,%.6f,%.6f)_q=(%.6f,%.6f,%.6f,%.6f) "
+                "rod_truth_world_p=(%.6f,%.6f,%.6f)_q=(%.6f,%.6f,%.6f,%.6f) bottom_gap_mm=%.3f",
+                sample, std::chrono::duration<double>(std::chrono::steady_clock::now()-settle_started).count(),
+                reference.l_pose.position.x, reference.l_pose.position.y, reference.l_pose.position.z,
+                reference.l_pose.orientation.x, reference.l_pose.orientation.y,
+                reference.l_pose.orientation.z, reference.l_pose.orientation.w,
+                left.translation().x(), left.translation().y(), left.translation().z(),
+                left_q.x(), left_q.y(), left_q.z(), left_q.w(),
+                reference.r_pose.position.x, reference.r_pose.position.y, reference.r_pose.position.z,
+                reference.r_pose.orientation.x, reference.r_pose.orientation.y,
+                reference.r_pose.orientation.z, reference.r_pose.orientation.w,
+                right.translation().x(), right.translation().y(), right.translation().z(),
+                right_q.x(), right_q.y(), right_q.z(), right_q.w(),
+                latest.position.x, latest.position.y, latest.position.z,
+                latest.orientation.x, latest.orientation.y, latest.orientation.z, latest.orientation.w,
+                bottom_gap_mm);
+            return true;
+        };
+
+        // execute() leaves the final Cartesian endpoint and zero twist in the
+        // single reference stream. Keep it there, with the existing continuous
+        // payload feedforward, while the normal observation path enforces the
+        // same contact, slip, and truth-freshness checks; bridge health polling
+        // and controller torque protections remain active independently.
+        // Stop waiting as soon as the original support window is reached, with
+        // one 2 s cap for the entire endpoint settle (including the initial check).
+        if (!observe("LOWER_SETTLE", false) || !logLowerSettleSnapshot("before"))
+            return fail(detail);
+        auto support_gap_mm = [&]() {
+            const Transform current_rod = rodTransform(latest);
+            const double current_extent = 0.5*(std::abs(current_rod.linear()(2,0))*truth.size.x+
+                std::abs(current_rod.linear()(2,1))*truth.size.y+
+                std::abs(current_rod.linear()(2,2))*truth.size.z);
+            return 1000.0*(latest.position.z-current_extent-ctx_->p2a_support_z_);
+        };
+        const auto settle_deadline = settle_started + 2s;
+        bool support_reached = std::chrono::steady_clock::now() <= settle_deadline &&
+                               std::abs(support_gap_mm()) <= 3.0;
+        while (rclcpp::ok() && !support_reached &&
+               std::chrono::steady_clock::now() < settle_deadline) {
+            const auto remaining = settle_deadline - std::chrono::steady_clock::now();
+            std::this_thread::sleep_for(std::min(10ms,
+                std::chrono::duration_cast<std::chrono::milliseconds>(remaining)));
+            if (!rclcpp::ok()) break;
+            if (std::chrono::steady_clock::now() >= settle_deadline) break;
+            if (!observe("LOWER_SETTLE", false)) return fail(detail);
+            support_reached = std::chrono::steady_clock::now() <= settle_deadline &&
+                              std::abs(support_gap_mm()) <= 3.0;
+        }
+        if (!rclcpp::ok()) return fail("E_CONTACT_LOWER_SETTLE_SHUTDOWN");
+        if (!logLowerSettleSnapshot("after")) return fail(detail);
+        if (!support_reached) return fail("E_CONTACT_LOWER_SETTLE_TIMEOUT");
+    }
     const double extent=0.5*(std::abs(rodTransform(latest).linear()(2,0))*truth.size.x+
         std::abs(rodTransform(latest).linear()(2,1))*truth.size.y+std::abs(rodTransform(latest).linear()(2,2))*truth.size.z);
     if (std::abs(latest.position.z-extent-ctx_->p2a_support_z_)>0.003) return fail("E_CONTACT_RELEASE_NOT_ON_SUPPORT");
+    if (abcd_mmc) {
+        std::ofstream complete(abcd_complete_path, std::ios::out | std::ios::trunc);
+        complete << "support_confirmed\n"; complete.flush();
+        if (!complete) return fail("E_ABCD_MMC_COMPLETE_GATE_WRITE");
+        int child_status = -1; bool child_reaped = true;
+        const auto result = dual_arm_carry_task::runProtectedChild(
+            abcd_bridge,
+            [&]() { return rclcpp::ok() && observe("MMC_SUPPORT_SWITCHBACK", false); },
+            [&]() { return abcd_bridge.poll() != -1; },
+            [](int status) { return WIFEXITED(status) && WEXITSTATUS(status) == 0; },
+            25s, child_status, child_reaped);
+        if (result != dual_arm_carry_task::ProtectedChildResult::COMPLETED)
+            return fail("E_ABCD_MMC_SWITCHBACK status=" + std::to_string(child_status));
+        {
+            std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+            abcd_reference_stream->running = false;
+        }
+        if (abcd_reference_timer) abcd_reference_timer->cancel();
+        abcd_activation_requested = false;
+        RCLCPP_INFO(ctx_->get_logger(), "[ABCD_MMC_SWITCHBACK] result=confirmed JTC=active MMC=inactive");
+    }
     if (!ctx_->grippers_->controlDualGrippers(0.04)) return fail("E_CONTACT_RELEASE_OPEN_FAILED");
     force_hold_may_be_active=false;
-    std::this_thread::sleep_for(500ms);
+    if (abcd_mmc) {
+        if (!feedback()) return fail(detail);
+        const double release_measurement_start = std::min(fingers[0].simulation_time, fingers[1].simulation_time);
+        const double wait_deadline = steadySeconds() + 10.0;
+        while (rclcpp::ok() && steadySeconds() < wait_deadline &&
+               std::min(fingers[0].simulation_time, fingers[1].simulation_time) - release_measurement_start < 2.0) {
+            if (!feedback()) return fail(detail);
+            std::this_thread::sleep_for(50ms);
+        }
+        if (std::min(fingers[0].simulation_time, fingers[1].simulation_time) - release_measurement_start < 2.0)
+            return fail("E_ABCD_RELEASE_MEASUREMENT_WAIT_TIMEOUT");
+        RCLCPP_INFO(ctx_->get_logger(), "[ABCD_RELEASE_MEASUREMENT] physics_wait_sec=%.3f measurement_only=true",
+                    std::min(fingers[0].simulation_time, fingers[1].simulation_time) - release_measurement_start);
+    } else {
+        std::this_thread::sleep_for(500ms);
+    }
     const auto released=readMujocoRodTruth();
     if (!released.ok || !feedback()) return fail("E_CONTACT_RELEASE_TRUTH_OR_FEEDBACK");
     for (const auto& f:fingers) if (f.hold_force_per_finger_n!=0 || f.q1+f.q2<0.078) return fail("E_CONTACT_RELEASE_FORCE_NOT_CLEARED");
@@ -2745,8 +3790,17 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         moveit::core::RobotState retreat_start(live_model);
         if (!measured(retreat_start)) return fail(detail);
         const Transform released_object=rodTransform(released);
+        rod_released=true;
+        released_rod_pose=released_object;
+        for (const auto& link : {"mj_left_leftfinger", "mj_left_rightfinger",
+                                 "mj_right_leftfinger", "mj_right_rightfinger"})
+            acm.setEntry(a1_verify_.rod_id,link,false);
         for (int i=0;i<2;++i)
             object_to_hand[i]=released_object.inverse()*retreat_start.getGlobalLinkTransform(eefs[i]);
+        for (const auto& name:dual->getVariableNames()) {
+            RCLCPP_INFO(ctx_->get_logger(),"[CONTACT_RETREAT_START] joint=%s q=%.12f",
+                        name.c_str(),retreat_start.getVariablePosition(name));
+        }
         moveit::planning_interface::MoveGroupInterface::Plan retreat;
         if (!makePlan(retreat_start,Eigen::Vector3d(0,0,0.15),retreat,"retreat",1.0,0.4,1.0))
             return fail(detail);

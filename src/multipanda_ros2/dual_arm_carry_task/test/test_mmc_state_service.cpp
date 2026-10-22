@@ -90,6 +90,63 @@ struct JointSampleForCacheTest
   bool stamp_valid{false};
   double position{0.0};
 };
+
+struct LostReplyClient
+{
+  using Request = Service::Request;
+  using SharedResponse = Service::Response::SharedPtr;
+  int calls{0};
+  int removed{0};
+  int reply_on{2};
+  std::vector<std::shared_ptr<std::promise<SharedResponse>>> pending;
+
+  std::shared_future<SharedResponse> async_send_request(Request::SharedPtr)
+  {
+    auto promise = std::make_shared<std::promise<SharedResponse>>();
+    auto future = promise->get_future().share();
+    pending.push_back(promise);
+    if (++calls == reply_on) {
+      auto response = std::make_shared<Service::Response>();
+      response->states = validPair();
+      promise->set_value(response);
+    }
+    return future;
+  }
+
+  void remove_pending_request(const std::shared_future<SharedResponse>&) { ++removed; }
+};
+}
+
+TEST(MmcStateRequest, LostFirstReplyIsRetriedWithinTheOriginalDeadline)
+{
+  LostReplyClient client;
+  std::size_t attempts = 0;
+  const auto response = dual_arm_carry_task::requestServiceUntil(
+      client, std::chrono::steady_clock::now() + 250ms, 5ms,
+      []() { return true; }, attempts);
+  ASSERT_TRUE(response);
+  EXPECT_EQ(response->states.size(), 2u);
+  EXPECT_EQ(attempts, 2u);
+  EXPECT_EQ(client.removed, 1);
+}
+
+TEST(MmcStateRequest, MissingRepliesStopAtTotalDeadlineAndRemovePendingRequests)
+{
+  LostReplyClient client;
+  client.reply_on = -1;
+  std::size_t attempts = 0;
+  const auto began = std::chrono::steady_clock::now();
+  EXPECT_FALSE(dual_arm_carry_task::requestServiceUntil(
+      client, began + 20ms, 5ms, []() { return true; }, attempts));
+  EXPECT_GT(attempts, 0u);
+  EXPECT_EQ(client.removed, static_cast<int>(attempts));
+  EXPECT_LT(std::chrono::steady_clock::now() - began, 200ms);
+
+  const int previous_calls = client.calls;
+  EXPECT_FALSE(dual_arm_carry_task::requestServiceUntil(
+      client, std::chrono::steady_clock::now() - 1ms, 5ms,
+      []() { return true; }, attempts));
+  EXPECT_EQ(client.calls, previous_calls);
 }
 
 TEST_F(MmcStateServiceTest, DelayedServiceAppearsAndExecutorProcessesRequest)
