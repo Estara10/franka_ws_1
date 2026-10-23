@@ -18,12 +18,18 @@ import json
 import math
 import re
 import statistics
+import sys
 from pathlib import Path
 
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scientific_style import NATURE, configure_scientific_style
+
+configure_scientific_style()
 
 SCENARIOS = [
     ('original 0.10 m/+10 deg', 's2s3_plan_orig_20261020'),
@@ -43,9 +49,9 @@ DIR_RUNS = {
     'soft': ['s2s3_dir_soft_01_retry1_20261020', 's2s3_dir_soft_02_20261020',
              's2s3_dir_soft_03_20261020'],
 }
-COLORS = {'baseline': '#4C72B0', 'geometry': '#DD8452', 'time_profile': '#55A868',
-          'off': '#4C72B0', 'on': '#C44E52',
-          'fixed': '#2878B5', 'soft': '#E1812C'}
+COLORS = {'baseline': NATURE['blue'], 'geometry': NATURE['orange'],
+          'time_profile': NATURE['green'], 'off': NATURE['blue'],
+          'on': NATURE['red'], 'fixed': NATURE['blue'], 'soft': NATURE['orange']}
 METHOD_LABEL = {'baseline': 'baseline', 'geometry': 'geometry projection',
                 'time_profile': 'time profile'}
 

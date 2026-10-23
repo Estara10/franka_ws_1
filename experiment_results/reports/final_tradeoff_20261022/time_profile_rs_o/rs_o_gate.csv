@@ -1,0 +1,2 @@
+gate_pass,reason,formal_runs,processed_runs,missing_runs,failed_runs,all_s_rms_scale_ok,all_s_peak_scale_ok,all_s_duration_ok,all_s_endpoints_ok,all_s_scale_ok,all_o_candidates_ok,median_o_vs_s_rms_pct,min_o_vs_s_rms_pct,max_o_vs_s_rms_pct,s_theoretical_ratio,s_rms_ratio_tolerance,s_peak_ratio_tolerance,blocking_runs
+0,median_O_vs_S_above_threshold,12,12,0,0,1,1,1,1,1,1,-4.8636383612629235,-6.931985275685482,-3.5469604368281393,0.5787037037037038,0.01,0.06,median_O_vs_S_above_threshold

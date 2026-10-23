@@ -5,6 +5,7 @@ import csv
 import json
 import math
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -12,11 +13,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scientific_style import GROUP_COLORS, configure_scientific_style
+
+configure_scientific_style()
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "experiment_results/a1_runs"
 OUT = ROOT / "experiment_results/reports/abcd_s0_today_20261022"
 FIG = ROOT / "docs/figures/abcd_s0_today_20261022"
+FINAL_OUT = ROOT / "experiment_results/reports/final_tradeoff_20261022"
+FINAL_FIG = ROOT / "docs/figures/final_tradeoff_20261022"
 FORMAL = [
     ("A", "abcd_s0_today_A1_20261022_210600"),
     ("C", "abcd_s0_today_C1_20261022_210700"),
@@ -35,9 +42,9 @@ VALIDATION = [
     ("B", "abcd_s0_Bconnectionv1_20261022_161500_retryinfra"),
     ("B", "abcd_s0_Bconnectionv2_20261022_211000"),
 ]
-COLORS = {"A": "#4477AA", "B": "#CC6677", "C": "#228833", "D": "#AA3377"}
+COLORS = GROUP_COLORS
 TARGET_XY = (0.40, 0.0)
-SUPPORT_Z = 0.000654
+SUPPORT_Z = 0.0
 ROD_DIMS = (0.04, 0.40, 0.04)
 
 
@@ -103,6 +110,25 @@ def parse_run(group, run_id, formal=True):
             release_xyz = ";".join(f"{v:.6f}" for v in release_center)
             release_yaw = math.degrees(yaw)
 
+    release_wait_target_s = ""
+    release_wait_actual_s = ""
+    release_wait_protocol = ""
+    release_wait_source = ""
+    if released:
+        if group in ("A", "B"):
+            release_wait_target_s = "0.500"
+            release_wait_protocol = "configured_0.5s_wall_clock"
+            release_wait_source = "code_configured_no_runtime_marker"
+        else:
+            wait_match = re.search(
+                r"\[ABCD_RELEASE_MEASUREMENT\] physics_wait_sec=([0-9.]+)", log
+            )
+            if wait_match:
+                release_wait_target_s = "2.000"
+                release_wait_actual_s = wait_match.group(1)
+                release_wait_protocol = "measured_about_2.0s_simulation"
+                release_wait_source = "task_launch_ABCD_RELEASE_MEASUREMENT"
+
     plans = {m.group(1): float(m.group(2)) for m in re.finditer(
         r"\[CONTACT_PLAN_TIMING\] label=(lift|transport|lower|retreat).*?final=([0-9.]+)", log
     )}
@@ -116,10 +142,20 @@ def parse_run(group, run_id, formal=True):
     if group in ("A", "B"):
         # The two pre-grasp/grasp actions precede the four carrying actions.
         phase_actual = dict(zip(("lift", "transport", "lower", "retreat"), action_durations[2:6]))
+        transport_action_wall_s = phase_actual.get("transport", "")
+        transport_reference_playback_s = ""
+        transport_observed_kind = "MoveGroup_action_wall_clock"
+        lower_action_wall_s = phase_actual.get("lower", "")
+        lower_reference_playback_s = ""
     else:
         phase_actual = dict(mmc_phases)
         if action_durations:
             phase_actual["retreat"] = action_durations[-1]
+        transport_action_wall_s = ""
+        transport_reference_playback_s = phase_actual.get("transport", "")
+        transport_observed_kind = "MMC_reference_playback"
+        lower_action_wall_s = ""
+        lower_reference_playback_s = phase_actual.get("lower", "")
 
     stamps_start = re.findall(r"\[INFO\] \[([0-9.]+)\].*?\[CONTACT_PROBE_CONFIG\]", log)
     stamps_end = re.findall(r"\[INFO\] \[([0-9.]+)\].*?\[CONTACT_PROBE_RESULT\]", log)
@@ -142,10 +178,28 @@ def parse_run(group, run_id, formal=True):
     metrics = read_csv(path / "abcd_transport_time_profile.csv")
     baseline = next((r for r in metrics if r.get("plan") == "baseline"), {})
     candidate = next((r for r in metrics if r.get("plan") == "candidate"), {})
+    baseline_cont = baseline.get("continuous_jerk_rms", "")
+    candidate_cont = candidate.get("continuous_jerk_rms", "")
+    baseline_export = baseline.get("exported_jerk_rms", "")
+    candidate_export = candidate.get("exported_jerk_rms", "")
+    continuous_change = (
+        f"{100.0 * (float(candidate_cont) / float(baseline_cont) - 1.0):.6f}"
+        if baseline_cont not in ("", None) and candidate_cont not in ("", None) and float(baseline_cont) != 0.0
+        else ""
+    )
+    exported_change = (
+        f"{100.0 * (float(candidate_export) / float(baseline_export) - 1.0):.6f}"
+        if baseline_export not in ("", None) and candidate_export not in ("", None) and float(baseline_export) != 0.0
+        else ""
+    )
     transport_dispatch = read_csv(path / "abcd_transport_dispatch.csv")
     conn_plan = read_csv(path / "abcd_transport_start_connection.csv")
     baseline_traj = read_csv(path / "abcd_transport_baseline.csv")
     candidate_traj = read_csv(path / "abcd_transport_optimized.csv")
+    if not candidate_traj:
+        # New time-profile runs may explicitly fall back to the baseline and
+        # therefore only write the selected, not the optimized, trajectory.
+        candidate_traj = read_csv(path / "abcd_transport_selected.csv")
     # writeTrajectoryCsv stores one row per joint per timestamp; use the max t.
     def duration(rows):
         return max((float(r["time_from_start"]) for r in rows), default="") if rows else ""
@@ -187,13 +241,26 @@ def parse_run(group, run_id, formal=True):
         "release_yaw_error_deg": f"{yaw_error:.4f}" if yaw_error != "" else "",
         "release_center_z_error_mm": f"{z_error:.4f}" if z_error != "" else "",
         "rod_bottom_gap_mm": f"{gap:.4f}" if gap != "" else "",
+        "release_wait_protocol": release_wait_protocol,
+        "release_wait_target_s": release_wait_target_s,
+        "release_wait_actual_s": release_wait_actual_s,
+        "release_wait_source": release_wait_source,
+        "release_sample_source": "last_A1_readback_before_CONTACT_PROBE_RELEASED",
         "release_after_contact_start_s": f"{release_delay:.3f}" if release_delay != "" else "",
         "lift_plan_s": f"{plans['lift']:.4f}" if "lift" in plans else "",
         "lift_actual_s": f"{phase_actual['lift']:.4f}" if "lift" in phase_actual else "",
         "transport_plan_s": f"{plans['transport']:.4f}" if "transport" in plans else "",
-        "transport_actual_s": f"{phase_actual['transport']:.4f}" if "transport" in phase_actual else "",
+        "transport_action_wall_s": f"{transport_action_wall_s:.4f}" if transport_action_wall_s != "" else "",
+        "transport_reference_playback_s": (
+            f"{transport_reference_playback_s:.4f}" if transport_reference_playback_s != "" else ""
+        ),
+        "transport_observed_kind": transport_observed_kind,
         "lower_plan_s": f"{plans['lower']:.4f}" if "lower" in plans else "",
         "lower_actual_s": f"{phase_actual['lower']:.4f}" if "lower" in phase_actual else "",
+        "lower_action_wall_s": f"{lower_action_wall_s:.4f}" if lower_action_wall_s != "" else "",
+        "lower_reference_playback_s": (
+            f"{lower_reference_playback_s:.4f}" if lower_reference_playback_s != "" else ""
+        ),
         "retreat_plan_s": f"{plans['retreat']:.4f}" if "retreat" in plans else "",
         "retreat_actual_s": f"{phase_actual['retreat']:.4f}" if "retreat" in phase_actual else "",
         "contact_start_to_terminal_s": f"{total_elapsed:.3f}" if total_elapsed != "" else "",
@@ -206,14 +273,16 @@ def parse_run(group, run_id, formal=True):
         "candidate_transport_duration_s": f"{duration(candidate_traj):.6f}" if candidate_traj else "",
         "dispatch_transport_duration_s": f"{duration(transport_dispatch):.6f}" if transport_dispatch else "",
         "connection_trajectory_duration_s": f"{duration(conn_plan):.6f}" if conn_plan else "",
-        "baseline_continuous_jerk_rms": baseline.get("continuous_jerk_rms", ""),
-        "candidate_continuous_jerk_rms": candidate.get("continuous_jerk_rms", ""),
+        "baseline_continuous_jerk_rms": baseline_cont,
+        "candidate_continuous_jerk_rms": candidate_cont,
         "baseline_continuous_jerk_max": baseline.get("continuous_jerk_max", ""),
         "candidate_continuous_jerk_max": candidate.get("continuous_jerk_max", ""),
-        "baseline_exported_jerk_rms": baseline.get("exported_jerk_rms", ""),
-        "candidate_exported_jerk_rms": candidate.get("exported_jerk_rms", ""),
+        "continuous_jerk_rms_change_pct_vs_same_run": continuous_change,
+        "baseline_exported_jerk_rms": baseline_export,
+        "candidate_exported_jerk_rms": candidate_export,
         "baseline_exported_jerk_max": baseline.get("exported_jerk_max", ""),
         "candidate_exported_jerk_max": candidate.get("exported_jerk_max", ""),
+        "exported_jerk_rms_change_pct_vs_same_run": exported_change,
         "max_export_deviation_rad": candidate.get("max_export_deviation_rad", ""),
         "time_profile_solve_sec": candidate.get("solve_sec", ""),
         "transport_executed": int(bool(transport_dispatch) and state == "DONE") if group in ("B", "D") else int(state == "DONE"),
@@ -238,14 +307,16 @@ def mean_range(rows, key):
 
 
 def main():
-    OUT.mkdir(parents=True, exist_ok=True)
-    FIG.mkdir(parents=True, exist_ok=True)
+    FINAL_OUT.mkdir(parents=True, exist_ok=True)
+    FINAL_FIG.mkdir(parents=True, exist_ok=True)
     records = [parse_run(g, run_id, True) for g, run_id in FORMAL]
     validations = [parse_run(g, run_id, False) for g, run_id in VALIDATION]
     public_fields = [k for k in records[0] if not k.startswith("_")]
     for name, rows in (("abcd_s0_formal_runs.csv", records), ("abcd_s0_validation_runs.csv", validations)):
-        with (OUT / name).open("w", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=public_fields, extrasaction="ignore")
+        with (FINAL_OUT / name).open("w", newline="") as stream:
+            writer = csv.DictWriter(
+                stream, fieldnames=public_fields, extrasaction="ignore", lineterminator="\n"
+            )
             writer.writeheader()
             writer.writerows(rows)
 
@@ -254,44 +325,102 @@ def main():
     for group in groups:
         rows = [r for r in records if r["group"] == group]
         completed_rows = [r for r in rows if r["state"] == "DONE"]
-        optimized_rows = [r for r in rows if number(r, "candidate_continuous_jerk_rms") is not None]
+        candidate_rows = [r for r in rows if number(r, "candidate_continuous_jerk_rms") is not None]
+        executed_rows = [r for r in rows if number(r, "transport_executed") == 1.0]
+        completed_candidate_rows = [
+            r for r in candidate_rows if r["state"] == "DONE" and number(r, "transport_executed") == 1.0
+        ]
         done = sum(r["state"] == "DONE" for r in rows)
         def avg(key, subset):
             vals = [number(r, key) for r in subset]
             vals = [v for v in vals if v is not None]
             return sum(vals) / len(vals) if vals else None
 
-        base_cont = avg("baseline_continuous_jerk_rms", optimized_rows)
-        cand_cont = avg("candidate_continuous_jerk_rms", optimized_rows)
-        base_export = avg("baseline_exported_jerk_rms", optimized_rows)
-        cand_export = avg("candidate_exported_jerk_rms", optimized_rows)
+        base_cont_all = avg("baseline_continuous_jerk_rms", candidate_rows)
+        cand_cont_all = avg("candidate_continuous_jerk_rms", candidate_rows)
+        base_export_all = avg("baseline_exported_jerk_rms", candidate_rows)
+        cand_export_all = avg("candidate_exported_jerk_rms", candidate_rows)
+        base_cont_done = avg("baseline_continuous_jerk_rms", completed_candidate_rows)
+        cand_cont_done = avg("candidate_continuous_jerk_rms", completed_candidate_rows)
+        base_export_done = avg("baseline_exported_jerk_rms", completed_candidate_rows)
+        cand_export_done = avg("candidate_exported_jerk_rms", completed_candidate_rows)
         summary.append({
             "group": group,
-            "runs": len(rows),
+            "attempts": len(rows),
             "full_done": done,
             "failed": len(rows) - done,
             "completion": f"{done}/{len(rows)}",
-            "release_xy_error_mm_mean_range": mean_range(rows, "release_xy_error_mm"),
-            "release_yaw_error_deg_mean_range": mean_range(rows, "release_yaw_error_deg"),
-            "rod_bottom_gap_mm_mean_range": mean_range(rows, "rod_bottom_gap_mm"),
+            "completed_release_xy_error_mm_mean_range": mean_range(completed_rows, "release_xy_error_mm"),
+            "completed_release_yaw_error_deg_mean_range": mean_range(completed_rows, "release_yaw_error_deg"),
+            "completed_rod_bottom_gap_mm_mean_range": mean_range(completed_rows, "rod_bottom_gap_mm"),
             "completed_contact_start_to_terminal_s_mean_range": mean_range(completed_rows, "contact_start_to_terminal_s"),
-            "all_attempts_contact_start_to_terminal_s_mean_range": mean_range(rows, "contact_start_to_terminal_s"),
-            "completed_transport_actual_s_mean_range": mean_range(completed_rows, "transport_actual_s"),
-            "max_grasp_residual_mm_mean_range": mean_range(rows, "max_grasp_reference_residual_mm"),
-            "optimized_runs_generated": len(optimized_rows),
-            "baseline_continuous_jerk_rms_mean": f"{base_cont:.6f}" if base_cont is not None else "",
-            "candidate_continuous_jerk_rms_mean": f"{cand_cont:.6f}" if cand_cont is not None else "",
-            "continuous_jerk_rms_change_pct": f"{100*(cand_cont/base_cont-1):.3f}" if base_cont else "",
-            "baseline_exported_jerk_rms_mean": f"{base_export:.6f}" if base_export is not None else "",
-            "candidate_exported_jerk_rms_mean": f"{cand_export:.6f}" if cand_export is not None else "",
-            "exported_jerk_rms_change_pct": f"{100*(cand_export/base_export-1):.3f}" if base_export else "",
+            "completed_transport_action_wall_s_mean_range": mean_range(completed_rows, "transport_action_wall_s"),
+            "completed_transport_reference_playback_s_mean_range": mean_range(
+                completed_rows, "transport_reference_playback_s"
+            ),
+            "completed_max_grasp_residual_mm_mean_range": mean_range(
+                completed_rows, "max_grasp_reference_residual_mm"
+            ),
+            "candidate_generated_runs": len(candidate_rows),
+            "transport_executed_runs": len(executed_rows),
+            "completed_candidate_runs": len(completed_candidate_rows),
+            "all_candidate_baseline_continuous_jerk_rms_mean": (
+                f"{base_cont_all:.6f}" if base_cont_all is not None else ""
+            ),
+            "all_candidate_candidate_continuous_jerk_rms_mean": (
+                f"{cand_cont_all:.6f}" if cand_cont_all is not None else ""
+            ),
+            "all_candidate_continuous_change_pct_mean_range": mean_range(
+                candidate_rows, "continuous_jerk_rms_change_pct_vs_same_run"
+            ),
+            "all_candidate_continuous_ratio_of_means_change_pct": (
+                f"{100*(cand_cont_all/base_cont_all-1):.3f}" if base_cont_all else ""
+            ),
+            "completed_candidate_baseline_continuous_jerk_rms_mean": (
+                f"{base_cont_done:.6f}" if base_cont_done is not None else ""
+            ),
+            "completed_candidate_candidate_continuous_jerk_rms_mean": (
+                f"{cand_cont_done:.6f}" if cand_cont_done is not None else ""
+            ),
+            "completed_candidate_continuous_change_pct_mean_range": mean_range(
+                completed_candidate_rows, "continuous_jerk_rms_change_pct_vs_same_run"
+            ),
+            "completed_candidate_continuous_ratio_of_means_change_pct": (
+                f"{100*(cand_cont_done/base_cont_done-1):.3f}" if base_cont_done else ""
+            ),
+            "all_candidate_baseline_exported_jerk_rms_mean": (
+                f"{base_export_all:.6f}" if base_export_all is not None else ""
+            ),
+            "all_candidate_candidate_exported_jerk_rms_mean": (
+                f"{cand_export_all:.6f}" if cand_export_all is not None else ""
+            ),
+            "all_candidate_exported_change_pct_mean_range": mean_range(
+                candidate_rows, "exported_jerk_rms_change_pct_vs_same_run"
+            ),
+            "all_candidate_exported_ratio_of_means_change_pct": (
+                f"{100*(cand_export_all/base_export_all-1):.3f}" if base_export_all else ""
+            ),
+            "completed_candidate_baseline_exported_jerk_rms_mean": (
+                f"{base_export_done:.6f}" if base_export_done is not None else ""
+            ),
+            "completed_candidate_candidate_exported_jerk_rms_mean": (
+                f"{cand_export_done:.6f}" if cand_export_done is not None else ""
+            ),
+            "completed_candidate_exported_change_pct_mean_range": mean_range(
+                completed_candidate_rows, "exported_jerk_rms_change_pct_vs_same_run"
+            ),
+            "completed_candidate_exported_ratio_of_means_change_pct": (
+                f"{100*(cand_export_done/base_export_done-1):.3f}" if base_export_done else ""
+            ),
         })
-    with (OUT / "abcd_s0_group_summary.csv").open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(summary[0]))
+    with (FINAL_OUT / "abcd_s0_group_summary.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(
+            stream, fieldnames=list(summary[0]), lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(summary)
 
-    # Figure 1: completion plus same-release placement errors and support gap.
+    # Figure 1: completion over all attempts, placement metrics over completed runs.
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     ax = axes[0, 0]
     done_counts = [sum(r["group"] == g and r["state"] == "DONE" for r in records) for g in groups]
@@ -305,15 +434,23 @@ def main():
         (axes[1, 1], "rod_bottom_gap_mm", "Rod bottom gap at release readback", "mm"),
     ):
         for i, group in enumerate(groups):
-            vals = [number(r, key) for r in records if r["group"] == group]
+            vals = [number(r, key) for r in records if r["group"] == group and r["state"] == "DONE"]
             vals = [v for v in vals if v is not None]
             if vals:
                 ax.scatter([i] * len(vals), vals, color=COLORS[group], s=45, zorder=3)
                 ax.plot([i - .18, i + .18], [sum(vals) / len(vals)] * 2, color=COLORS[group], lw=2)
         ax.set_xticks(range(4), groups); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(axis="y", alpha=.25)
     fig.suptitle("Fixed S0 no-weld ABCD — every formal attempt shown; descriptive n=3")
+    fig.text(
+        0.5,
+        0.01,
+        "Placement panels use completed runs only. A/B release wait: configured 0.5 s wall; "
+        "C/D: measured about 2 s simulation. Timing protocols differ.",
+        ha="center",
+        fontsize=8.5,
+    )
     fig.tight_layout()
-    fig.savefig(FIG / "abcd_s0_completion_and_placement.png", dpi=180)
+    fig.savefig(FINAL_FIG / "abcd_s0_completion_and_placement.png", dpi=180)
     plt.close(fig)
 
     # Figure 2: same-path before/after metrics for each B/D time-profile run.
@@ -342,7 +479,7 @@ def main():
     ax.set_title("Matched transport duration"); ax.grid(axis="y", alpha=.25); ax.legend(frameon=False)
     fig.suptitle("Same-run, same geometric path; B1 candidate was generated but not executed")
     fig.tight_layout()
-    fig.savefig(FIG / "abcd_s0_time_profile_jerk.png", dpi=180)
+    fig.savefig(FINAL_FIG / "abcd_s0_time_profile_jerk.png", dpi=180)
     plt.close(fig)
 
     # Figure 3: measured rod-center space tracks from the existing phase CSVs.
@@ -369,16 +506,16 @@ def main():
     ax.set_title("Measured rod-center paths during lift, transport, lower and retreat")
     ax.legend(fontsize=7, ncol=2, loc="upper left")
     fig.tight_layout()
-    fig.savefig(FIG / "abcd_s0_rod_space_trajectories.png", dpi=180)
+    fig.savefig(FINAL_FIG / "abcd_s0_rod_space_trajectories.png", dpi=180)
     plt.close(fig)
 
-    print(f"formal={OUT / 'abcd_s0_formal_runs.csv'}")
-    print(f"groups={OUT / 'abcd_s0_group_summary.csv'}")
-    print(f"validation={OUT / 'abcd_s0_validation_runs.csv'}")
+    print(f"formal={FINAL_OUT / 'abcd_s0_formal_runs.csv'}")
+    print(f"groups={FINAL_OUT / 'abcd_s0_group_summary.csv'}")
+    print(f"validation={FINAL_OUT / 'abcd_s0_validation_runs.csv'}")
     for item in summary:
         print(item)
     for name in ("abcd_s0_completion_and_placement.png", "abcd_s0_time_profile_jerk.png", "abcd_s0_rod_space_trajectories.png"):
-        print(FIG / name)
+        print(FINAL_FIG / name)
 
 
 if __name__ == "__main__":

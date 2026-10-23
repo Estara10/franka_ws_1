@@ -228,6 +228,27 @@ double BernsteinTimeMap::dddsdtau(double tau) const
   return w1 > 1e-300 ? w / w1 : 0.0;
 }
 
+double BernsteinTimeMap::inverseS(double s_value, double tolerance) const
+{
+  s_value = std::clamp(s_value, 0.0, 1.0);
+  if (s_value <= 0.0) return 0.0;
+  if (s_value >= 1.0) return 1.0;
+
+  const double tol = std::max(1e-15, std::abs(tolerance));
+  double lo = 0.0;
+  double hi = 1.0;
+  for (int iteration = 0; iteration < 80; ++iteration)
+  {
+    const double mid = 0.5 * (lo + hi);
+    if (s(mid) < s_value)
+      lo = mid;
+    else
+      hi = mid;
+  }
+  const double tau = 0.5 * (lo + hi);
+  return std::abs(s(tau) - s_value) <= tol ? tau : std::clamp(tau, 0.0, 1.0);
+}
+
 // ------------------------------------------------------------ continuous path
 
 bool ContinuousPath::build(const std::vector<std::string>& joint_names,
@@ -392,6 +413,66 @@ bool exportTrajectory(const ContinuousPath& path, const BernsteinTimeMap& map, d
   return true;
 }
 
+bool buildFaithfulExport(const ContinuousPath& path,
+                         const BernsteinTimeMap& map,
+                         double duration,
+                         double export_spacing,
+                         std::vector<TrajectoryPoint>& out,
+                         std::string& error)
+{
+  error.clear();
+  out.clear();
+  if (!path.valid())
+  {
+    error = "path is not built";
+    return false;
+  }
+  if (!(duration > 0.0) || !std::isfinite(duration))
+  {
+    error = "duration must be positive and finite";
+    return false;
+  }
+  if (!(export_spacing > 0.0) || !std::isfinite(export_spacing))
+  {
+    error = "export spacing must be positive and finite";
+    return false;
+  }
+
+  const int uniform_steps =
+      std::max(1, static_cast<int>(std::ceil(duration / export_spacing)));
+  std::vector<double> times;
+  times.reserve(static_cast<std::size_t>(uniform_steps) + path.segmentCount() + 1);
+  for (int i = 0; i <= uniform_steps; ++i)
+  {
+    times.push_back(duration * static_cast<double>(i) / static_cast<double>(uniform_steps));
+  }
+  times.front() = 0.0;
+  times.back() = duration;
+
+  const double path_duration = path.duration();
+  for (const double knot_time : path.knotTimes())
+  {
+    const double s_knot = std::clamp(knot_time / path_duration, 0.0, 1.0);
+    const double mapped_time = duration * map.inverseS(s_knot);
+    times.push_back(std::clamp(mapped_time, 0.0, duration));
+  }
+  std::sort(times.begin(), times.end());
+  const double duplicate_tolerance = std::max(1e-14, duration * 1e-12);
+  times.erase(std::unique(times.begin(), times.end(),
+                          [duplicate_tolerance](double a, double b) {
+                            return std::abs(a - b) <= duplicate_tolerance;
+                          }),
+              times.end());
+  times.front() = 0.0;
+  times.back() = duration;
+  if (times.size() < 2 || times.front() != 0.0 || times.back() != duration)
+  {
+    error = "faithful export grid did not retain both trajectory endpoints";
+    return false;
+  }
+  return exportTrajectory(path, map, duration, times, out, error);
+}
+
 // ---------------------------------------------------------------- evaluation
 
 bool evaluateExported(const std::vector<TrajectoryPoint>& points,
@@ -551,6 +632,35 @@ bool maxPositionDeviation(const std::vector<TrajectoryPoint>& points, const Cont
   return true;
 }
 
+TimeProfileAcceptance evaluateTimeProfileAcceptance(
+    const TrajectoryMetrics& baseline_continuous,
+    const TrajectoryMetrics& candidate_continuous,
+    bool export_fidelity_ok)
+{
+  TimeProfileAcceptance acceptance;
+  acceptance.constraints_ok =
+      !candidate_continuous.position_violation &&
+      !candidate_continuous.velocity_violation &&
+      !candidate_continuous.acceleration_violation &&
+      candidate_continuous.max_velocity_ratio <= 1.0 + 1e-9 &&
+      candidate_continuous.max_acceleration_ratio <= 1.0 + 1e-9;
+  acceptance.rms_improved =
+      candidate_continuous.jerk_rms < baseline_continuous.jerk_rms;
+  const double peak_tolerance = 1e-12 * std::max(1.0, baseline_continuous.jerk_max);
+  acceptance.peak_ok =
+      candidate_continuous.jerk_max <= baseline_continuous.jerk_max + peak_tolerance;
+  acceptance.accepted =
+      acceptance.constraints_ok && acceptance.rms_improved && acceptance.peak_ok &&
+      export_fidelity_ok;
+
+  if (!acceptance.constraints_ok) acceptance.fallback_reason += "constraints_not_satisfied;";
+  if (!acceptance.rms_improved) acceptance.fallback_reason += "continuous_rms_not_reduced;";
+  if (!acceptance.peak_ok) acceptance.fallback_reason += "continuous_peak_increased;";
+  if (!export_fidelity_ok) acceptance.fallback_reason += "export_fidelity_exceeded;";
+  if (!acceptance.fallback_reason.empty()) acceptance.fallback_reason.pop_back();
+  return acceptance;
+}
+
 // --------------------------------------------------------------- optimisation
 TimeProfileResult optimizeTimeProfile(const ContinuousPath& path,
                                       const std::vector<JointLimits>& limits, double duration,
@@ -570,49 +680,81 @@ TimeProfileResult optimizeTimeProfile(const ContinuousPath& path,
     result.detail = "limit count does not match the path dimension";
     return result;
   }
+  if (!(duration > 0.0) || !std::isfinite(duration))
+  {
+    result.status = "invalid_input";
+    result.detail = "duration must be positive and finite";
+    return result;
+  }
+  if (!(options.interpolation_dt > 0.0) || !std::isfinite(options.interpolation_dt) ||
+      options.max_evaluations <= 0)
+  {
+    result.status = "invalid_input";
+    result.detail = "invalid evaluation interval or evaluation budget";
+    return result;
+  }
+  if (!(options.export_spacing > 0.0) || !std::isfinite(options.export_spacing) ||
+      !(options.refined_export_spacing > 0.0) || !std::isfinite(options.refined_export_spacing) ||
+      options.refined_export_spacing > options.export_spacing ||
+      !(options.export_fidelity_tolerance >= 0.0) ||
+      !std::isfinite(options.export_fidelity_tolerance))
+  {
+    result.status = "invalid_input";
+    result.detail = "invalid export spacing or fidelity tolerance";
+    return result;
+  }
 
-  BernsteinTimeMap map(options.degree);
-  const std::vector<double> times = path.knotTimes();
-  int evaluations = 0;
+  const int n = BernsteinTimeMap(options.degree).parameterCount();
+  const Eigen::VectorXd zero = Eigen::VectorXd::Zero(n);
+  BernsteinTimeMap baseline_map(options.degree);
+  baseline_map.setParameters(zero);
+  std::string error;
+  if (!evaluateContinuous(path, baseline_map, duration, limits, options.interpolation_dt,
+                          result.baseline_continuous, error))
+  {
+    result.status = "invalid_input";
+    result.detail = "the baseline time map could not be evaluated: " + error;
+    return result;
+  }
+  result.baseline_objective = result.baseline_continuous.jerk_rms;
+  const double baseline_peak = result.baseline_continuous.jerk_max;
+  int evaluations = 1;
 
+  BernsteinTimeMap search_map(options.degree);
   auto cost = [&](const Eigen::VectorXd& u, TrajectoryMetrics& metrics) -> double {
     if (evaluations >= options.max_evaluations) return std::numeric_limits<double>::infinity();
     ++evaluations;
-    map.setParameters(u);
-    std::vector<TrajectoryPoint> pts;
-    std::string error;
-    if (!exportTrajectory(path, map, duration, times, pts, error)) return 1e12;
-    if (!evaluateExported(pts, limits, options.interpolation_dt, metrics, error)) return 1e12;
+    search_map.setParameters(u);
+    std::string cost_error;
+    if (!evaluateContinuous(path, search_map, duration, limits, options.interpolation_dt,
+                            metrics, cost_error))
+      return 1e12;
     const double excess_v = std::max(0.0, metrics.max_velocity_ratio - 1.0);
     const double excess_a = std::max(0.0, metrics.max_acceleration_ratio - 1.0);
-    double cost_value = metrics.jerk_rms +
-                        options.violation_weight * (excess_v * excess_v + excess_a * excess_a);
+    double peak_excess = 0.0;
+    if (baseline_peak > 0.0)
+      peak_excess = std::max(0.0, metrics.jerk_max / baseline_peak - 1.0);
+    else if (metrics.jerk_max > 0.0)
+      peak_excess = 1.0;
+    double cost_value =
+        metrics.jerk_rms +
+        options.violation_weight *
+            (excess_v * excess_v + excess_a * excess_a + peak_excess * peak_excess);
     if (metrics.position_violation) cost_value += options.violation_weight;
     return cost_value;
   };
 
-  const int n = map.parameterCount();
-  result.parameters = Eigen::VectorXd::Zero(n);
-  TrajectoryMetrics base_metrics;
-  result.baseline_objective = cost(result.parameters, base_metrics);
-  result.baseline_metrics = base_metrics;
-  if (!std::isfinite(result.baseline_objective) || result.baseline_objective >= 1e11)
-  {
-    result.status = "invalid_input";
-    result.detail = "the baseline time map could not be evaluated";
-    result.evaluations = evaluations;
-    return result;
-  }
-
   // Nelder-Mead over the log-speed parameters. The baseline vertex is kept, so
-  // the result can never be worse than the linear clock.
+  // the result can never be worse than the linear clock. The baseline objective
+  // is evaluated above; subsequent evaluations use the continuous composition,
+  // never the exported interpolation metric.
   std::vector<Eigen::VectorXd> simplex(static_cast<std::size_t>(n) + 1);
   std::vector<double> f(static_cast<std::size_t>(n) + 1);
-  simplex[0] = result.parameters;
+  simplex[0] = zero;
   f[0] = result.baseline_objective;
   for (int i = 0; i < n; ++i)
   {
-    Eigen::VectorXd x = result.parameters;
+    Eigen::VectorXd x = zero;
     x[i] = 0.3;
     simplex[static_cast<std::size_t>(i) + 1] = x;
     TrajectoryMetrics ignored;
@@ -692,56 +834,143 @@ TimeProfileResult optimizeTimeProfile(const ContinuousPath& path,
     if (f[static_cast<std::size_t>(i)] < f[static_cast<std::size_t>(best_index)])
       best_index = i;
   }
-  // The baseline vertex may itself have been replaced during the search, so the
-  // guard against a worse result compares against the recorded baseline value.
-  if (!(f[static_cast<std::size_t>(best_index)] < result.baseline_objective))
+  result.parameters = simplex[static_cast<std::size_t>(best_index)];
+  result.objective = f[static_cast<std::size_t>(best_index)];
+  result.selected_parameters = zero;
+
+  BernsteinTimeMap candidate_map(options.degree);
+  candidate_map.setParameters(result.parameters);
+  if (!evaluateContinuous(path, candidate_map, duration, limits, options.interpolation_dt,
+                          result.candidate_continuous, error))
   {
-    result.parameters = Eigen::VectorXd::Zero(n);
-    result.objective = result.baseline_objective;
+    result.status = "invalid_input";
+    result.detail = "the candidate time map could not be evaluated: " + error;
+    result.evaluations = evaluations;
+    return result;
+  }
+
+  auto build_export = [&](const BernsteinTimeMap& export_map,
+                          std::vector<TrajectoryPoint>& points,
+                          TrajectoryMetrics& metrics,
+                          double& deviation,
+                          std::string& export_error) -> bool {
+    if (!buildFaithfulExport(path, export_map, duration, options.export_spacing, points,
+                             export_error))
+      return false;
+    if (!evaluateExported(points, limits, options.interpolation_dt, metrics, export_error))
+      return false;
+    return maxPositionDeviation(points, path, export_map, duration, options.interpolation_dt,
+                                deviation, export_error);
+  };
+
+  double baseline_deviation = std::numeric_limits<double>::quiet_NaN();
+  double candidate_deviation = std::numeric_limits<double>::quiet_NaN();
+  std::vector<tpo::TrajectoryPoint> baseline_export;
+  std::vector<tpo::TrajectoryPoint> candidate_export;
+  TrajectoryMetrics baseline_export_metrics;
+  TrajectoryMetrics candidate_export_metrics;
+  bool baseline_export_ok =
+      build_export(baseline_map, baseline_export, baseline_export_metrics, baseline_deviation, error);
+  if (!baseline_export_ok)
+  {
+    result.status = "invalid_input";
+    result.detail = "baseline faithful export failed: " + error;
+    result.evaluations = evaluations;
+    return result;
+  }
+  bool candidate_export_ok =
+      build_export(candidate_map, candidate_export, candidate_export_metrics, candidate_deviation,
+                   error);
+  bool export_fidelity_ok =
+      candidate_export_ok && baseline_deviation <= options.export_fidelity_tolerance &&
+      candidate_deviation <= options.export_fidelity_tolerance;
+
+  // The first export is deliberately coarse. If either side fails the
+  // representation target, refine both once with the same grid and same
+  // evaluation method.
+  if (!export_fidelity_ok)
+  {
+    std::vector<tpo::TrajectoryPoint> refined_baseline;
+    std::vector<tpo::TrajectoryPoint> refined_candidate;
+    TrajectoryMetrics refined_baseline_metrics;
+    TrajectoryMetrics refined_candidate_metrics;
+    double refined_baseline_deviation = std::numeric_limits<double>::quiet_NaN();
+    double refined_candidate_deviation = std::numeric_limits<double>::quiet_NaN();
+    const bool refined_baseline_ok =
+        buildFaithfulExport(path, baseline_map, duration, options.refined_export_spacing,
+                            refined_baseline, error) &&
+        evaluateExported(refined_baseline, limits, options.interpolation_dt,
+                         refined_baseline_metrics, error) &&
+        maxPositionDeviation(refined_baseline, path, baseline_map, duration,
+                             options.interpolation_dt, refined_baseline_deviation, error);
+    const bool refined_candidate_ok =
+        buildFaithfulExport(path, candidate_map, duration, options.refined_export_spacing,
+                            refined_candidate, error) &&
+        evaluateExported(refined_candidate, limits, options.interpolation_dt,
+                         refined_candidate_metrics, error) &&
+        maxPositionDeviation(refined_candidate, path, candidate_map, duration,
+                             options.interpolation_dt, refined_candidate_deviation, error);
+    if (refined_baseline_ok)
+    {
+      baseline_export = std::move(refined_baseline);
+      baseline_export_metrics = refined_baseline_metrics;
+      baseline_deviation = refined_baseline_deviation;
+    }
+    if (refined_candidate_ok)
+    {
+      candidate_export = std::move(refined_candidate);
+      candidate_export_metrics = refined_candidate_metrics;
+      candidate_deviation = refined_candidate_deviation;
+      candidate_export_ok = true;
+    }
+    export_fidelity_ok =
+        refined_baseline_ok && refined_candidate_ok &&
+        refined_baseline_deviation <= options.export_fidelity_tolerance &&
+        refined_candidate_deviation <= options.export_fidelity_tolerance;
+    result.export_spacing_used = options.refined_export_spacing;
   }
   else
   {
-    result.parameters = simplex[static_cast<std::size_t>(best_index)];
-    result.objective = f[static_cast<std::size_t>(best_index)];
+    result.export_spacing_used = options.export_spacing;
   }
 
-  std::string error;
-  map.setParameters(result.parameters);
-  if (!exportTrajectory(path, map, duration, times, result.candidate_export, error) ||
-      !evaluateExported(result.candidate_export, limits, options.interpolation_dt,
-                        result.candidate_metrics, error))
+  result.baseline_export = std::move(baseline_export);
+  result.candidate_export = std::move(candidate_export);
+  result.baseline_metrics = baseline_export_metrics;
+  result.candidate_metrics = candidate_export_metrics;
+  result.export_fidelity_ok = export_fidelity_ok;
+  result.baseline_export_deviation_rad = baseline_deviation;
+  result.max_export_deviation_rad = candidate_deviation;
+  const auto acceptance = evaluateTimeProfileAcceptance(
+      result.baseline_continuous, result.candidate_continuous,
+      candidate_export_ok && result.export_fidelity_ok);
+  result.constraints_ok = acceptance.constraints_ok;
+  result.rms_improved = acceptance.rms_improved;
+  result.peak_ok = acceptance.peak_ok;
+  result.accepted = acceptance.accepted;
+  result.fallback_reason = acceptance.fallback_reason;
+  result.fallback_to_baseline = !result.accepted;
+  if (result.accepted)
   {
-    result.status = "invalid_input";
-    result.detail = error;
-    result.evaluations = evaluations;
-    return result;
+    result.selected_parameters = result.parameters;
+    result.selected_export = result.candidate_export;
+    result.selected_metrics = result.candidate_metrics;
+    result.decision = "accepted";
+    result.status = "accepted";
+    result.detail = "continuous RMS reduced and all final checks passed";
   }
-  BernsteinTimeMap baseline_map(options.degree);
-  baseline_map.setParameters(Eigen::VectorXd::Zero(n));
-  if (!exportTrajectory(path, baseline_map, duration, times, result.baseline_export, error) ||
-      !evaluateExported(result.baseline_export, limits, options.interpolation_dt,
-                        result.baseline_metrics, error))
+  else
   {
-    result.status = "invalid_input";
-    result.detail = error;
-    result.evaluations = evaluations;
-    return result;
-  }
-  const double continuous_dt = 0.001;
-  if (!evaluateContinuous(path, baseline_map, duration, limits, continuous_dt,
-                          result.baseline_continuous, error) ||
-      !evaluateContinuous(path, map, duration, limits, continuous_dt, result.candidate_continuous,
-                          error))
-  {
-    result.status = "invalid_input";
-    result.detail = error;
-    result.evaluations = evaluations;
-    return result;
+    result.selected_parameters = zero;
+    result.selected_export = result.baseline_export;
+    result.selected_metrics = result.baseline_metrics;
+    result.decision = "fallback_to_baseline";
+    result.status = "fallback";
+    result.detail = result.fallback_reason;
   }
 
   result.evaluations = evaluations;
   result.ok = true;
-  result.status = "ok";
   return result;
 }
 

@@ -26,6 +26,25 @@
 - `analyze_hover_ab.py`：重建固定场景 JTC/MMC 3 s HOLD 的逐次指标与图表。杆/手 ΔZ 为相对窗口入口的世界坐标位移；旧 task `*_slip_m` 字段在输出中标作抓取参考残差，不是局部接触滑移。
 - `plot_mmc_directional_perturbation.py`：从六次固定/方向性 MMC 扰动运行生成 pulse-aligned 原始图、施力前局部线性漂移扣除图和逐次汇总 CSV。去趋势结果依赖局部线性趋势延续假设。
 - `plot_s2_offline_summary.py`：生成 S2 单个重建离线样本的几何目标与连续时间 jerk RMS 前后图；没有重复运行范围，也没有执行数据。
+- `analyze_time_profile_alignment_20261023.py`：读取正式 12 个 ABCD 运行的基础运输轨迹，调用
+  `time_profile_replay` 执行修正后的连续目标优化、忠实导出和最终接受检查；结果写入
+  `experiment_results/reports/final_tradeoff_20261022/time_profile_alignment/`。运行前需先构建
+  `dual_arm_carry_task`，该脚本不启动 MuJoCo。
+- `analyze_time_profile_rs_o_20261023.py`：对同一 12 个基础运输轨迹分别计算 R 原时长、S 统一
+  1.2 倍伸时和 O 同 1.2 倍预算的时间优化，生成逐运行 CSV、组汇总、gate CSV 和图
+  `docs/figures/final_tradeoff_20261022/time_profile_rs_o.png`；不启动 MuJoCo，gate 关闭时仍保留 R/S 结果。
+  `time_profile_replay` 的 `--duration-scale` 只改变目标时长，不改变几何路径；`1.0` 用于 R，
+  `1.2` 用于 S/O。
+- R/S 完整搬运执行使用 `CONTACT_TRANSPORT_TIME_SCALE=1.0/1.2`，只作用于运输主段；默认
+  `CONTACT_TRANSPORT_STRETCH=2.0` 保持不手工改成 `2.4`。运行前确认
+  `CONTACT_PROBE_ABCD_GROUP=none`，并在每次运行后保存 `contact_transport_planned.csv` 和
+  `contact_transport_meta.txt`。
+- `analyze_rs_execution_20261023.py`：汇总 R1/S1/S2/R2 四次完整搬运的完成状态、计划/动作运输时长、
+  释放误差、杆底面间隙、抓取参考残差和总耗时，结果写入
+  `experiment_results/reports/final_tradeoff_20261022/rs_execution/`。
+- `plot_final_time_smoothness_20261023.py`：合并 R/S/O 离线结果与 R/S 四次执行结果，生成最终
+  `fig_time_smoothness_final.png/svg`。`scientific_style.py` 提供统一的 Science/Nature 风格、
+  配色和中文 fallback 字体；本机没有 Microsoft YaHei 时使用 Noto Sans CJK，避免中文方框。
 
 - `plot_experiment_results.py`：读取最新实验 CSV 或 task-metrics 同步样本，生成整周期分析图；
   一键脚本会在任务结束后自动调用。

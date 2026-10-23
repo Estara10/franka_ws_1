@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -286,6 +287,103 @@ TEST(TimeProfileOptimizer, InvalidTrajectoriesAndExportsAreRejected)
   EXPECT_NEAR(map.s(0.5), 0.5, 1e-12);
 }
 
+TEST(TimeProfileOptimizer, AcceptanceRequiresContinuousRmsPeakAndFidelity)
+{
+  tpo::TrajectoryMetrics baseline;
+  baseline.jerk_rms = 10.0;
+  baseline.jerk_max = 20.0;
+  tpo::TrajectoryMetrics candidate = baseline;
+
+  candidate.jerk_rms = 9.0;
+  candidate.jerk_max = 21.0;
+  auto acceptance = tpo::evaluateTimeProfileAcceptance(baseline, candidate, true);
+  EXPECT_TRUE(acceptance.rms_improved);
+  EXPECT_FALSE(acceptance.peak_ok);
+  EXPECT_FALSE(acceptance.accepted);
+  EXPECT_NE(acceptance.fallback_reason.find("continuous_peak_increased"), std::string::npos);
+
+  candidate.jerk_max = 19.0;
+  acceptance = tpo::evaluateTimeProfileAcceptance(baseline, candidate, false);
+  EXPECT_TRUE(acceptance.peak_ok);
+  EXPECT_FALSE(acceptance.accepted);
+  EXPECT_NE(acceptance.fallback_reason.find("export_fidelity_exceeded"), std::string::npos);
+
+  acceptance = tpo::evaluateTimeProfileAcceptance(baseline, candidate, true);
+  EXPECT_TRUE(acceptance.accepted);
+  EXPECT_TRUE(acceptance.fallback_reason.empty());
+
+  candidate.jerk_rms = 11.0;
+  acceptance = tpo::evaluateTimeProfileAcceptance(baseline, candidate, true);
+  EXPECT_FALSE(acceptance.rms_improved);
+  EXPECT_FALSE(acceptance.accepted);
+  EXPECT_NE(acceptance.fallback_reason.find("continuous_rms_not_reduced"), std::string::npos);
+}
+
+TEST(TimeProfileOptimizer, FaithfulExportPreservesMappedSegmentBoundaries)
+{
+  tpo::ContinuousPath path;
+  std::string error;
+  ASSERT_TRUE(path.build(names(), curvedTrajectory(), error)) << error;
+
+  tpo::BernsteinTimeMap map(6);
+  map.setParameters((Eigen::VectorXd(6) << 0.3, -0.2, 0.1, 0.4, -0.3, 0.2).finished());
+  std::vector<tpo::TrajectoryPoint> points;
+  ASSERT_TRUE(tpo::buildFaithfulExport(path, map, path.duration(), 0.005, points, error))
+      << error;
+  ASSERT_GE(points.size(), path.knotTimes().size());
+  EXPECT_NEAR(points.front().time, 0.0, 1e-15);
+  EXPECT_NEAR(points.back().time, path.duration(), 1e-15);
+
+  const auto knots = path.knotTimes();
+  for (const double knot : knots)
+  {
+    const double expected_time = path.duration() * map.inverseS(knot / path.duration());
+    const auto found = std::find_if(points.begin(), points.end(), [=](const auto& point) {
+      return std::abs(point.time - expected_time) <= 1e-12;
+    });
+    EXPECT_NE(found, points.end()) << "missing mapped boundary " << expected_time;
+  }
+}
+
+TEST(TimeProfileOptimizer, FaithfulExportHandlesNonGridEndpoint)
+{
+  tpo::ContinuousPath path;
+  std::string error;
+  ASSERT_TRUE(path.build(names(), curvedTrajectory(), error)) << error;
+  tpo::BernsteinTimeMap map(6);
+  std::vector<tpo::TrajectoryPoint> points;
+  const double duration = 1.234567;
+  ASSERT_TRUE(tpo::buildFaithfulExport(path, map, duration, 0.005, points, error))
+      << error;
+  ASSERT_GE(points.size(), 2u);
+  EXPECT_DOUBLE_EQ(points.front().time, 0.0);
+  EXPECT_DOUBLE_EQ(points.back().time, duration);
+}
+
+TEST(TimeProfileOptimizer, ContinuousJerkScalesUnderUniformTimeStretch)
+{
+  tpo::ContinuousPath path;
+  std::string error;
+  ASSERT_TRUE(path.build(names(), curvedTrajectory(), error)) << error;
+  tpo::BernsteinTimeMap map(6);
+  map.setParameters(Eigen::VectorXd::Zero(6));
+
+  tpo::TrajectoryMetrics original;
+  tpo::TrajectoryMetrics stretched;
+  ASSERT_TRUE(tpo::evaluateContinuous(path, map, path.duration(), limits(), 0.001, original, error))
+      << error;
+  ASSERT_TRUE(tpo::evaluateContinuous(path, map, 1.2 * path.duration(), limits(), 0.001, stretched,
+                                      error))
+      << error;
+  ASSERT_GT(original.jerk_rms, 0.0);
+  ASSERT_GT(original.jerk_max, 0.0);
+  const double scale = 1.0 / std::pow(1.2, 3.0);
+  // Both curves use the required 1 ms evaluation interval; the two resulting
+  // time grids sample a varying jerk signal at slightly different tau points.
+  EXPECT_NEAR(stretched.jerk_rms / original.jerk_rms, scale, 2e-3);
+  EXPECT_NEAR(stretched.jerk_max / original.jerk_max, scale, 2e-3);
+}
+
 TEST(TimeProfileOptimizer, OptimiserKeepsTheBaselineOrImprovesIt)
 {
   tpo::ContinuousPath path;
@@ -297,10 +395,39 @@ TEST(TimeProfileOptimizer, OptimiserKeepsTheBaselineOrImprovesIt)
   const auto result = tpo::optimizeTimeProfile(path, limits(), path.duration(), options);
   ASSERT_TRUE(result.ok) << result.detail;
   EXPECT_LE(result.evaluations, options.max_evaluations);
-  EXPECT_LE(result.objective, result.baseline_objective * (1.0 + 1e-9));
-  EXPECT_LE(result.candidate_metrics.jerk_rms,
-            result.baseline_metrics.jerk_rms * (1.0 + 1e-9));
-  EXPECT_EQ(result.candidate_export.size(), path.knotTimes().size());
-  EXPECT_FALSE(result.candidate_metrics.velocity_violation);
-  EXPECT_FALSE(result.candidate_metrics.acceleration_violation);
+  EXPECT_NEAR(result.baseline_objective, result.baseline_continuous.jerk_rms, 1e-12);
+  if (result.accepted)
+  {
+    EXPECT_LT(result.candidate_continuous.jerk_rms, result.baseline_continuous.jerk_rms);
+    EXPECT_LE(result.candidate_continuous.jerk_max,
+              result.baseline_continuous.jerk_max + 1e-12);
+    EXPECT_NEAR(result.selected_parameters.norm(), result.parameters.norm(), 1e-12);
+  }
+  else
+  {
+    EXPECT_TRUE(result.fallback_to_baseline);
+    EXPECT_TRUE(result.selected_parameters.isZero(1e-12));
+    EXPECT_FALSE(result.fallback_reason.empty());
+  }
+  EXPECT_FALSE(result.baseline_export.empty());
+  EXPECT_FALSE(result.selected_export.empty());
+}
+
+TEST(TimeProfileOptimizer, OptimiserFallsBackWhenExportCannotMeetFidelity)
+{
+  tpo::ContinuousPath path;
+  std::string error;
+  ASSERT_TRUE(path.build(names(), curvedTrajectory(), error)) << error;
+
+  tpo::TimeProfileOptions options;
+  options.max_evaluations = 40;
+  options.export_fidelity_tolerance = 0.0;
+  const auto result = tpo::optimizeTimeProfile(path, limits(), path.duration(), options);
+  ASSERT_TRUE(result.ok) << result.detail;
+  EXPECT_FALSE(result.accepted);
+  EXPECT_TRUE(result.fallback_to_baseline);
+  EXPECT_FALSE(result.export_fidelity_ok);
+  EXPECT_NE(result.fallback_reason.find("export_fidelity_exceeded"), std::string::npos);
+  EXPECT_TRUE(result.selected_parameters.isZero(1e-12));
+  EXPECT_DOUBLE_EQ(result.export_spacing_used, options.refined_export_spacing);
 }

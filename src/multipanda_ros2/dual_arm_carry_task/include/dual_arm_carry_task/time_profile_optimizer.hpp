@@ -102,6 +102,9 @@ public:
   double dsdtau(double tau) const;
   double ddsdtau(double tau) const;
   double dddsdtau(double tau) const;
+  // Inverse of the monotone map. Used to preserve the original path segment
+  // boundaries when a non-linear clock is exported to the controller.
+  double inverseS(double s_value, double tolerance = 1e-12) const;
 
   // Coefficient c_i for the current parameters (index 0 is fixed at 1).
   double coefficient(int i) const;
@@ -132,42 +135,86 @@ struct TrajectoryMetrics
 struct TimeProfileOptions
 {
   int degree{6};
+  // Sampling interval used for both the continuous objective and the
+  // continuous-vs-export representation check.
   double interpolation_dt{0.001};
   int max_evaluations{100};
   // Penalty weight for limit violations; a candidate must be feasible.
   double violation_weight{1e6};
+  // Export sample spacing. This is deliberately separate from the 1 ms
+  // evaluation interval used to measure the continuous objective.
+  double export_spacing{0.005};
+  double refined_export_spacing{0.0025};
+  double export_fidelity_tolerance{1e-5};
 };
 
 struct TimeProfileResult
 {
   bool ok{false};
+  bool accepted{false};
+  bool fallback_to_baseline{true};
+  bool constraints_ok{false};
+  bool rms_improved{false};
+  bool peak_ok{false};
+  bool export_fidelity_ok{false};
   double total_duration{0.0};
   Eigen::VectorXd parameters;
+  Eigen::VectorXd selected_parameters;
   int evaluations{0};
   double objective{0.0};
   double baseline_objective{0.0};
   TrajectoryMetrics baseline_metrics;
   TrajectoryMetrics candidate_metrics;
+  TrajectoryMetrics selected_metrics;
   // Metrics of the continuous composition, before export (no JTC
   // re-interpolation). Reported separately from the exported result.
   TrajectoryMetrics baseline_continuous;
   TrajectoryMetrics candidate_continuous;
   std::vector<TrajectoryPoint> baseline_export;
   std::vector<TrajectoryPoint> candidate_export;
+  std::vector<TrajectoryPoint> selected_export;
+  double export_spacing_used{0.0};
+  double baseline_export_deviation_rad{0.0};
+  double max_export_deviation_rad{0.0};
   std::string status;
   std::string detail;
+  std::string decision;
+  std::string fallback_reason;
 };
 
-// Sample q(s(tau)) at the GIVEN times and fill q/v/a by the chain rule. Both
-// the baseline and the candidate are exported on the baseline's own knot times,
-// so the comparison uses one export method and the linear map reproduces the
-// baseline exactly.
+struct TimeProfileAcceptance
+{
+  bool constraints_ok{false};
+  bool rms_improved{false};
+  bool peak_ok{false};
+  bool accepted{false};
+  std::string fallback_reason;
+};
+
+TimeProfileAcceptance evaluateTimeProfileAcceptance(
+    const TrajectoryMetrics& baseline_continuous,
+    const TrajectoryMetrics& candidate_continuous,
+    bool export_fidelity_ok);
+
+// Sample q(s(tau)) at the GIVEN times and fill q/v/a by the chain rule. This
+// low-level interface is used by buildFaithfulExport(), which owns the common
+// boundary-preserving grid policy.
 bool exportTrajectory(const ContinuousPath& path,
                       const BernsteinTimeMap& map,
                       double duration,
                       const std::vector<double>& times,
                       std::vector<TrajectoryPoint>& out,
                       std::string& error);
+
+// Build a controller-facing export with one consistent method for both the
+// baseline and a candidate. The grid contains uniform samples plus the
+// original path segment boundaries mapped through the current clock.
+bool buildFaithfulExport(const ContinuousPath& path,
+                         const BernsteinTimeMap& map,
+                         double duration,
+                         double export_spacing,
+                         std::vector<TrajectoryPoint>& out,
+                         std::string& error);
 
 // Metrics of the trajectory AS THE CONTROLLER WILL INTERPOLATE IT (quintic
 // between consecutive points), sampled every options.interpolation_dt.

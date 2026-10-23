@@ -237,6 +237,7 @@ install(TARGETS
   gripper_client
   coordinated_path_optimizer
   time_profile_optimizer
+  time_profile_replay
   DESTINATION lib/${PROJECT_NAME}
 )
 

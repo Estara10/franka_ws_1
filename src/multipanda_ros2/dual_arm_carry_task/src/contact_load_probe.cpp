@@ -1017,15 +1017,27 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     // comparison and by the live execution pairing.
     struct TimeProfileCandidateInfo {
         bool ok{false};
+        bool accepted{false};
+        bool fallback_to_baseline{true};
+        bool constraints_ok{false};
+        bool rms_improved{false};
+        bool peak_ok{false};
+        bool export_fidelity_ok{false};
+        bool transport_ok{false};
         moveit::planning_interface::MoveGroupInterface::Plan plan;
         std::function<double(double)> progress_of_time;
         double solve_sec{0.0};
         double duration{0.0};
         int evaluations{0};
         int parameters{0};
+        double export_spacing_used{0.0};
         double max_export_deviation_rad{0.0};
         tpo::TrajectoryMetrics baseline_continuous, candidate_continuous;
         tpo::TrajectoryMetrics baseline_exported, candidate_exported;
+        tpo::TrajectoryMetrics selected_exported;
+        std::vector<tpo::TrajectoryPoint> candidate_export;
+        std::vector<tpo::TrajectoryPoint> selected_export;
+        std::string fallback_reason;
         std::string detail;
     };
     auto buildTimeProfileCandidate=[&](
@@ -1062,10 +1074,23 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         info.evaluations=tp_result.evaluations;
         info.duration=tp_path.duration();
         info.parameters=static_cast<int>(tp_result.parameters.size());
+        info.accepted=tp_result.accepted;
+        info.fallback_to_baseline=tp_result.fallback_to_baseline;
+        info.constraints_ok=tp_result.constraints_ok;
+        info.rms_improved=tp_result.rms_improved;
+        info.peak_ok=tp_result.peak_ok;
+        info.export_fidelity_ok=tp_result.export_fidelity_ok;
+        info.export_spacing_used=tp_result.export_spacing_used;
         info.baseline_continuous=tp_result.baseline_continuous;
         info.candidate_continuous=tp_result.candidate_continuous;
         info.baseline_exported=tp_result.baseline_metrics;
         info.candidate_exported=tp_result.candidate_metrics;
+        info.selected_exported=tp_result.selected_metrics;
+        info.candidate_export=tp_result.candidate_export;
+        info.selected_export=tp_result.selected_export;
+        info.max_export_deviation_rad=tp_result.max_export_deviation_rad;
+        info.fallback_reason=tp_result.fallback_reason;
+        info.detail=tp_result.detail;
         auto& tp_jt=info.plan.trajectory_.joint_trajectory;
         tp_jt.joint_names=baseline_jt.joint_names;
         for (const auto& p:tp_result.candidate_export) {
@@ -1099,10 +1124,6 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             }
             return 1.0;
         };
-        std::string dev_error;
-        if (!tpo::maxPositionDeviation(tp_result.candidate_export,tp_path,tp_map,T_tp,
-                                       tp_options.interpolation_dt,info.max_export_deviation_rad,dev_error))
-            info.max_export_deviation_rad=std::numeric_limits<double>::quiet_NaN();
         info.ok=true;
         return true;
     };
@@ -1360,17 +1381,32 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 pct(tp_info.baseline_exported.jerk_rms,tp_info.candidate_exported.jerk_rms),
                 tp_info.baseline_exported.jerk_max,tp_info.candidate_exported.jerk_max,
                 tp_info.max_export_deviation_rad);
-            if (!evaluateTransport("time_profile_candidate",tp_info.plan,tp_cand_stats,first_object,
-                                   transport_delta,transport_dyaw,tp_info.progress_of_time,&compare_csv))
-                return planFail(detail);
-            tp_ok=tp_cand_stats.collisions==0 && !tp_cand_stats.limit_violation &&
-                !tp_cand_stats.vel_violation && !tp_cand_stats.acc_violation &&
-                tp_cand_stats.max_sample_dual_pos_mm<=5.0 && tp_cand_stats.max_sample_dual_ang_deg<=2.0 &&
-                tp_cand_stats.max_rod_pos_mm<=5.0 && tp_cand_stats.max_rod_ang_deg<=2.0;
+            if (tp_info.accepted) {
+                if (!evaluateTransport("time_profile_candidate",tp_info.plan,tp_cand_stats,first_object,
+                                       transport_delta,transport_dyaw,tp_info.progress_of_time,&compare_csv)) {
+                    tp_info.transport_ok=false;
+                    tp_info.fallback_reason="final_transport_evaluation_failed: "+detail;
+                } else {
+                    tp_info.transport_ok=tp_cand_stats.collisions==0 && !tp_cand_stats.limit_violation &&
+                        !tp_cand_stats.vel_violation && !tp_cand_stats.acc_violation &&
+                        tp_cand_stats.max_sample_dual_pos_mm<=5.0 && tp_cand_stats.max_sample_dual_ang_deg<=2.0 &&
+                        tp_cand_stats.max_rod_pos_mm<=5.0 && tp_cand_stats.max_rod_ang_deg<=2.0;
+                }
+            }
+            tp_ok=tp_info.accepted && tp_info.transport_ok;
             RCLCPP_INFO(ctx_->get_logger(),
-                "[TIME_PROFILE_CHECK] candidate_pass=%d collisions=%zu limits=%d vel=%d acc=%d "
+                "[TIME_PROFILE_ACCEPTANCE] accepted=%d candidate_pass=%d fallback_reason=%s "
+                "continuous_rms_improved=%d peak_ok=%d constraints_ok=%d export_fidelity_ok=%d "
+                "export_spacing=%g max_export_deviation_rad=%.9f",
+                tp_info.accepted?1:0,tp_ok?1:0,
+                tp_info.fallback_reason.empty()?"none":tp_info.fallback_reason.c_str(),
+                tp_info.rms_improved?1:0,tp_info.peak_ok?1:0,tp_info.constraints_ok?1:0,
+                tp_info.export_fidelity_ok?1:0,tp_info.export_spacing_used,
+                tp_info.max_export_deviation_rad);
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[TIME_PROFILE_CHECK] received_candidate_pass=%d collisions=%zu limits=%d vel=%d acc=%d "
                 "dual_max=(%.6f mm,%.6f deg) rod_path_max=(%.6f mm,%.6f deg) "
-                "vel_ratio=%.4f acc_ratio=%.4f jerk_rms(exported)=%.6f jerk_max=%.6f "
+                "vel_ratio=%.4f acc_ratio=%.4f command_interp_jerk_rms=%.6f command_interp_jerk_max=%.6f "
                 "max_export_deviation_rad=%.9f",
                 tp_ok?1:0,tp_cand_stats.collisions,tp_cand_stats.limit_violation?1:0,
                 tp_cand_stats.vel_violation?1:0,tp_cand_stats.acc_violation?1:0,
@@ -1390,6 +1426,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 baseline_stats.jerk_rms,baseline_stats.jerk_max);
             if (!writeTrajectoryCsv("experiment_results/a1_runs/"+run_id+"/time_profile_candidate.csv",
                                     tp_info.plan)) return planFail("E_TIME_PROFILE_CSV_OPEN");
+            if (!writeTrajectoryCsv("experiment_results/a1_runs/"+run_id+"/time_profile_selected.csv",
+                                    tp_ok?tp_info.plan:baseline)) return planFail("E_TIME_PROFILE_SELECTED_CSV_OPEN");
         }
 
         auto logStats=[&](const char* name,const TransportPlanStats& s,double planning_sec) {
@@ -1429,10 +1467,15 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                   "max_vel_ratio,max_acc_ratio,acc_rms,jerk_rms,jerk_max,"
                   "continuous_jerk_rms,continuous_jerk_max,exported_jerk_rms,exported_jerk_max,"
                   "max_export_deviation_rad,max_sample_dual_pos_mm,max_sample_dual_ang_deg,"
-                  "max_rod_pos_mm,max_rod_ang_deg,time_profile_evaluations,time_profile_parameters,pass\n";
+                  "max_rod_pos_mm,max_rod_ang_deg,time_profile_evaluations,time_profile_parameters,"
+                  "pass,time_profile_accepted,time_profile_transport_ok,"
+                  "time_profile_export_fidelity_ok,time_profile_export_spacing_used,"
+                  "time_profile_fallback_reason\n";
             auto writeRow=[&](const char* name,const TransportPlanStats& s,double planning_sec,
                               bool pass,double cont_rms,double cont_max,double exp_rms,double exp_max,
-                              double dev,int evaluations,int parameters) {
+                              double dev,int evaluations,int parameters,bool accepted,
+                              bool transport_ok,bool export_fidelity_ok,double export_spacing,
+                              const std::string& fallback_reason) {
                 summary<<name<<','<<ctx_->rod_target_x_<<','<<ctx_->rod_target_y_<<','
                     <<ctx_->rod_target_yaw_rad_*180.0/M_PI<<','<<transport_delta.x()<<','
                     <<transport_delta.y()<<','<<transport_dyaw*180.0/M_PI<<','
@@ -1443,17 +1486,23 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                     <<cont_rms<<','<<cont_max<<','<<exp_rms<<','<<exp_max<<','<<dev<<','
                     <<s.max_sample_dual_pos_mm<<','<<s.max_sample_dual_ang_deg<<','
                     <<s.max_rod_pos_mm<<','<<s.max_rod_ang_deg<<','<<evaluations<<','
-                    <<parameters<<','<<(pass?1:0)<<'\n';
+                    <<parameters<<','<<(pass?1:0)<<','<<(accepted?1:0)<<','
+                    <<(transport_ok?1:0)<<','<<(export_fidelity_ok?1:0)<<','<<export_spacing<<','
+                    <<(fallback_reason.empty()?"none":fallback_reason)<<'\n';
             };
             writeRow("baseline",baseline_stats,baseline_plan_sec,baseline_passes,
-                     -1.0,-1.0,baseline_stats.jerk_rms,baseline_stats.jerk_max,0.0,-1,-1);
+                     -1.0,-1.0,baseline_stats.jerk_rms,baseline_stats.jerk_max,0.0,-1,-1,
+                     true,true,true,0.0,"none");
             writeRow("geometry_candidate",optimized_stats,optimized_plan_sec,optimized_passes,
-                     -1.0,-1.0,optimized_stats.jerk_rms,optimized_stats.jerk_max,0.0,-1,-1);
+                     -1.0,-1.0,optimized_stats.jerk_rms,optimized_stats.jerk_max,0.0,-1,-1,
+                     true,optimized_passes,true,0.0,"none");
             if (tp_info.ok) {
                 writeRow("time_profile_candidate",tp_cand_stats,tp_info.solve_sec,tp_ok,
                          tp_info.candidate_continuous.jerk_rms,tp_info.candidate_continuous.jerk_max,
                          tp_info.candidate_exported.jerk_rms,tp_info.candidate_exported.jerk_max,
-                         tp_info.max_export_deviation_rad,tp_info.evaluations,tp_info.parameters);
+                         tp_info.max_export_deviation_rad,tp_info.evaluations,tp_info.parameters,
+                         tp_info.accepted,tp_info.transport_ok,tp_info.export_fidelity_ok,
+                         tp_info.export_spacing_used,tp_info.fallback_reason);
             }
             summary.flush();
             if (!summary) return planFail("E_TRANSPORT_SUMMARY_CSV_WRITE");
@@ -3030,12 +3079,47 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     RCLCPP_INFO(ctx_->get_logger(),
         "[CONTACT_PROBE_TRANSPORT_STRETCH] value=%.3f (env CONTACT_TRANSPORT_STRETCH, default 2.0)",
         transport_stretch);
+    double transport_time_scale=1.0;
+    if (const char* raw=std::getenv("CONTACT_TRANSPORT_TIME_SCALE")) {
+        const double value=std::atof(raw);
+        if (!std::isfinite(value) || value<=0.0) {
+            detail="E_CONTACT_TRANSPORT_TIME_SCALE";
+            return fail(detail);
+        }
+        transport_time_scale=value;
+    }
+    RCLCPP_INFO(ctx_->get_logger(),
+        "[CONTACT_TRANSPORT_TIME_SCALE] value=%.6f (env CONTACT_TRANSPORT_TIME_SCALE, "
+        "applies only to transport main segment)",
+        transport_time_scale);
     const double transport_plan_start=steadySeconds();
-    if (!makePlan(lifted, transport_delta, transport, "transport", 1.0, 0.3, transport_stretch, transport_dyaw)) return fail(detail);
+    if (!makePlan(lifted, transport_delta, transport, "transport", 1.0, 0.3,
+                  transport_stretch, transport_dyaw, false, nullptr, transport_time_scale))
+        return fail(detail);
     const double transport_plan_sec=steadySeconds()-transport_plan_start;
     const std::string abcd_run_dir="experiment_results/a1_runs/"+run_id+"/";
     if (abcd_group && !writeTrajectoryCsv(abcd_run_dir+"abcd_transport_baseline.csv",transport))
         return fail("E_ABCD_BASELINE_TRAJECTORY_WRITE");
+    if (!abcd_group) {
+        if (!writeTrajectoryCsv(abcd_run_dir+"contact_transport_planned.csv",transport))
+            return fail("E_CONTACT_TRANSPORT_PLANNED_CSV_WRITE");
+        const auto& transport_jt=transport.trajectory_.joint_trajectory;
+        const double final_duration=rclcpp::Duration(transport_jt.points.back().time_from_start).seconds();
+        const double base_duration=final_duration/transport_time_scale;
+        std::ofstream meta(abcd_run_dir+"contact_transport_meta.txt");
+        if (!meta) return fail("E_CONTACT_TRANSPORT_META_OPEN");
+        meta<<std::setprecision(12)
+            <<"source=fresh_measured_transport_start\n"
+            <<"transport_stretch="<<transport_stretch<<"\n"
+            <<"transport_time_scale="<<transport_time_scale<<"\n"
+            <<"base_plan_duration_s="<<base_duration<<"\n"
+            <<"planned_duration_s="<<final_duration<<"\n"
+            <<"transport_dx="<<transport_delta.x()<<"\n"
+            <<"transport_dy="<<transport_delta.y()<<"\n"
+            <<"transport_dyaw_deg="<<transport_dyaw*180.0/M_PI<<"\n";
+        meta.flush();
+        if (!meta) return fail("E_CONTACT_TRANSPORT_META_WRITE");
+    }
     // S2 extended-scenario execution pairing. When enabled, BOTH trajectories
     // are built from THIS run's measured transport start and saved; only the
     // requested one is dispatched. The baseline keeps the production planning
@@ -3074,6 +3158,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             candidate_plan_sec=pairing_tp.solve_sec;
             if (candidate_built) pairing_candidate=pairing_tp.plan;
             else candidate_error=pairing_tp.detail;
+            if (candidate_built && !pairing_tp.accepted)
+                candidate_error=pairing_tp.fallback_reason;
         }
         const Transform pairing_first=lifted.getGlobalLinkTransform(eefs[0])*object_to_hand[0].inverse();
         TransportPlanStats pairing_base_stats,pairing_cand_stats;
@@ -3085,7 +3171,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             pairing_base_stats.max_sample_dual_pos_mm<=5.0 && pairing_base_stats.max_sample_dual_ang_deg<=2.0 &&
             pairing_base_stats.max_rod_pos_mm<=5.0 && pairing_base_stats.max_rod_ang_deg<=2.0;
         bool candidate_ok=false;
-        if (candidate_built) {
+        if (candidate_built &&
+            (pairing_kind!="time_profile" || pairing_tp.accepted)) {
             const std::function<double(double)> progress =
                 pairing_kind=="time_profile"?pairing_tp.progress_of_time:std::function<double(double)>{};
             if (!evaluateTransport("pairing_candidate",pairing_candidate,pairing_cand_stats,pairing_first,
@@ -3109,6 +3196,10 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 <<"pairing_choice="<<pairing_choice<<"\n"
                 <<"candidate_kind="<<pairing_kind<<"\n"
                 <<"candidate_built="<<(candidate_built?1:0)<<"\n"
+                <<"optimizer_accepted="<<(pairing_kind=="time_profile"?pairing_tp.accepted:true)<<"\n"
+                <<"fallback_reason="<<(pairing_tp.fallback_reason.empty()?"none":pairing_tp.fallback_reason)<<"\n"
+                <<"export_spacing_used="<<pairing_tp.export_spacing_used<<"\n"
+                <<"max_export_deviation_rad="<<pairing_tp.max_export_deviation_rad<<"\n"
                 <<"candidate_error="<<candidate_error<<"\n"
                 <<"transport_stretch="<<transport_stretch<<"\n"
                 <<"transport_dx="<<transport_delta.x()<<"\n"
@@ -3135,35 +3226,46 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 <<"plan,kind,executed,points,duration_s,planning_sec,collisions,"
                   "limit_violation,vel_violation,acc_violation,max_vel_ratio,max_acc_ratio,"
                   "acc_rms,jerk_rms,jerk_max,continuous_jerk_rms,continuous_jerk_max,"
-                  "max_export_deviation_rad,max_sample_dual_pos_mm,max_sample_dual_ang_deg,"
-                  "max_rod_pos_mm,max_rod_ang_deg,pass\n";
+                  "command_interp_jerk_rms,command_interp_jerk_max,max_export_deviation_rad,"
+                  "export_spacing_used,accepted,selected,max_sample_dual_pos_mm,"
+                  "max_sample_dual_ang_deg,max_rod_pos_mm,max_rod_ang_deg,pass\n";
             auto row=[&](const char* name,const char* kind,const TransportPlanStats& s,
                          double planning_sec,bool pass,double cont_rms,double cont_max,
-                         double dev) {
+                         double command_rms,double command_max,double dev,double spacing,
+                         bool accepted,bool selected) {
                 csv<<name<<','<<kind<<','<<(pairing_choice==name?1:0)<<','<<s.points<<','
                    <<s.duration<<','<<planning_sec<<','<<s.collisions<<','
                    <<(s.limit_violation?1:0)<<','<<(s.vel_violation?1:0)<<','
                    <<(s.acc_violation?1:0)<<','<<s.max_vel_ratio<<','<<s.max_acc_ratio<<','
                    <<s.acc_rms<<','<<s.jerk_rms<<','<<s.jerk_max<<','<<cont_rms<<','
-                   <<cont_max<<','<<dev<<','<<s.max_sample_dual_pos_mm<<','
+                   <<cont_max<<','<<command_rms<<','<<command_max<<','<<dev<<','<<spacing<<','
+                   <<(accepted?1:0)<<','<<(selected?1:0)<<','<<s.max_sample_dual_pos_mm<<','
                    <<s.max_sample_dual_ang_deg<<','<<s.max_rod_pos_mm<<','
                    <<s.max_rod_ang_deg<<','<<(pass?1:0)<<'\n';
             };
-            row("baseline","production",pairing_base_stats,transport_plan_sec,base_ok,-1.0,-1.0,0.0);
+            row("baseline","production",pairing_base_stats,transport_plan_sec,base_ok,-1.0,-1.0,
+                pairing_base_stats.jerk_rms,pairing_base_stats.jerk_max,0.0,0.0,true,
+                pairing_choice=="baseline");
             if (candidate_built) {
                 row("candidate",pairing_kind.c_str(),pairing_cand_stats,candidate_plan_sec,
                     candidate_ok,pairing_kind=="time_profile"?pairing_tp.candidate_continuous.jerk_rms:-1.0,
                     pairing_kind=="time_profile"?pairing_tp.candidate_continuous.jerk_max:-1.0,
-                    pairing_kind=="time_profile"?pairing_tp.max_export_deviation_rad:0.0);
+                    pairing_kind=="time_profile"?pairing_tp.candidate_exported.jerk_rms:pairing_cand_stats.jerk_rms,
+                    pairing_kind=="time_profile"?pairing_tp.candidate_exported.jerk_max:pairing_cand_stats.jerk_max,
+                    pairing_kind=="time_profile"?pairing_tp.max_export_deviation_rad:0.0,
+                    pairing_kind=="time_profile"?pairing_tp.export_spacing_used:0.0,
+                    pairing_kind=="geometry"?true:pairing_tp.accepted,
+                    pairing_choice=="candidate" && candidate_ok);
             }
             csv.flush();
             if (!csv) return fail("E_TRANSPORT_PAIRING_SUMMARY_WRITE");
         }
         RCLCPP_INFO(ctx_->get_logger(),
-            "[TRANSPORT_PAIRING] choice=%s kind=%s candidate_built=%d candidate_ok=%d "
+            "[TRANSPORT_PAIRING] choice=%s kind=%s candidate_built=%d optimizer_accepted=%d candidate_ok=%d "
             "baseline_jerk_rms=%.4f candidate_jerk_rms=%.4f baseline_duration=%.6f "
             "candidate_duration=%.6f baseline_samples=%zu candidate_samples=%zu error=%s",
-            pairing_choice.c_str(),pairing_kind.c_str(),candidate_built?1:0,candidate_ok?1:0,
+            pairing_choice.c_str(),pairing_kind.c_str(),candidate_built?1:0,
+            (pairing_kind=="time_profile"?pairing_tp.accepted:true)?1:0,candidate_ok?1:0,
             pairing_base_stats.jerk_rms,candidate_built?pairing_cand_stats.jerk_rms:-1.0,
             pairing_base_stats.duration,candidate_built?pairing_cand_stats.duration:-1.0,
             pairing_base_stats.samples,candidate_built?pairing_cand_stats.samples:0,
@@ -3187,43 +3289,101 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     if (ctx_->contact_abcd_group_ == "B" || ctx_->contact_abcd_group_ == "D") {
         if (!refreshTruthBeforeLift("before_transport_time_profile"))
             return fail(detail.empty()?"E_CONTACT_TRUTH_BEFORE_TIME_PROFILE":detail);
+        const auto baseline_transport=transport;
         TimeProfileCandidateInfo selected_time_profile;
         if (!buildTimeProfileCandidate(transport, selected_time_profile) || !selected_time_profile.ok)
             return fail("E_ABCD_TIME_PROFILE: " + selected_time_profile.detail);
-        transport = selected_time_profile.plan;
-        if (!writeTrajectoryCsv(abcd_run_dir+"abcd_transport_optimized.csv", transport))
+        const Transform final_first_object=lifted.getGlobalLinkTransform(eefs[0])*object_to_hand[0].inverse();
+        TransportPlanStats final_baseline_stats;
+        if (!evaluateTransport("abcd_final_baseline",baseline_transport,final_baseline_stats,
+                               final_first_object,transport_delta,transport_dyaw,{},nullptr))
+            return fail(detail);
+        selected_time_profile.transport_ok=false;
+        if (selected_time_profile.accepted) {
+            TransportPlanStats final_candidate_stats;
+            if (!evaluateTransport("abcd_final_candidate",selected_time_profile.plan,
+                                   final_candidate_stats,final_first_object,transport_delta,
+                                   transport_dyaw,selected_time_profile.progress_of_time,nullptr)) {
+                selected_time_profile.fallback_to_baseline=true;
+                selected_time_profile.fallback_reason="final_transport_evaluation_failed: "+detail;
+            } else {
+                selected_time_profile.transport_ok=final_candidate_stats.collisions==0 &&
+                    !final_candidate_stats.limit_violation &&
+                    !final_candidate_stats.vel_violation &&
+                    !final_candidate_stats.acc_violation &&
+                    final_candidate_stats.max_sample_dual_pos_mm<=5.0 &&
+                    final_candidate_stats.max_sample_dual_ang_deg<=2.0 &&
+                    final_candidate_stats.max_rod_pos_mm<=5.0 &&
+                    final_candidate_stats.max_rod_ang_deg<=2.0;
+            }
+        }
+        const bool selected_candidate=selected_time_profile.accepted &&
+            selected_time_profile.transport_ok;
+        transport=selected_candidate?selected_time_profile.plan:baseline_transport;
+        if (!writeTrajectoryCsv(abcd_run_dir+"abcd_transport_candidate.csv",
+                                selected_time_profile.plan))
+            return fail("E_ABCD_CANDIDATE_TRAJECTORY_WRITE");
+        if (!writeTrajectoryCsv(abcd_run_dir+"abcd_transport_selected.csv",transport))
+            return fail("E_ABCD_SELECTED_TRAJECTORY_WRITE");
+        if (selected_candidate &&
+            !writeTrajectoryCsv(abcd_run_dir+"abcd_transport_optimized.csv",transport))
             return fail("E_ABCD_OPTIMIZED_TRAJECTORY_WRITE");
         {
             std::ofstream metrics(abcd_run_dir+"abcd_transport_time_profile.csv");
             if (!metrics) return fail("E_ABCD_TIME_PROFILE_METRICS_OPEN");
             metrics<<std::setprecision(12)
-                <<"plan,duration_s,solve_sec,continuous_jerk_rms,continuous_jerk_max,"
-                  "exported_jerk_rms,exported_jerk_max,max_export_deviation_rad,evaluations,parameters\n"
-                <<"baseline,"<<selected_time_profile.duration<<",0,"
+                <<"plan,accepted,selected,transport_ok,fallback_reason,duration_s,solve_sec,"
+                  "continuous_jerk_rms,continuous_jerk_max,exported_jerk_rms,"
+                  "exported_jerk_max,command_interp_jerk_rms,command_interp_jerk_max,"
+                  "max_export_deviation_rad,export_spacing_used,evaluations,parameters\n"
+                <<"baseline,0,"<<(selected_candidate?0:1)<<",1,none,"
+                <<selected_time_profile.duration<<",0,"
                 <<selected_time_profile.baseline_continuous.jerk_rms<<','
                 <<selected_time_profile.baseline_continuous.jerk_max<<','
                 <<selected_time_profile.baseline_exported.jerk_rms<<','
-                <<selected_time_profile.baseline_exported.jerk_max<<",0,0,0\n"
-                <<"candidate,"<<selected_time_profile.duration<<','<<selected_time_profile.solve_sec<<','
+                <<selected_time_profile.baseline_exported.jerk_max<<','
+                <<selected_time_profile.baseline_exported.jerk_rms<<','
+                <<selected_time_profile.baseline_exported.jerk_max<<",0,"
+                <<selected_time_profile.export_spacing_used<<",0,0\n"
+                <<"candidate,"<<(selected_time_profile.accepted?1:0)<<','
+                <<(selected_candidate?1:0)<<','<<(selected_time_profile.transport_ok?1:0)<<','
+                <<(selected_time_profile.fallback_reason.empty()?"none":selected_time_profile.fallback_reason)
+                <<','<<selected_time_profile.duration<<','<<selected_time_profile.solve_sec<<','
                 <<selected_time_profile.candidate_continuous.jerk_rms<<','
                 <<selected_time_profile.candidate_continuous.jerk_max<<','
                 <<selected_time_profile.candidate_exported.jerk_rms<<','
                 <<selected_time_profile.candidate_exported.jerk_max<<','
+                <<selected_time_profile.candidate_exported.jerk_rms<<','
+                <<selected_time_profile.candidate_exported.jerk_max<<','
                 <<selected_time_profile.max_export_deviation_rad<<','
+                <<selected_time_profile.export_spacing_used<<','
                 <<selected_time_profile.evaluations<<','<<selected_time_profile.parameters<<'\n';
             metrics.flush();
             if (!metrics) return fail("E_ABCD_TIME_PROFILE_METRICS_WRITE");
         }
         RCLCPP_INFO(ctx_->get_logger(),
-            "[ABCD_TRAJECTORY] group=%s source=fixed_geometry_time_profile duration=%.6f "
-            "continuous_jerk_rms=%.6f->%.6f exported_jerk_rms=%.6f->%.6f "
-            "max_export_deviation_rad=%.9f solve_sec=%.6f; baseline and candidate q/t/v/a saved",
-            ctx_->contact_abcd_group_.c_str(), selected_time_profile.duration,
+            "[ABCD_TIME_PROFILE_ACCEPTANCE] group=%s accepted=%d selected_candidate=%d "
+            "transport_ok=%d fallback_reason=%s constraints_ok=%d rms_improved=%d "
+            "peak_ok=%d export_fidelity_ok=%d",
+            ctx_->contact_abcd_group_.c_str(),selected_time_profile.accepted?1:0,
+            selected_candidate?1:0,selected_time_profile.transport_ok?1:0,
+            selected_time_profile.fallback_reason.empty()?"none":selected_time_profile.fallback_reason.c_str(),
+            selected_time_profile.constraints_ok?1:0,selected_time_profile.rms_improved?1:0,
+            selected_time_profile.peak_ok?1:0,selected_time_profile.export_fidelity_ok?1:0);
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[ABCD_TRAJECTORY] group=%s source=%s duration=%.6f "
+            "continuous_jerk_rms=%.6f->%.6f command_interp_jerk_rms=%.6f->%.6f "
+            "max_export_deviation_rad=%.9f export_spacing=%g solve_sec=%.6f; "
+            "baseline, candidate and selected q/t/v/a saved",
+            ctx_->contact_abcd_group_.c_str(),
+            selected_candidate?"fixed_geometry_time_profile":"production_baseline",
+            selected_time_profile.duration,
             selected_time_profile.baseline_continuous.jerk_rms,
             selected_time_profile.candidate_continuous.jerk_rms,
             selected_time_profile.baseline_exported.jerk_rms,
             selected_time_profile.candidate_exported.jerk_rms,
-            selected_time_profile.max_export_deviation_rad,selected_time_profile.solve_sec);
+            selected_time_profile.max_export_deviation_rad,selected_time_profile.export_spacing_used,
+            selected_time_profile.solve_sec);
         if (!refreshTruthBeforeLift("after_transport_time_profile"))
             return fail(detail.empty()?"E_CONTACT_TRUTH_AFTER_TIME_PROFILE":detail);
     }

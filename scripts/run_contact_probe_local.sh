@@ -231,5 +231,8 @@ fi
 echo "Return these files from ${RUN_DIR}:"
 echo "  prepare_status.json task_launch.log sim_dual_moveit.log contact_probe.csv"
 echo "  gripper_fingers_mj_left.csv gripper_fingers_mj_right.csv controllers.txt runner.log"
+if [[ "${CONTACT_PROBE_ABCD_GROUP}" == "none" ]]; then
+  echo "  contact_transport_planned.csv contact_transport_meta.txt"
+fi
 echo "ROS logs: ${ROS_LOG_DIR}"
 exit "${RUN_STATUS}"
