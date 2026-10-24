@@ -169,6 +169,7 @@ def plot_transport(data, out_path):
 
     fig.suptitle('S2 transport planning comparison by scenario '
                  '(baseline / geometry / fixed-geometry time profile)')
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
 
@@ -311,6 +312,7 @@ def plot_feedforward(off, on, out_path):
 
     fig.suptitle('Rod payload feedforward: fixed-gain MMC hover, n=3/group; '
                  '0.5 s ramp is inside the 3.0 s hold, not followed by another 3 s window')
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
 
@@ -505,6 +507,7 @@ def plot_directional(fixed, soft, out_path):
 
     fig.suptitle('Directional MMC: lower X stiffness increases displacement and residual; '
                  'same payload feedforward, world +X total 2 N for 1 s, 5 s hold')
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
 
@@ -531,6 +534,7 @@ def plot_directional_detrended(fixed, soft, out_path):
     ax.set_title('Auxiliary de-trended response (assumes the pre-pulse drift continues)')
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8, ncol=2)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
 
@@ -550,7 +554,8 @@ def main():
     parser.add_argument('--report-dir', type=Path,
                         default=Path('experiment_results/reports/s2s3_extended_20261020'))
     parser.add_argument('--fig-dir', type=Path,
-                        default=Path('docs/figures/s2s3_extended_20261020'))
+                        default=Path('docs/figures'),
+                        help='Figure root; technical and exploratory figures go to 历史归档')
     args = parser.parse_args()
     args.report_dir.mkdir(parents=True, exist_ok=True)
     args.fig_dir.mkdir(parents=True, exist_ok=True)
@@ -591,7 +596,7 @@ def main():
             })
     write_csv(args.report_dir / 'transport_plan_comparison.csv', transport_rows,
               list(transport_rows[0].keys()))
-    plot_transport(transport, args.fig_dir / 'transport_plan_comparison.png')
+    plot_transport(transport, args.fig_dir / '历史归档/离线探索/20261020_扩展场景规划对照.png')
 
     # 2. Feedforward
     ff = {}
@@ -628,7 +633,7 @@ def main():
             rec['task_state'] = 'DONE' if rec['completed'] else 'FAILED'
             ff_records.append({key: rec.get(key) for key in ff_fields})
     write_csv(args.report_dir / 'feedforward_summary.csv', ff_records, ff_fields)
-    plot_feedforward(ff['off'], ff['on'], args.fig_dir / 'feedforward_hover_comparison.png')
+    plot_feedforward(ff['off'], ff['on'], args.fig_dir / '历史归档/技术分析版/03_载荷补偿减少下沉.png')
     (args.report_dir / 'feedforward_summary.json').write_text(
         json.dumps({group: [{k: v for k, v in rec.items() if k != 'series'}
                             for rec in ff[group]] for group in ff},
@@ -661,9 +666,9 @@ def main():
             rec[f'{key}_pre_pulse_drift_slope_mm_s'] = rec['pre_pulse_drift_slope_mm_s'][key]
     write_csv(args.report_dir / 'directional_summary.csv', dir_records, dir_fields)
     plot_directional(directional['fixed'], directional['soft'],
-                     args.fig_dir / 'directional_pulse_comparison.png')
+                     args.fig_dir / '历史归档/技术分析版/04_方向性柔顺与受力让步.png')
     plot_directional_detrended(directional['fixed'], directional['soft'],
-                               args.fig_dir / 'directional_pulse_detrended.png')
+                               args.fig_dir / '历史归档/离线探索/20261020_方向性受力去趋势.png')
 
     print('transport:', args.report_dir / 'transport_plan_comparison.csv')
     for group in ('off', 'on'):

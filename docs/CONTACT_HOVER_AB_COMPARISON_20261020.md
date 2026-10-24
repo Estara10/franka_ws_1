@@ -63,18 +63,18 @@
 
 ## 3. 图表
 
-- `docs/figures/hover_ab_vertical_displacement_20261020.png`：按各组实际窗口入口对齐的杆与双手世界坐标 ΔZ；每行独立显示一组，但同一列共用纵轴。细线为每次运行，粗线为组中位数。
-- `docs/figures/hover_ab_residual_attitude_20261020.png`：原抓取参考下的杆中心残差与杆姿态变化；残差不是局部接触滑移。
-- `docs/figures/hover_ab_run_summary_20261020.png`：逐次杆世界下降量、杆−手相对位置变化和完成情况；相对位置变化不是直接接触滑移。
+- `docs/figures/历史归档/早期实验/20261020_悬空保持高度变化.png`：按各组实际窗口入口对齐的杆与双手世界坐标 ΔZ；每行独立显示一组，但同一列共用纵轴。细线为每次运行，粗线为组中位数。
+- `docs/figures/历史归档/早期实验/20261020_悬空保持残差与姿态.png`：原抓取参考下的杆中心残差与杆姿态变化；残差不是局部接触滑移。
+- `docs/figures/历史归档/早期实验/20261020_悬空保持逐次汇总.png`：逐次杆世界下降量、杆−手相对位置变化和完成情况；相对位置变化不是直接接触滑移。
 - 机器可读结果：`experiment_results/reports/hover_ab_20261020/hover_ab_summary.csv`、`hover_ab_summary.json`。
 - 复现脚本：`python3 -I scripts/analyze_hover_ab.py`（只读原始 run 数据）。
 - 原始数据：`experiment_results/a1_runs/<run_id>/`，启动日志：`launch_logs/<run_id>/`；`<run_id>` 见表 1。
 
-![垂直位移](figures/hover_ab_vertical_displacement_20261020.png)
+![垂直位移](figures/历史归档/早期实验/20261020_悬空保持高度变化.png)
 
-![抓取残差与杆姿态](figures/hover_ab_residual_attitude_20261020.png)
+![抓取残差与杆姿态](figures/历史归档/早期实验/20261020_悬空保持残差与姿态.png)
 
-![每次运行汇总](figures/hover_ab_run_summary_20261020.png)
+![每次运行汇总](figures/历史归档/早期实验/20261020_悬空保持逐次汇总.png)
 
 ## 4. 失败与未计入样本
 

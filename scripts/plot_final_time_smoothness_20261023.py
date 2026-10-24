@@ -20,7 +20,7 @@ from scientific_style import GROUP_COLORS, NATURE, configure_scientific_style
 ROOT = Path(__file__).resolve().parents[1]
 OFFLINE = ROOT / "experiment_results/reports/final_tradeoff_20261022/time_profile_rs_o/rs_o_by_run.csv"
 EXECUTION = ROOT / "experiment_results/reports/final_tradeoff_20261022/rs_execution/rs_execution.csv"
-OUT_DIR = ROOT / "docs/figures/final_tradeoff_20261022"
+OUT_DIR = ROOT / "docs/figures/历史归档/技术分析版"
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -112,10 +112,10 @@ def main() -> None:
     fig.tight_layout(rect=(0.0, 0.07, 1.0, 0.95))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for suffix in ("png", "svg"):
-        fig.savefig(OUT_DIR / f"fig_time_smoothness_final.{suffix}", dpi=300)
+        fig.savefig(OUT_DIR / f"02_运输时间与平滑度.{suffix}", dpi=300)
     plt.close(fig)
-    print(OUT_DIR / "fig_time_smoothness_final.png")
-    print(OUT_DIR / "fig_time_smoothness_final.svg")
+    print(OUT_DIR / "02_运输时间与平滑度.png")
+    print(OUT_DIR / "02_运输时间与平滑度.svg")
 
 
 if __name__ == "__main__":

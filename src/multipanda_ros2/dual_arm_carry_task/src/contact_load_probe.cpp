@@ -523,9 +523,15 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         const Transform inferred_right=live.getGlobalLinkTransform(eefs[1])*object_to_hand[1].inverse();
         const double residual_pos_tol=carrying_transition?lift_slip_tol:pos_tol;
         const double residual_angle_tol=carrying_transition?carrying_angle_tol:angle_tol;
+        const double dual_position_error=(inferred.translation()-inferred_right.translation()).norm();
+        const double dual_angle_error=rotationError(inferred,inferred_right);
         if (!relax_dual_residual &&
-            ((inferred.translation()-inferred_right.translation()).norm()>residual_pos_tol ||
-             rotationError(inferred,inferred_right)>residual_angle_tol)) {
+            (dual_position_error>residual_pos_tol || dual_angle_error>residual_angle_tol)) {
+            RCLCPP_ERROR(ctx_->get_logger(),
+                "[CONTACT_DUAL_GRASP_RESIDUAL] position_mm=%.6f angle_deg=%.6f "
+                "limits_mm_deg=(%.3f,%.3f)",
+                dual_position_error*1000.0,dual_angle_error*180.0/M_PI,
+                residual_pos_tol*1000.0,residual_angle_tol*180.0/M_PI);
             detail="E_CONTACT_DUAL_GRASP_RESIDUAL"; return false;
         }
         // After release the rod stays at its measured world pose; the virtual
@@ -3675,7 +3681,10 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             for (std::size_t index=0;index<bounds.size();++index) {
                 const auto& name=bounds[index];
                 q0.push_back(dispatch.getVariablePosition(name));
-                v0.push_back(dispatch.getVariableVelocity(name));
+                // measured() fills positions only. The post-lift JTC hold is
+                // stationary; use a zero-velocity boundary instead of reading
+                // RobotState's uninitialized velocity storage.
+                v0.push_back(0.0);
                 a0.push_back(0.0);
                 q1.push_back(first.positions.at(index));
                 v1.push_back(index<first.velocities.size()?first.velocities[index]:0.0);
@@ -3708,7 +3717,13 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 moveit::core::RobotState sample_state(live_model);
                 sample_state.setVariablePositions(bounds,point.positions); applyTransportFingers(sample_state);
                 sample_state.update();
-                if (!valid(sample_state,abcd_group)) return fail("E_ABCD_JTC_START_CONNECTION_INVALID: "+detail);
+                if (!valid(sample_state,abcd_group)) {
+                    RCLCPP_ERROR(ctx_->get_logger(),
+                        "[ABCD_JTC_START_CONNECTION] rejected sample=%d/%d "
+                        "max_joint_delta_rad=%.9f start_velocity=stationary_zero",
+                        sample,samples,max_delta);
+                    return fail("E_ABCD_JTC_START_CONNECTION_INVALID: "+detail);
+                }
                 connected.points.push_back(std::move(point));
             }
             // Drop the old t=0 sample (the connection endpoint is exactly the
@@ -3722,7 +3737,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             moveit::core::robotStateToRobotStateMsg(dispatch,transport_dispatch.start_state_);
             RCLCPP_INFO(ctx_->get_logger(),
                 "[ABCD_JTC_START_CONNECTION] samples=%d duration_sec=%.3f max_joint_delta_rad=%.9f "
-                "quintic_boundary_qva=continuous limits_collision_closed_chain=passed",
+                "start_velocity=stationary_zero quintic_boundary_qva=continuous "
+                "limits_collision_closed_chain=passed",
                 samples+1,T,max_delta);
         }
     }

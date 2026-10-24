@@ -15,6 +15,7 @@
 
 ## 当前状态
 
+- **结题选图入口：[图片说明与分类](docs/figures/README.md)。** 4张主图统一在 `docs/figures/结题主图/`，细分结果放 `辅助图/`，旧版与探索图保留在 `历史归档/`。
 - **2026-10-23 当前交接与入口：[HANDOFF_20261023.md](docs/HANDOFF_20261023.md)。** 最新同场景无weld完整搬运对照12次中11次完成，A/C/D各3次、B两次；ABCD统计和时间优化目标/最终检查已修正，正式12路径离线验收通过（12/12候选接受），R/S四次执行也已完成。O因gate未通过未执行，后续主要剩图表与正文收口。
 - 队友离线接续所需原始轨迹和记录已打包；拉取后按交接文档解压，无需为获取样本重新跑仿真。现有ABCD图表的统计修订项见交接开头，勿直接当作最终结题数值。
 - **结题研究状态与边界见：[项目指南](docs/PROJECT_GUIDE.md)。**
@@ -24,16 +25,15 @@
 - R/S/O 离线比较已完成：O/S RMS 中位改善约 `−4.86%`，未达到 `−5%` gate；因此不执行 O，后续按 R/S 结果整理图表和正文。
 - R/S 四次完整搬运已完成（R1→S1→S2→R2）：四次 `DONE`，weld/约束关闭；计划运输时长均值 R/S 为
   `2.2366/2.6787 s`，动作墙钟均值为 `2.5412/3.2571 s`。O 因离线 gate 为 0 未执行。
-- 最终时间—平滑度主图：[fig_time_smoothness_final.png](docs/figures/final_tradeoff_20261022/fig_time_smoothness_final.png)；
+- 最终时间—平滑度主图：[02_运输时间与平滑度.png](docs/figures/结题主图/02_运输时间与平滑度.png)；
   统一结论见 [20261022_结题收口_结果.md](docs/deliverables/20261022_结题收口_结果.md)。
 - S3 无 weld 接触下的 JTC/MMC 悬空保持 A/B 各完成 3 次；每次均完成保持、切回和释放，
   MMC 杆世界 Z 位移中位数为 −8.48 mm。固定/方向性 MMC 的 +X 短脉冲对照各 3 次，未显示明确优势。
   该项是历史悬空保持结果；随后已完成固定场景MMC完整搬运，最新记录见10月22日交接，尚不支持性能全面优于JTC。
 - A1 真值准备、静态与预抓取路径检查已具备；随机场景全过程统计尚未完成。
 
-结题主图：S2 离线指标 `docs/figures/s2_offline_metrics_single_sample_20261020.png`；
-JTC/MMC 悬空位移 `docs/figures/hover_ab_vertical_displacement_20261020.png`；
-固定/方向性脉冲 `experiment_results/reports/hover_directional_perturbation_20261020/mmc_directional_perturbation_comparison.png`。
+当前结题主图为完整搬运对照、运输时间与平滑度、载荷补偿减少下沉、方向性柔顺与受力让步，
+文件与使用说明见[图片目录](docs/figures/README.md)。早期单样本优化、未补偿悬空保持及旧版统计图均已归档。
 指标口径、逐次结果和限制见 [本机 S2/S3 对照记录](docs/CONTACT_HOVER_AB_COMPARISON_20261020.md)
 及 [S2 几何投影结果](docs/deliverables/P6_S2_projection_optimizer_result_20261017.md)、
 [S2 时间剖面结果](docs/deliverables/P6_S2_time_profile_result_20261017.md)。

@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "experiment_results/a1_runs"
 OUT = ROOT / "experiment_results/reports/abcd_s0_20261022"
-FIG = ROOT / "docs/figures/abcd_s0_20261022"
+FIG = ROOT / "docs/figures/历史归档/旧版统计"
 ORDER = ["Ar1", "Cr1", "Br1", "Dr1", "Dr2", "Br2", "Cr2", "Ar2", "Br3", "Ar3", "Dr3", "Cr3"]
 TARGET = (0.40, 0.0, 0.020654)
 TARGET_YAW = math.radians(20.0)
@@ -178,7 +178,7 @@ def main():
 
     fig.suptitle("S0 no-weld ABCD transport — 3 runs per group, descriptive only")
     fig.tight_layout()
-    fig.savefig(FIG / "abcd_s0_completion_and_release_error.png", dpi=180)
+    fig.savefig(FIG / "20261022_上一批搬运结果.png", dpi=180)
     plt.close(fig)
 
     print(f"wrote {OUT / 'abcd_s0_run_summary.csv'}")

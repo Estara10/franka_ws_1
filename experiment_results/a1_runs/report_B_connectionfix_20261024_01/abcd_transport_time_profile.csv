@@ -1,0 +1,3 @@
+plan,accepted,selected,transport_ok,fallback_reason,duration_s,solve_sec,continuous_jerk_rms,continuous_jerk_max,exported_jerk_rms,exported_jerk_max,command_interp_jerk_rms,command_interp_jerk_max,max_export_deviation_rad,export_spacing_used,evaluations,parameters
+baseline,0,0,1,none,2.235696972,0,3.60845345584,46.690053064,3.79383019733,48.3773208442,3.79383019733,48.3773208442,0,0.005,0,0
+candidate,1,1,1,none,2.235696972,4.160609345,3.46252505978,44.4683633629,3.58890787691,45.7592895772,3.58890787691,45.7592895772,5.72875080707e-14,0.005,100,6

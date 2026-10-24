@@ -42,3 +42,6 @@ experiment_results/reports/final_tradeoff_20261022/time_profile_rs_o/*/
 
 # Nested local checkout retained for reference, not part of this workspace commit
 franka_dual_arm/
+
+# Local submission documents contain personal information; never publish them.
+/report/

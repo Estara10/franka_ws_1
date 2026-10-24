@@ -21,9 +21,8 @@ configure_scientific_style()
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "experiment_results/a1_runs"
 OUT = ROOT / "experiment_results/reports/abcd_s0_today_20261022"
-FIG = ROOT / "docs/figures/abcd_s0_today_20261022"
 FINAL_OUT = ROOT / "experiment_results/reports/final_tradeoff_20261022"
-FINAL_FIG = ROOT / "docs/figures/final_tradeoff_20261022"
+FINAL_FIG = ROOT / "docs/figures"
 FORMAL = [
     ("A", "abcd_s0_today_A1_20261022_210600"),
     ("C", "abcd_s0_today_C1_20261022_210700"),
@@ -309,6 +308,8 @@ def mean_range(rows, key):
 def main():
     FINAL_OUT.mkdir(parents=True, exist_ok=True)
     FINAL_FIG.mkdir(parents=True, exist_ok=True)
+    for directory in ("历史归档/技术分析版", "辅助图", "历史归档/旧版统计"):
+        (FINAL_FIG / directory).mkdir(parents=True, exist_ok=True)
     records = [parse_run(g, run_id, True) for g, run_id in FORMAL]
     validations = [parse_run(g, run_id, False) for g, run_id in VALIDATION]
     public_fields = [k for k in records[0] if not k.startswith("_")]
@@ -450,7 +451,7 @@ def main():
         fontsize=8.5,
     )
     fig.tight_layout()
-    fig.savefig(FINAL_FIG / "abcd_s0_completion_and_placement.png", dpi=180)
+    fig.savefig(FINAL_FIG / "历史归档/技术分析版/01_完整搬运对照.png", dpi=180)
     plt.close(fig)
 
     # Figure 2: same-path before/after metrics for each B/D time-profile run.
@@ -479,7 +480,7 @@ def main():
     ax.set_title("Matched transport duration"); ax.grid(axis="y", alpha=.25); ax.legend(frameon=False)
     fig.suptitle("Same-run, same geometric path; B1 candidate was generated but not executed")
     fig.tight_layout()
-    fig.savefig(FINAL_FIG / "abcd_s0_time_profile_jerk.png", dpi=180)
+    fig.savefig(FINAL_FIG / "历史归档/旧版统计/20261023_原时间优化方法对照.png", dpi=180)
     plt.close(fig)
 
     # Figure 3: measured rod-center space tracks from the existing phase CSVs.
@@ -506,7 +507,7 @@ def main():
     ax.set_title("Measured rod-center paths during lift, transport, lower and retreat")
     ax.legend(fontsize=7, ncol=2, loc="upper left")
     fig.tight_layout()
-    fig.savefig(FINAL_FIG / "abcd_s0_rod_space_trajectories.png", dpi=180)
+    fig.savefig(FINAL_FIG / "辅助图/01_铝条搬运路径.png", dpi=180)
     plt.close(fig)
 
     print(f"formal={FINAL_OUT / 'abcd_s0_formal_runs.csv'}")
@@ -514,7 +515,7 @@ def main():
     print(f"validation={FINAL_OUT / 'abcd_s0_validation_runs.csv'}")
     for item in summary:
         print(item)
-    for name in ("abcd_s0_completion_and_placement.png", "abcd_s0_time_profile_jerk.png", "abcd_s0_rod_space_trajectories.png"):
+    for name in ("历史归档/技术分析版/01_完整搬运对照.png", "历史归档/旧版统计/20261023_原时间优化方法对照.png", "辅助图/01_铝条搬运路径.png"):
         print(FINAL_FIG / name)
 
 

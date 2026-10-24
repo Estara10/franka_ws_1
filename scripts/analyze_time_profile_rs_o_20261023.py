@@ -30,7 +30,7 @@ configure_scientific_style()
 ROOT = Path(__file__).resolve().parents[1]
 FORMAL_RUNS = ROOT / "experiment_results/reports/final_tradeoff_20261022/abcd_s0_formal_runs.csv"
 OUT_DIR = ROOT / "experiment_results/reports/final_tradeoff_20261022/time_profile_rs_o"
-FIG = ROOT / "docs/figures/final_tradeoff_20261022/time_profile_rs_o.png"
+FIG = ROOT / "docs/figures/辅助图/03_时间分配优化对照.png"
 DEFAULT_REPLAY = (
     ROOT
     / "install/dual_arm_carry_task/lib/dual_arm_carry_task/time_profile_replay"

@@ -313,7 +313,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runs-root', type=Path, default=Path('experiment_results/a1_runs'))
     parser.add_argument('--out-dir', type=Path, default=Path('experiment_results/reports/hover_ab_20261020'))
-    parser.add_argument('--fig-dir', type=Path, default=Path('docs/figures'))
+    parser.add_argument('--fig-dir', type=Path, default=Path('docs/figures/历史归档/早期实验'))
     parser.add_argument('--runs', default=None,
                         help='Comma-separated GROUP:run_id entries; defaults to the six reported runs')
     args = parser.parse_args()
@@ -408,9 +408,9 @@ def main():
                 'completed': r['completed'],
             })
 
-    plot_vertical(results, args.fig_dir / 'hover_ab_vertical_displacement_20261020.png')
-    plot_residual_attitude(results, args.fig_dir / 'hover_ab_residual_attitude_20261020.png')
-    plot_summary(results, args.fig_dir / 'hover_ab_run_summary_20261020.png')
+    plot_vertical(results, args.fig_dir / '20261020_悬空保持高度变化.png')
+    plot_residual_attitude(results, args.fig_dir / '20261020_悬空保持残差与姿态.png')
+    plot_summary(results, args.fig_dir / '20261020_悬空保持逐次汇总.png')
 
     for r in results:
         d = r['delta']

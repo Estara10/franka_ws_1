@@ -1,0 +1,16 @@
+run_id=report_B_connectionfix_20261024_01
+task_state=DONE
+runner_exit=0
+mode=B, real contact, JTC, no weld, no attach
+scenario=start(0.50,0.00,+10deg), target(0.40,0.00,+20deg)
+completed=grasp,lift,optimized_transport,lower,release,retreat
+fix=stationary-zero start velocity instead of uninitialized RobotState velocity in the JTC start connection
+start_connection=max_delta 0.005476510 rad, 51 points, 0.5 s; existing checks passed
+transport_duration_sec=2.235697
+continuous_reference_jerk_rms_baseline=3.608453
+continuous_reference_jerk_rms_candidate=3.462525
+optimizer_solve_sec=4.160609
+retreated_rod_xyz_m=0.396550,-0.005201,0.020656
+cleanup=wrapper reaped simulator; no task/simulator/RViz instance remaining
+statistics=standalone repair validation; historical B1 and formal B 2/3 unchanged
+limitations=one successful run; no new paired A/B comparison; reference jerk does not measure executed jerk

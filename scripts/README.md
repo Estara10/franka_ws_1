@@ -1,5 +1,7 @@
 # 根目录 Python 工具说明
 
+结题图片位置统一见[图片说明](../docs/figures/README.md)：`plot_report_figures_20261024.py`使用已有记录生成4张中文主图，写入 `docs/figures/结题主图/`（PNG/SVG），不启动仿真。原技术分析脚本输出至 `历史归档/技术分析版/`，细分图输出至 `辅助图/`；`analyze_s2s3_extended.py` 的 `--fig-dir` 指定分类目录共同根目录，默认 `docs/figures`。
+
 本目录集中存放项目级 Python 辅助工具。所有默认输入、输出路径均由脚本位置反推仓库根目录，
 因此不依赖调用时的当前目录。`start_dual_arm_task.sh` 和 benchmark 脚本也使用绝对定位调用它们。
 
@@ -32,7 +34,7 @@
   `dual_arm_carry_task`，该脚本不启动 MuJoCo。
 - `analyze_time_profile_rs_o_20261023.py`：对同一 12 个基础运输轨迹分别计算 R 原时长、S 统一
   1.2 倍伸时和 O 同 1.2 倍预算的时间优化，生成逐运行 CSV、组汇总、gate CSV 和图
-  `docs/figures/final_tradeoff_20261022/time_profile_rs_o.png`；不启动 MuJoCo，gate 关闭时仍保留 R/S 结果。
+  `docs/figures/辅助图/03_时间分配优化对照.png`；不启动 MuJoCo，gate 关闭时仍保留 R/S 结果。
   `time_profile_replay` 的 `--duration-scale` 只改变目标时长，不改变几何路径；`1.0` 用于 R，
   `1.2` 用于 S/O。
 - R/S 完整搬运执行使用 `CONTACT_TRANSPORT_TIME_SCALE=1.0/1.2`，只作用于运输主段；默认

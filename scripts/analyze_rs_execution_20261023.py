@@ -30,7 +30,7 @@ configure_scientific_style()
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "experiment_results/a1_runs"
 OUT = ROOT / "experiment_results/reports/final_tradeoff_20261022/rs_execution"
-FIG = ROOT / "docs/figures/final_tradeoff_20261022/rs_execution_comparison.png"
+FIG = ROOT / "docs/figures/辅助图/02_正常与慢速搬运对照.png"
 TAGS = ("R1", "S1", "S2", "R2")
 TARGET_XY = (0.40, 0.0)
 TARGET_YAW_DEG = 20.0

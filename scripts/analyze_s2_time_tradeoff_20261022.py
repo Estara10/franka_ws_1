@@ -29,7 +29,7 @@ METHOD_FILES = {
     "TP": "time_profile_candidate.csv",
 }
 REPORT = ROOT / "experiment_results/reports/s2_time_tradeoff_20261022"
-FIGURES = ROOT / "docs/figures/s2_time_tradeoff_20261022"
+FIGURES = ROOT / "docs/figures/历史归档/离线探索"
 
 
 def load_trajectory(path):
@@ -180,7 +180,7 @@ def main():
     axes[0].legend(frameon=False)
     fig.suptitle("Coordinated transport planning: position × method", fontsize=14)
     fig.tight_layout()
-    fig.savefig(FIGURES / "s2_position_method_metrics.png", dpi=180, bbox_inches="tight")
+    fig.savefig(FIGURES / "20261022_运输位置与方法比较.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(10.5, 7))
@@ -208,7 +208,7 @@ def main():
         ax.scatter([], [], marker=marker, facecolors="none", edgecolors="#444444", label=scene)
     ax.legend(frameon=False, ncol=3, loc="upper left")
     fig.tight_layout()
-    fig.savefig(FIGURES / "s2_time_jerk_tradeoff.png", dpi=180, bbox_inches="tight")
+    fig.savefig(FIGURES / "20261022_离线运输时间取舍.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 

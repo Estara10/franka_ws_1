@@ -32,7 +32,7 @@ METRICS = [
 
 
 def main():
-    out = Path("docs/figures/s2_offline_metrics_single_sample_20261020.png")
+    out = Path("docs/figures/历史归档/离线探索/20261020_单样本离线优化.png")
     out.parent.mkdir(parents=True, exist_ok=True)
     fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.6), constrained_layout=True)
     colors = {"baseline": "#557A95", "optimized": "#E1812C"}
