@@ -97,3 +97,17 @@ TEST(ControllerFaultLatch, ControllerStateConflictLatchesImmediately)
   EXPECT_NE(latch.failure().find("controller state conflict"), std::string::npos);
   EXPECT_FALSE(latch.latchControllerStateConflict("anything"));
 }
+
+TEST(ControllerFaultLatch, ArmedResponseUsesTheSameBudgetAsAnArmedQueryMiss)
+{
+  const std::uint64_t sent = 1000000000ULL;
+  const std::uint64_t received = sent + 388000000ULL;
+  ControllerFaultLatch armed;
+  EXPECT_TRUE(armed.observe(true, true, true, false, "", 0, 0,
+                            sent, received, 2000000000ULL));
+  ControllerFaultLatch active;
+  EXPECT_FALSE(active.observe(true, true, true, false, "", 0, 0, sent, received));
+  ControllerFaultLatch fault;
+  EXPECT_FALSE(fault.observe(true, true, true, true, "reference_watchdog", 1, sent,
+                             sent, received, 2000000000ULL));
+}

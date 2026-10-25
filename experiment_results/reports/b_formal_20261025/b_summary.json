@@ -1,0 +1,84 @@
+{
+  "group": "B",
+  "batch": "20261025",
+  "attempts": 3,
+  "completed": 3,
+  "failed": 0,
+  "run_ids": [
+    "b_formal_20261025_01",
+    "b_formal_20261025_02",
+    "b_formal_20261025_03"
+  ],
+  "old_B_replaced_in_presentation_only": true,
+  "historical_data_modified": false,
+  "metrics": {
+    "release_xy_error_mm": {
+      "n": 3,
+      "mean": 6.098066666666666,
+      "median": 5.9932,
+      "min": 5.35,
+      "max": 6.951
+    },
+    "release_yaw_error_deg": {
+      "n": 3,
+      "mean": 1.2104333333333333,
+      "median": 1.2016,
+      "min": 1.1992,
+      "max": 1.2305
+    },
+    "candidate_transport_duration_s": {
+      "n": 3,
+      "mean": 2.745147333333333,
+      "median": 2.999719,
+      "min": 2.224946,
+      "max": 3.010777
+    },
+    "transport_action_wall_s": {
+      "n": 3,
+      "mean": 3.309266666666667,
+      "median": 3.5419,
+      "min": 2.8023,
+      "max": 3.5836
+    },
+    "continuous_jerk_rms_change_pct_vs_same_run": {
+      "n": 3,
+      "mean": -6.151701666666667,
+      "median": -6.094837,
+      "min": -7.093215,
+      "max": -5.267053
+    },
+    "continuous_jerk_peak_change_pct": {
+      "n": 3,
+      "mean": -22.73622635309787,
+      "median": -23.273267319711877,
+      "min": -24.864811914635542,
+      "max": -20.07059982494619
+    },
+    "time_profile_solve_sec": {
+      "n": 3,
+      "mean": 5.032374274666667,
+      "median": 5.408367705,
+      "min": 4.172088844,
+      "max": 5.516666275
+    },
+    "max_grasp_reference_residual_mm": {
+      "n": 3,
+      "mean": 11.100966666666666,
+      "median": 11.0894,
+      "min": 10.7785,
+      "max": 11.435
+    },
+    "max_grasp_reference_angle_deg": {
+      "n": 3,
+      "mean": 1.3186333333333333,
+      "median": 1.3175,
+      "min": 1.2838,
+      "max": 1.3546
+    }
+  },
+  "notes": [
+    "Jerk is a planned reference metric, not measured robot jerk.",
+    "B is the new batch; A/C/D retain their historical batch.",
+    "JTC action wall time includes the checked 0.5 s start connection."
+  ]
+}

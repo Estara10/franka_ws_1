@@ -1,0 +1,5 @@
+group,sample,run_id,criterion,rod_height_range_mm,rod_x_range_mm,rod_y_range_mm,left_hand_yaw_change_range_deg
+A,A09,abcd_n20_20261025_A09,nearest multimetric group median among completed runs,392.15177988000005,105.64151939999999,3.6548390927,11.41880956747972
+B,B14,abcd_n20_20261025_B14,nearest multimetric group median among completed runs,390.98696918,105.27431129999997,4.8031914436,11.5205649956619
+C,C13,abcd_n20_20261025_C13_startup2,nearest multimetric group median among completed runs,399.54061464,121.33518629999998,13.781446462000002,10.107897800730512
+D,D20,abcd_n20_20261025_D20,nearest multimetric group median among completed runs,398.79795279,120.81578600000006,13.908881867,10.113683566494103

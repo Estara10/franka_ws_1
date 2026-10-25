@@ -1,0 +1,52 @@
+contact_probe: full fixed initial pose (0.50, 0.00, +10 deg), current default profile
+contact_probe profile: RIGID (internal compliance disabled; CONTACT_PROBE_RIGID=true)
+ABCD group: B; full lift/transport/lower/release/retreat
+MuJoCo: /home/lidio/Libraries/mujoco
+ROS_DOMAIN_ID: 149
+ROS_HOME: <ROS default>
+run id: explanatory_20261025_T1_attempt1
+run data: /home/lidio/franka_ws_1/experiment_results/a1_runs/explanatory_20261025_T1_attempt1
+ROS logs: /home/lidio/franka_ws_1/launch_logs/explanatory_20261025_T1_attempt1
+This invokes one run only; failures are preserved and are not retried.
+==============================================================
+ A1 P1a scene runner
+   run_id            : explanatory_20261025_T1_attempt1
+   candidate index   : 0
+   seed override     : <from config>
+   explicit pose     : x=0.50 y=0.00 yaw_deg=10 (override)
+   dry run           : 0
+   ROS_DOMAIN_ID     : 149
+   ROS_LOCALHOST_ONLY: 1
+   params            : /home/lidio/franka_ws_1/install/dual_arm_carry_task/share/dual_arm_carry_task/config/a1_scene_sampling.yaml
+   output dir        : /home/lidio/franka_ws_1/experiment_results/a1_runs/explanatory_20261025_T1_attempt1
+   task target       : x=0.40 y=0.00 world_yaw_deg=20
+==============================================================
+[contact_probe] rigid validation profile: internal MuJoCo compliance disabled
+[contact_probe] single-primary-pad contact profile enabled
+[contact_probe] per-contact geom/force/actuator trace: /home/lidio/franka_ws_1/experiment_results/a1_runs/explanatory_20261025_T1_attempt1/contact_probe_contacts.csv
+[contact_probe] adaptive normal-force hold: false
+[contact_probe] rod payload feedforward: 0 (MMC hover hold; default 0)
+[gripper] raw finger command/feedback trace enabled: /home/lidio/franka_ws_1/experiment_results/a1_runs/explanatory_20261025_T1_attempt1/gripper_fingers_<robot>.csv
+[sim] starting one simulation instance (MoveIt launch includes MuJoCo)
+[sim] pid=310810 pgid=310810 log=/home/lidio/franka_ws_1/experiment_results/a1_runs/explanatory_20261025_T1_attempt1/sim_dual_moveit.log
+[sim] waiting up to 120s for /set_body_state, /get_body_state, /get_sim_info
+[sim] services available
+[sim] controller inventory captured
+[prepare] A1 P1b prepare mode: apply -> publish truth -> task freeze -> scene sync
+[prepare] runner pid=311454 pgid=311454
+[prepare] truth published; starting the task in prepare-only mode
+[prepare] task pid=311692 pgid=311692
+[prepare] task state: DONE
+[prepare] ABCD B complete: no-weld contact lift/transport/lower/release/retreat
+[prepare] wrote p2b_path.csv (25 waypoints)
+[cleanup] SIGINT to task (-311692)
+[cleanup] SIGINT to runner (-311454)
+prepare exit code: 0
+[cleanup] SIGTERM to sim (-310810)
+[cleanup] SIGTERM to sim
+[cleanup] simulator reaped
+runner exit=0
+Return these files from /home/lidio/franka_ws_1/experiment_results/a1_runs/explanatory_20261025_T1_attempt1:
+  prepare_status.json task_launch.log sim_dual_moveit.log contact_probe.csv
+  gripper_fingers_mj_left.csv gripper_fingers_mj_right.csv controllers.txt runner.log
+ROS logs: /home/lidio/franka_ws_1/launch_logs/explanatory_20261025_T1_attempt1

@@ -57,6 +57,8 @@ struct AbcdMmcReferenceStream {
     bool running{false};
     bool mmc_active{false};
     bool failure_stop{false};
+    bool payload_enabled{true};
+    double max_payload_force_n{0.0};
     double payload_start_sim{0.0};
     std::chrono::steady_clock::time_point last_publish{};
     double max_publish_interval_sec{0.0};
@@ -269,6 +271,11 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     const bool abcd_group = abcd_group_name == "A" || abcd_group_name == "B" ||
                             abcd_group_name == "C" || abcd_group_name == "D";
     const bool abcd_mmc = abcd_group_name == "C" || abcd_group_name == "D";
+    const char* payload_env = std::getenv("CONTACT_ABCD_PAYLOAD_FEEDFORWARD");
+    const bool abcd_payload_enabled = !payload_env || std::string(payload_env) != "0";
+    const char* matched_env = std::getenv("CONTACT_ABCD_MATCHED_WAIT_SEC");
+    const double matched_wait_sec = matched_env ? std::atof(matched_env) : 0.0;
+    const bool matched_comparison = abcd_group && matched_wait_sec > 0.0;
     // Project acceptance is a 45 mm rod rise, independent of the commanded lift
     // height. With ~7-9 mm vertical slip, a 6 cm lift is needed to clear it.
     constexpr double rod_rise_target=0.045;
@@ -338,6 +345,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
          !std::isfinite(ctx_->contact_hover_hold_seconds_) ||
          ctx_->contact_hover_hold_seconds_ < 1.0 || ctx_->contact_hover_hold_seconds_ > 10.0))
         return fail("E_CONTACT_HOVER_BAD_PARAMETERS: height=0.045..0.10m hold=1..10s");
+    if (!std::isfinite(matched_wait_sec) || matched_wait_sec < 0.0 || matched_wait_sec > 30.0)
+        return fail("E_ABCD_MATCHED_WAIT_PARAMETER");
     if (!a1_verify_.valid) return fail("E_CONTACT_PRECONDITION");
     if (!plan_only &&
         (!a1_verify_.pregrasp_reached_this_round || !a1_verify_.descent_plan_valid ||
@@ -348,7 +357,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         return fail("E_CONTACT_RUN_ID");
     std::ofstream csv("experiment_results/a1_runs/"+run_id+"/contact_probe.csv");
     if (!csv) return fail("E_CONTACT_CSV_OPEN");
-    csv << std::setprecision(10) << "phase,left_sim_time,right_sim_time,rod_x,rod_y,rod_z,left_slip_m,left_angle_rad,right_slip_m,right_angle_rad,left_q1,left_q2,right_q1,right_q2,left_command_per_finger_m,right_command_per_finger_m,left_force_limit_n,right_force_limit_n,left_hold_force_n,right_hold_force_n,left_pad_contact_count,right_pad_contact_count,left_contact_1,left_contact_2,right_contact_1,right_contact_2,left_normal1_n,left_normal2_n,right_normal1_n,right_normal2_n,left_tangent1_n,left_tangent2_n,right_tangent1_n,right_tangent2_n,left_rod_force_x_n,left_rod_force_y_n,left_rod_force_z_n,right_rod_force_x_n,right_rod_force_y_n,right_rod_force_z_n,left_seq,right_seq,weld_left,weld_right,rod_constraint,left_hand_x,left_hand_y,left_hand_z,left_hand_qx,left_hand_qy,left_hand_qz,left_hand_qw,right_hand_x,right_hand_y,right_hand_z,right_hand_qx,right_hand_qy,right_hand_qz,right_hand_qw\n";
+    csv << std::setprecision(10) << "phase,left_sim_time,right_sim_time,rod_x,rod_y,rod_z,left_slip_m,left_angle_rad,right_slip_m,right_angle_rad,left_q1,left_q2,right_q1,right_q2,left_command_per_finger_m,right_command_per_finger_m,left_force_limit_n,right_force_limit_n,left_hold_force_n,right_hold_force_n,left_pad_contact_count,right_pad_contact_count,left_contact_1,left_contact_2,right_contact_1,right_contact_2,left_normal1_n,left_normal2_n,right_normal1_n,right_normal2_n,left_tangent1_n,left_tangent2_n,right_tangent1_n,right_tangent2_n,left_rod_force_x_n,left_rod_force_y_n,left_rod_force_z_n,right_rod_force_x_n,right_rod_force_y_n,right_rod_force_z_n,left_seq,right_seq,weld_left,weld_right,rod_constraint,left_hand_x,left_hand_y,left_hand_z,left_hand_qx,left_hand_qy,left_hand_qz,left_hand_qw,right_hand_x,right_hand_y,right_hand_z,right_hand_qx,right_hand_qy,right_hand_qz,right_hand_qw,observation_sim_time,truth_request_sim_time,truth_received_sim_time,rod_qx,rod_qy,rod_qz,rod_qw\n";
     std::array<unsigned long long,2> seq{{0,0}};
     std::array<double,2> sim_time{{-1,-1}}, progress_wall{{steadySeconds(),steadySeconds()}};
     auto feedback=[&]() {
@@ -1578,6 +1587,9 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     truth_guard.seedSample(initial_truth_received);
     double last_truth_request_elapsed = 0.0;
     double last_truth_age = 0.0;
+    double pending_truth_sim = ctx_->get_clock()->now().seconds();
+    double sample_request_sim = pending_truth_sim;
+    double sample_received_sim = pending_truth_sim;
     auto advanceTruthRequest = [&](bool allow_stale_cache_while_refreshing = false) {
         const auto now_steady = std::chrono::steady_clock::now();
         if (truth_guard.inFlight()) {
@@ -1601,6 +1613,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                     detail="E_CONTACT_TRUTH_SERVICE_FAILED service="+truth_service+" message="+response->status_message;
                     return false;
                 }
+                sample_request_sim = pending_truth_sim;
+                sample_received_sim = ctx_->get_clock()->now().seconds();
                 const auto& p = response->state.pose.pose;
                 const auto& tw = response->state.twist.twist;
                 latest.position={p.position.x,p.position.y,p.position.z};
@@ -1633,6 +1647,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             req->name=ctx_->mujoco_rod_body_name_;
             req->admin_hash=ctx_->mujoco_admin_hash_;
             truth_guard.beginRequest(std::chrono::steady_clock::now());
+            pending_truth_sim = ctx_->get_clock()->now().seconds();
             truth_future=truth_client->async_send_request(req).future.share();
         }
         // Planning and the read-only MMC preflight run on this task thread. They
@@ -1683,6 +1698,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 req->name=ctx_->mujoco_rod_body_name_;
                 req->admin_hash=ctx_->mujoco_admin_hash_;
                 truth_guard.beginRequest(std::chrono::steady_clock::now());
+                pending_truth_sim = ctx_->get_clock()->now().seconds();
                 truth_future=truth_client->async_send_request(req).future.share();
             }
         }
@@ -1755,7 +1771,10 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
            <<left_pose.translation().x()<<','<<left_pose.translation().y()<<','<<left_pose.translation().z()<<','
            <<left_q.x()<<','<<left_q.y()<<','<<left_q.z()<<','<<left_q.w()<<','
            <<right_pose.translation().x()<<','<<right_pose.translation().y()<<','<<right_pose.translation().z()<<','
-           <<right_q.x()<<','<<right_q.y()<<','<<right_q.z()<<','<<right_q.w()<<'\n'; csv.flush();
+           <<right_q.x()<<','<<right_q.y()<<','<<right_q.z()<<','<<right_q.w()<<','
+           <<ctx_->get_clock()->now().seconds()<<','<<sample_request_sim<<','<<sample_received_sim<<','
+           <<latest.orientation.x<<','<<latest.orientation.y<<','<<latest.orientation.z<<','
+           <<latest.orientation.w<<'\n'; csv.flush();
         if (!csv) { detail="E_CONTACT_CSV_WRITE"; return false; }
         if (hover_csv.is_open()) {
             hover_csv << phase << ',' << steadySeconds() << ',' << fingers[0].simulation_time
@@ -1806,6 +1825,13 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     rclcpp::Publisher<MmcGoal>::SharedPtr abcd_reference_publisher;
     bool abcd_jacobian_conversion_verified = false;
     stopAbcdMmc = [&]() {
+        if (abcd_reference_stream) {
+            std::lock_guard<std::mutex> lock(abcd_reference_stream->mutex);
+            RCLCPP_INFO(ctx_->get_logger(),
+                "[ABCD_PAYLOAD_REFERENCE] enabled=%d max_abs_per_arm_n=%.6f publications=%llu",
+                abcd_reference_stream->payload_enabled?1:0, abcd_reference_stream->max_payload_force_n,
+                static_cast<unsigned long long>(abcd_reference_stream->publications));
+        }
         auto stopExternalWrench = [&](MmcGoal& goal) {
             goal.use_cooperative_wrench = true;
             goal.l_cooperative_wrench = geometry_msgs::msg::Wrench();
@@ -2297,6 +2323,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             abcd_reference_publisher = ctx_->create_publisher<MmcGoal>(
                 "/mj_left_and_mj_right/dual_cartesian_impedance_controller/desired_pose", rclcpp::QoS(10));
             abcd_reference_stream = std::make_shared<AbcdMmcReferenceStream>();
+            abcd_reference_stream->payload_enabled = abcd_payload_enabled;
             tpo::TrajectoryPoint initial_sample;
             initial_sample.time = points.front().time;
             initial_sample.q.resize(static_cast<Eigen::Index>(jt.joint_names.size()));
@@ -2318,13 +2345,15 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 std::lock_guard<std::mutex> lock(stream->mutex);
                 if (!stream->running) return;
                 MmcGoal goal = stream->goal;
-                if (stream->mmc_active && !stream->failure_stop) {
+                if (stream->mmc_active && !stream->failure_stop && stream->payload_enabled) {
                     const double elapsed = std::max(0.0,
                         node->get_clock()->now().seconds() - stream->payload_start_sim);
                     const double force = 0.64 * 9.81 * 0.5 * std::min(1.0, elapsed / 0.5);
                     goal.l_ff_force.z = force;
                     goal.r_ff_force.z = force;
                 }
+                stream->max_payload_force_n = std::max(stream->max_payload_force_n,
+                    std::max(std::abs(goal.l_ff_force.z), std::abs(goal.r_ff_force.z)));
                 const auto now = std::chrono::steady_clock::now();
                 if (stream->last_publish != std::chrono::steady_clock::time_point{})
                     stream->max_publish_interval_sec = std::max(stream->max_publish_interval_sec,
@@ -2342,7 +2371,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             std::string spawn_error;
             const std::vector<std::string> args{
                 "--ros-args", "-p", "use_sim_time:=true", "-p", "external_reference_mode:=true",
-                "-p", "hold_only:=true", "-p", "payload_feedforward_enabled:=true", "-p",
+                "-p", "hold_only:=true", "-p",
+                std::string("payload_feedforward_enabled:=") + (abcd_payload_enabled?"true":"false"), "-p",
                 "payload_mass_kg:=0.64", "-p", "feedforward_ramp_seconds:=0.5", "-p",
                 "control_variant:=fixed", "-p", "rotational_stiffness:=40.0", "-p",
                 "wall_timeout_seconds:=120.0", "-p",
@@ -2394,8 +2424,9 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 "[ABCD_MMC_ACTIVE] group=%s phase=%s method_version=independent_cartesian_v1 "
                 "reference=per_arm_FK_Jacobian truth_source=%s feedback=asynchronous_MuJoCo_BodyState "
                 "age_sec=%.6f Kdiag=(400,400,400,40,40,40) damping_ratio=0.8 nullspace=10 "
-                "payload_kg=0.64 ramp_sec=0.5; cooperative_wrench=off; JTC inactive",
-                ctx_->contact_abcd_group_.c_str(), phase, truth_service.c_str(), last_truth_age);
+                "payload_enabled=%d payload_kg=0.64 ramp_sec=0.5; cooperative_wrench=off; JTC inactive",
+                ctx_->contact_abcd_group_.c_str(), phase, truth_service.c_str(), last_truth_age,
+                abcd_payload_enabled?1:0);
         } else if (!refreshTruthBeforeLift()) {
             // Between MMC segments the timer continues sending the previous
             // endpoint with zero twist while this bounded refresh completes.
@@ -2930,6 +2961,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
         return true;
     }
     if (!execute(lift,"LIFT")) return fail(detail);
+    const double lift_finished_sim = ctx_->get_clock()->now().seconds();
     if (!observe(abcd_mmc ? "LIFT" : "HOLD",true)) return fail(detail);
     if (!abcd_group) {
     // B: creep hold. The static hold is where the soft friction lets the rod
@@ -3292,7 +3324,7 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                 "[TRANSPORT_PAIRING] dispatching the production baseline trajectory from the measured start");
         }
     }
-    if (ctx_->contact_abcd_group_ == "B" || ctx_->contact_abcd_group_ == "D") {
+    if (ctx_->contact_abcd_group_ == "B" || ctx_->contact_abcd_group_ == "D" || matched_comparison) {
         if (!refreshTruthBeforeLift("before_transport_time_profile"))
             return fail(detail.empty()?"E_CONTACT_TRUTH_BEFORE_TIME_PROFILE":detail);
         const auto baseline_transport=transport;
@@ -3323,8 +3355,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
                     final_candidate_stats.max_rod_ang_deg<=2.0;
             }
         }
-        const bool selected_candidate=selected_time_profile.accepted &&
-            selected_time_profile.transport_ok;
+        const bool selected_candidate=(ctx_->contact_abcd_group_ == "B" || ctx_->contact_abcd_group_ == "D") &&
+            selected_time_profile.accepted && selected_time_profile.transport_ok;
         transport=selected_candidate?selected_time_profile.plan:baseline_transport;
         if (!writeTrajectoryCsv(abcd_run_dir+"abcd_transport_candidate.csv",
                                 selected_time_profile.plan))
@@ -3392,6 +3424,22 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             selected_time_profile.solve_sec);
         if (!refreshTruthBeforeLift("after_transport_time_profile"))
             return fail(detail.empty()?"E_CONTACT_TRUTH_AFTER_TIME_PROFILE":detail);
+    }
+    if (matched_comparison) {
+        const double elapsed = ctx_->get_clock()->now().seconds() - lift_finished_sim;
+        if (elapsed > matched_wait_sec + 0.05)
+            return fail("E_ABCD_MATCHED_WAIT_OVERRUN elapsed_sim_sec="+std::to_string(elapsed));
+        const double wall_deadline = steadySeconds() + 20.0;
+        while (ctx_->get_clock()->now().seconds() - lift_finished_sim < matched_wait_sec) {
+            if (!rclcpp::ok() || steadySeconds() > wall_deadline)
+                return fail("E_ABCD_MATCHED_WAIT_CLOCK_TIMEOUT");
+            if (!observe("TRANSPORT_MATCHED_WAIT", false)) return fail(detail);
+            std::this_thread::sleep_for(20ms);
+        }
+        RCLCPP_INFO(ctx_->get_logger(),
+            "[ABCD_MATCHED_WAIT] target_sim_sec=%.3f actual_sim_sec=%.6f group=%s payload_enabled=%d",
+            matched_wait_sec, ctx_->get_clock()->now().seconds()-lift_finished_sim,
+            abcd_group_name.c_str(), abcd_payload_enabled?1:0);
     }
     if (plan_compare) {
         // P4/S2 phase 1: compare the current object-space transport plan (A)
@@ -3758,7 +3806,11 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
             "[ABCD_DISPATCH_TRAJECTORY] group=%s connection_sec=%.6f main_qtva_preserved=1",
             ctx_->contact_abcd_group_.c_str(),transport_connection_sec);
     }
+    RCLCPP_INFO(ctx_->get_logger(), "[TRANSPORT_EVENT] event=start sim_time=%.9f post_lift_sim_sec=%.6f",
+        ctx_->get_clock()->now().seconds(), ctx_->get_clock()->now().seconds()-lift_finished_sim);
     if (!execute(transport_dispatch,"TRANSPORT",transport_dispatch_tol)) return fail(detail);
+    RCLCPP_INFO(ctx_->get_logger(), "[TRANSPORT_EVENT] event=end sim_time=%.9f",
+        ctx_->get_clock()->now().seconds());
     if (!observe("TRANSPORT", true)) return fail(detail);
     // The 1x transport leaves the arm servos settling after the action returns.
     // Wait for a stable measured joint state before re-freezing and planning the
@@ -3927,7 +3979,8 @@ bool DualArmController::runContactLoadProbe(const a1t::TruthPayload& truth,std::
     }
     if (!ctx_->grippers_->controlDualGrippers(0.04)) return fail("E_CONTACT_RELEASE_OPEN_FAILED");
     force_hold_may_be_active=false;
-    if (abcd_mmc) {
+    // Use the same post-release measurement time for all four ABCD groups.
+    if (abcd_group) {
         if (!feedback()) return fail(detail);
         const double release_measurement_start = std::min(fingers[0].simulation_time, fingers[1].simulation_time);
         const double wait_deadline = steadySeconds() + 10.0;

@@ -1,0 +1,17 @@
+block,condition,sample,run_id,wrapper_exit,formal,run_dir
+1,P,P1,explanatory_20261025_P1_attempt1,4,0,experiment_results/a1_runs/explanatory_20261025_P1_attempt1
+1,P,P1,explanatory_20261025_P1_attempt2,2,0,experiment_results/a1_runs/explanatory_20261025_P1_attempt2
+1,P,P1,explanatory_20261025_P1_attempt3,4,0,experiment_results/a1_runs/explanatory_20261025_P1_attempt3
+1,P,P1,explanatory_20261025_P1_attempt4,0,1,experiment_results/a1_runs/explanatory_20261025_P1_attempt4
+1,T,T1,explanatory_20261025_T1_attempt1,0,1,experiment_results/a1_runs/explanatory_20261025_T1_attempt1
+1,I0,I01,explanatory_20261025_I01_attempt1,2,1,experiment_results/a1_runs/explanatory_20261025_I01_attempt1
+1,I1,I11,explanatory_20261025_I11_attempt1,5,0,experiment_results/a1_runs/explanatory_20261025_I11_attempt1
+1,I1,I11,explanatory_20261025_I11_attempt2,2,1,experiment_results/a1_runs/explanatory_20261025_I11_attempt2
+2,I1,I12,explanatory_20261025_I12_attempt1,2,1,experiment_results/a1_runs/explanatory_20261025_I12_attempt1
+2,I0,I02,explanatory_20261025_I02_attempt1,2,1,experiment_results/a1_runs/explanatory_20261025_I02_attempt1
+2,T,T2,explanatory_20261025_T2_attempt1,0,1,experiment_results/a1_runs/explanatory_20261025_T2_attempt1
+2,P,P2,explanatory_20261025_P2_attempt1,0,1,experiment_results/a1_runs/explanatory_20261025_P2_attempt1
+3,T,T3,explanatory_20261025_T3_attempt1,0,1,experiment_results/a1_runs/explanatory_20261025_T3_attempt1
+3,P,P3,explanatory_20261025_P3_attempt1,0,1,experiment_results/a1_runs/explanatory_20261025_P3_attempt1
+3,I1,I13,explanatory_20261025_I13_attempt1,2,1,experiment_results/a1_runs/explanatory_20261025_I13_attempt1
+3,I0,I03,explanatory_20261025_I03_attempt1,2,1,experiment_results/a1_runs/explanatory_20261025_I03_attempt1

@@ -837,11 +837,11 @@ if [[ "${PREPARE_MODE}" -eq 1 ]]; then
   PREP_DEADLINE=$((SECONDS + NODE_TIMEOUT))
   TRUTH_READY=0
   while (( SECONDS < PREP_DEADLINE )); do
-    if ! kill -0 "${RUNNER_PID}" 2>/dev/null && [[ ! -f "${RUN_DIR}/manifest.json" ]]; then
+    if ! kill -0 "${RUNNER_PID}" 2>/dev/null; then
       echo "[prepare] runner exited before publishing truth; see runner.log" >&2
       break
     fi
-    if [[ -f "${RUN_DIR}/manifest.json" ]] && grep -q "truth published" "${RUN_DIR}/runner.log"; then
+    if grep -q "truth published" "${RUN_DIR}/runner.log"; then
       TRUTH_READY=1
       break
     fi

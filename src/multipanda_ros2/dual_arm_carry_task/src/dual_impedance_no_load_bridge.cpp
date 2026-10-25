@@ -359,6 +359,22 @@ public:
       return fail(std::string("MMC activation/first-reference handshake: ") + reason);
     }
 
+    // Anchor the hover observation, payload ramp, and optional rod-force delay
+    // to the first MMC reference confirmed by the controller, not to the later
+    // completion of the impedance-parameter service call.
+    const double first_reference_sim_time = now().seconds();
+    RCLCPP_INFO(get_logger(), "[MMC_HOVER_WINDOW] first_reference_sim_time=%.9f duration_sim_sec=%.3f",
+                first_reference_sim_time,
+                hold_only_ ? hold_seconds_ : hold_seconds_ + move_seconds_ + final_hold_seconds_);
+    if (rod_disturbance_enabled_) {
+      std_msgs::msg::Bool arm_request;
+      arm_request.data = true;
+      rod_force_arm_pub_->publish(arm_request);
+      RCLCPP_INFO(get_logger(), "[ROD_FORCE_REQUEST] event=arm first_reference_sim_time=%.9f "
+                  "world_force=(+2,0,0)N start_after_sim_sec=1.0 duration_sim_sec=plugin_configured "
+                  "(CONTACT_PROBE_ROD_FORCE_DURATION_SEC)", first_reference_sim_time);
+    }
+
     if (!configureDirectionalParameters())
       return fail("directional impedance parameter service failed before HOLD");
 
@@ -401,7 +417,7 @@ public:
     }
 
     const auto began = std::chrono::steady_clock::now();
-    const double sim_began = now().seconds();
+    const double sim_began = first_reference_sim_time;
     // Rod payload feedforward. The first accepted MMC reference and the
     // already-confirmed carried state define the enable instant; the force is
     // ramped linearly in simulation time. The target is fixed (half the rod
@@ -424,14 +440,6 @@ public:
                 payload_feedforward_enabled_ ? 1 : 0, payload_mass_kg_, payload_ff_force_n,
                 payload_ff_world.z(), payload_ff_base.x(), payload_ff_base.y(), payload_ff_base.z(),
                 feedforward_ramp_seconds_, sim_began);
-    if (rod_disturbance_enabled_) {
-      std_msgs::msg::Bool arm_request;
-      arm_request.data = true;
-      rod_force_arm_pub_->publish(arm_request);
-      RCLCPP_INFO(get_logger(), "[ROD_FORCE_REQUEST] event=arm sim_time=%.9f world_force=(+2,0,0)N "
-                  "start_after_sim_sec=1.0 duration_sim_sec=plugin_configured "
-                  "(CONTACT_PROBE_ROD_FORCE_DURATION_SEC)", sim_began);
-    }
     int cycle = 0;
     auto elapsed = [&began]() {
       return std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
@@ -882,7 +890,7 @@ private:
     } else if (!fault_latch_.observe(
                  true, true, true, status->faulted, status->fault_source,
                  status->fault_sequence, status->fault_steady_time_ns,
-                 status->status_steady_time_ns, now_ns)) {
+                 status->status_steady_time_ns, now_ns, health_freshness_budget_ns_)) {
       // The latch already holds the precise reason (fault/stale/clock).
     }
 

@@ -1,0 +1,173 @@
+[
+  {
+    "figure": "01_完整搬运对照",
+    "sources": [
+      "experiment_results/reports/b_formal_20261025/abcd_display_runs.csv"
+    ],
+    "metrics": {
+      "groups": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "completed": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "attempts_each": 3,
+      "release_xy_mean_mm": [
+        5.498733333333333,
+        6.098066666666665,
+        9.931600000000001,
+        9.7663
+      ],
+      "release_yaw_mean_deg": [
+        1.1765333333333334,
+        1.2104333333333335,
+        2.1328666666666667,
+        1.9966
+      ],
+      "batches": {
+        "B": "20261025",
+        "A_C_D": "20261022"
+      }
+    }
+  },
+  {
+    "figure": "docs/figures/辅助图/04_B组完整搬运曲线",
+    "sources": [
+      "experiment_results/a1_runs/b_formal_20261025_01/contact_probe.csv",
+      "experiment_results/a1_runs/b_formal_20261025_02/contact_probe.csv",
+      "experiment_results/a1_runs/b_formal_20261025_03/contact_probe.csv"
+    ],
+    "metrics": {
+      "runs": [
+        "b_formal_20261025_01",
+        "b_formal_20261025_02",
+        "b_formal_20261025_03"
+      ],
+      "span_sec": [
+        18.897000000000002,
+        16.656000000000002,
+        18.636000000000003
+      ],
+      "coordinates": "MuJoCo rod world XZ; feedback-time axis"
+    }
+  },
+  {
+    "figure": "docs/figures/辅助图/05_B组运输参考平滑度",
+    "sources": [
+      "experiment_results/reports/b_formal_20261025/b_runs.csv"
+    ],
+    "metrics": {
+      "comparison": "same run, same geometry and duration; planned jerk"
+    }
+  },
+  {
+    "figure": "02_运输时间与平滑度",
+    "sources": [
+      "experiment_results/reports/final_tradeoff_20261022/time_profile_rs_o/rs_o_by_run.csv",
+      "experiment_results/reports/final_tradeoff_20261022/rs_execution/rs_execution.csv"
+    ],
+    "metrics": {
+      "paths": 12,
+      "normalized_jerk_median_pct": [
+        100.0,
+        57.98710960785378,
+        55.10599171334687
+      ],
+      "slow_reduction_median_pct": 42.01289039214622,
+      "optimization_extra_median_pct": 4.8636383612629235,
+      "release_xy_mean_mm": {
+        "R": 5.751607180084822,
+        "S": 6.626476020879084
+      },
+      "O_executed": false
+    }
+  },
+  {
+    "figure": "03_载荷补偿减少下沉",
+    "sources": [
+      "experiment_results/a1_runs/s2s3_ff_off_01_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_ff_off_01_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_ff_off_01_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_ff_off_02_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_ff_off_02_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_ff_off_02_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_ff_off_03_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_ff_off_03_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_ff_off_03_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_ff_on_01_retry1_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_ff_on_01_retry1_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_ff_on_01_retry1_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_ff_on_02_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_ff_on_02_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_ff_on_02_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_ff_on_03_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_ff_on_03_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_ff_on_03_20261020/prepare_status.json"
+    ],
+    "metrics": {
+      "n_each": 3,
+      "rod_dz_median_mm": {
+        "off": -8.36826929,
+        "on": -2.895768320000002
+      },
+      "descent_reduction_pct": 65.39585164329718,
+      "sampling_span_sec": [
+        2.9199999999999875,
+        2.9199999999999946,
+        2.9639999999999986,
+        2.9780000000000015,
+        2.979999999999997,
+        2.942
+      ]
+    }
+  },
+  {
+    "figure": "04_方向性柔顺与受力让步",
+    "sources": [
+      "experiment_results/a1_runs/s2s3_dir_fixed_01_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_01_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_01_20261020/rod_force_events.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_01_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_dir_fixed_02_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_02_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_02_20261020/rod_force_events.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_02_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_dir_fixed_03_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_03_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_03_20261020/rod_force_events.csv",
+      "experiment_results/a1_runs/s2s3_dir_fixed_03_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_dir_soft_01_retry1_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_01_retry1_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_01_retry1_20261020/rod_force_events.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_01_retry1_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_dir_soft_02_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_02_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_02_20261020/rod_force_events.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_02_20261020/prepare_status.json",
+      "experiment_results/a1_runs/s2s3_dir_soft_03_20261020/contact_probe.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_03_20261020/mmc_hold_trace.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_03_20261020/rod_force_events.csv",
+      "experiment_results/a1_runs/s2s3_dir_soft_03_20261020/prepare_status.json"
+    ],
+    "metrics": {
+      "n_each": 3,
+      "pulse_end_and_residual_median_mm": {
+        "fixed": [
+          1.645645057513434,
+          0.6199200411764423
+        ],
+        "soft": [
+          2.3184713206274523,
+          1.119834749019617
+        ]
+      },
+      "pulse_end_displacement_increase_pct": 40.885260162398396
+    }
+  }
+]

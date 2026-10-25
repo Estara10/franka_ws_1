@@ -24,7 +24,7 @@ public:
   bool observe(bool service_ready, bool response_ready, bool mmc_active, bool faulted,
                const std::string& source, std::uint64_t fault_sequence,
                std::uint64_t fault_time_ns, std::uint64_t status_time_ns,
-               std::uint64_t now_ns)
+               std::uint64_t now_ns, std::uint64_t status_age_budget_ns = kMaxStatusAgeNs)
   {
     if (!healthy_) return false;
     if (!service_ready || !response_ready) {
@@ -32,7 +32,7 @@ public:
     } else if (!mmc_active) {
       latch("MMC is not active");
     } else if (status_time_ns == 0 || now_ns < status_time_ns ||
-               now_ns - status_time_ns > kMaxStatusAgeNs) {
+               now_ns - status_time_ns > status_age_budget_ns) {
       latch("controller fault status stale or clock invalid");
     } else if (faulted) {
       const std::string detail = source.empty() ? "unknown" : source;

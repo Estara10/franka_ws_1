@@ -1,0 +1,57 @@
+contact_probe: RIGID suspended hover, lift=0.05m hold=3.5s mode=mmc_hold; no transport
+contact_probe profile: RIGID (internal compliance disabled; CONTACT_PROBE_RIGID=true)
+MuJoCo: /home/lidio/Libraries/mujoco
+ROS_DOMAIN_ID: 166
+ROS_HOME: /tmp/compliance_hover_20261025_r1_feedforward_F1_b3_a1_ros_home
+run id: compliance_hover_20261025_r1_feedforward_F1_b3_a1
+run data: /home/lidio/franka_ws_1/experiment_results/a1_runs/compliance_hover_20261025_r1_feedforward_F1_b3_a1
+ROS logs: /home/lidio/franka_ws_1/launch_logs/compliance_hover_20261025_r1_feedforward_F1_b3_a1
+This invokes one run only; failures are preserved and are not retried.
+==============================================================
+ A1 P1a scene runner
+   run_id            : compliance_hover_20261025_r1_feedforward_F1_b3_a1
+   candidate index   : 0
+   seed override     : <from config>
+   explicit pose     : x=0.50 y=0.00 yaw_deg=10 (override)
+   dry run           : 0
+   ROS_DOMAIN_ID     : 166
+   ROS_LOCALHOST_ONLY: 1
+   params            : /home/lidio/franka_ws_1/install/dual_arm_carry_task/share/dual_arm_carry_task/config/a1_scene_sampling.yaml
+   output dir        : /home/lidio/franka_ws_1/experiment_results/a1_runs/compliance_hover_20261025_r1_feedforward_F1_b3_a1
+   task target       : launch defaults
+==============================================================
+[contact_probe] rigid validation profile: internal MuJoCo compliance disabled
+[contact_probe] single-primary-pad contact profile enabled
+[contact_probe] per-contact geom/force/actuator trace: /home/lidio/franka_ws_1/experiment_results/a1_runs/compliance_hover_20261025_r1_feedforward_F1_b3_a1/contact_probe_contacts.csv
+[contact_probe] adaptive normal-force hold: false
+[contact_probe] rod payload feedforward: 1 (MMC hover hold; default 0)
+[gripper] raw finger command/feedback trace enabled: /home/lidio/franka_ws_1/experiment_results/a1_runs/compliance_hover_20261025_r1_feedforward_F1_b3_a1/gripper_fingers_<robot>.csv
+[sim] starting one simulation instance (MoveIt launch includes MuJoCo)
+[sim] pid=366029 pgid=366029 log=/home/lidio/franka_ws_1/experiment_results/a1_runs/compliance_hover_20261025_r1_feedforward_F1_b3_a1/sim_dual_moveit.log
+[sim] waiting up to 120s for /set_body_state, /get_body_state, /get_sim_info
+[sim] services available
+[mmc] loading sim_multi_mode_controller inactive; JTC remains the only active arm controller
+[sim] controller inventory captured
+[joint-states] observing raw arm, finger, and merged topics for 2.5 s (no motion)
+[joint-states] continuous finger trace ready: /home/lidio/franka_ws_1/experiment_results/a1_runs/compliance_hover_20261025_r1_feedforward_F1_b3_a1/finger_feedback_trace.csv
+[prepare] A1 P1b prepare mode: apply -> publish truth -> task freeze -> scene sync
+[prepare] runner pid=367152 pgid=367152
+[prepare] truth published; starting the task in prepare-only mode
+[prepare] task pid=367239 pgid=367239
+[prepare] task state: DONE
+[prepare] contact_probe complete: no-weld lift/hold/lower/release only; full transport unverified
+[prepare] wrote p2b_path.csv (25 waypoints)
+[cleanup] SIGINT to task (-367239)
+[cleanup] SIGINT to finger_observer (-367106)
+[cleanup] SIGINT to runner (-367152)
+prepare exit code: 0
+[cleanup] SIGTERM to sim (-366029)
+[cleanup] SIGTERM to sim
+[cleanup] simulator reaped
+runner exit=0
+hover diagnostics: hover_diagnostics.csv hover_analysis.json hover_analysis.txt
+Return these files from /home/lidio/franka_ws_1/experiment_results/a1_runs/compliance_hover_20261025_r1_feedforward_F1_b3_a1:
+  prepare_status.json task_launch.log sim_dual_moveit.log contact_probe.csv
+  gripper_fingers_mj_left.csv gripper_fingers_mj_right.csv controllers.txt runner.log
+  contact_transport_planned.csv contact_transport_meta.txt
+ROS logs: /home/lidio/franka_ws_1/launch_logs/compliance_hover_20261025_r1_feedforward_F1_b3_a1

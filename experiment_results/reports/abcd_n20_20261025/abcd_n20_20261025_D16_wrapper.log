@@ -1,0 +1,34 @@
+contact_probe: full fixed initial pose (0.50, 0.00, +10 deg), current default profile
+contact_probe profile: RIGID (internal compliance disabled; CONTACT_PROBE_RIGID=true)
+ABCD group: D; full lift/transport/lower/release/retreat
+MuJoCo: /home/lidio/Libraries/mujoco
+ROS_DOMAIN_ID: 113
+ROS_HOME: <ROS default>
+run id: abcd_n20_20261025_D16
+run data: /home/lidio/franka_ws_1/experiment_results/a1_runs/abcd_n20_20261025_D16
+ROS logs: /home/lidio/franka_ws_1/launch_logs/abcd_n20_20261025_D16
+This invokes one run only; failures are preserved and are not retried.
+==============================================================
+ A1 P1a scene runner
+   run_id            : abcd_n20_20261025_D16
+   candidate index   : 0
+   seed override     : <from config>
+   explicit pose     : x=0.50 y=0.00 yaw_deg=10 (override)
+   dry run           : 0
+   ROS_DOMAIN_ID     : 113
+   ROS_LOCALHOST_ONLY: 1
+   params            : /home/lidio/franka_ws_1/install/dual_arm_carry_task/share/dual_arm_carry_task/config/a1_scene_sampling.yaml
+   output dir        : /home/lidio/franka_ws_1/experiment_results/a1_runs/abcd_n20_20261025_D16
+   task target       : x=0.40 y=0.00 world_yaw_deg=20
+==============================================================
+[contact_probe] rigid validation profile: internal MuJoCo compliance disabled
+[contact_probe] single-primary-pad contact profile enabled
+[contact_probe] per-contact geom/force/actuator trace: /home/lidio/franka_ws_1/experiment_results/a1_runs/abcd_n20_20261025_D16/contact_probe_contacts.csv
+[contact_probe] adaptive normal-force hold: false
+[contact_probe] ABCD MMC payload feedforward: enabled, 0.64 kg split per arm, 0.5 s ramp
+[gripper] raw finger command/feedback trace enabled: /home/lidio/franka_ws_1/experiment_results/a1_runs/abcd_n20_20261025_D16/gripper_fingers_<robot>.csv
+[sim] starting one simulation instance (MoveIt launch includes MuJoCo)
+[sim] pid=178594 pgid=178594 log=/home/lidio/franka_ws_1/experiment_results/a1_runs/abcd_n20_20261025_D16/sim_dual_moveit.log
+[sim] waiting up to 120s for /set_body_state, /get_body_state, /get_sim_info
+[sim] services available
+[mmc] loading sim_multi_mode_controller inactive; JTC remains the only active arm controller

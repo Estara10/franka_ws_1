@@ -1,0 +1,250 @@
+{
+  "P": {
+    "attempts": 3,
+    "completed": 3,
+    "metrics": {
+      "matched_wait_sim_s": {
+        "n": 3,
+        "mean": 8.000666666666667,
+        "median": 8.0,
+        "min": 8.0,
+        "max": 8.002
+      },
+      "post_lift_to_dispatch_sim_s": {
+        "n": 3,
+        "mean": 8.017333333333333,
+        "median": 8.018,
+        "min": 8.014,
+        "max": 8.02
+      },
+      "transport_event_sim_s": {
+        "n": 3,
+        "mean": 2.8126666666666673,
+        "median": 2.8299999999999983,
+        "min": 2.7779999999999987,
+        "max": 2.8300000000000054
+      },
+      "transport_height_net_mm": {
+        "n": 3,
+        "mean": -6.829906388645649,
+        "median": -6.387412031996689,
+        "min": -7.767400788485702,
+        "max": -6.334906345454556
+      },
+      "transport_height_range_mm": {
+        "n": 3,
+        "mean": 7.188164954361828,
+        "median": 6.927622774766007,
+        "min": 6.83600347912801,
+        "max": 7.800868609191468
+      },
+      "release_xy_error_mm": {
+        "n": 3,
+        "mean": 6.813766666666667,
+        "median": 6.6204,
+        "min": 5.9818,
+        "max": 7.8391
+      },
+      "release_yaw_error_deg": {
+        "n": 3,
+        "mean": 1.2134333333333334,
+        "median": 1.2213,
+        "min": 1.1586,
+        "max": 1.2604
+      },
+      "truth_interval_max_s": {
+        "n": 3,
+        "mean": 0.059333333333332426,
+        "median": 0.060000000000002274,
+        "min": 0.055999999999997385,
+        "max": 0.06199999999999761
+      },
+      "actual_payload_force_max_n": null,
+      "continuous_jerk_rms_change_pct_vs_same_run": {
+        "n": 3,
+        "mean": -4.912719,
+        "median": -4.929024,
+        "min": -5.020747,
+        "max": -4.788386
+      },
+      "time_profile_solve_sec": {
+        "n": 3,
+        "mean": 4.041805482,
+        "median": 4.032962996,
+        "min": 4.018631442,
+        "max": 4.073822008
+      }
+    }
+  },
+  "T": {
+    "attempts": 3,
+    "completed": 3,
+    "metrics": {
+      "matched_wait_sim_s": {
+        "n": 3,
+        "mean": 8.014666666666667,
+        "median": 8.02,
+        "min": 8.002,
+        "max": 8.022
+      },
+      "post_lift_to_dispatch_sim_s": {
+        "n": 3,
+        "mean": 8.034666666666666,
+        "median": 8.038,
+        "min": 8.022,
+        "max": 8.044
+      },
+      "transport_event_sim_s": {
+        "n": 3,
+        "mean": 2.8293333333333357,
+        "median": 2.8299999999999983,
+        "min": 2.824000000000005,
+        "max": 2.834000000000003
+      },
+      "transport_height_net_mm": {
+        "n": 3,
+        "mean": -7.216450634492635,
+        "median": -6.650223443478296,
+        "min": -8.389393899999959,
+        "max": -6.6097345599996515
+      },
+      "transport_height_range_mm": {
+        "n": 3,
+        "mean": 7.53026138589136,
+        "median": 7.239755143478305,
+        "min": 6.959925318117712,
+        "max": 8.391103696078062
+      },
+      "release_xy_error_mm": {
+        "n": 3,
+        "mean": 6.918466666666667,
+        "median": 7.043,
+        "min": 6.5216,
+        "max": 7.1908
+      },
+      "release_yaw_error_deg": {
+        "n": 3,
+        "mean": 1.2188333333333332,
+        "median": 1.192,
+        "min": 1.1898,
+        "max": 1.2747
+      },
+      "truth_interval_max_s": {
+        "n": 3,
+        "mean": 0.05466666666666953,
+        "median": 0.054000000000002046,
+        "min": 0.054000000000002046,
+        "max": 0.05600000000000449
+      },
+      "actual_payload_force_max_n": null,
+      "continuous_jerk_rms_change_pct_vs_same_run": {
+        "n": 3,
+        "mean": -5.635155,
+        "median": -6.134593,
+        "min": -6.396297,
+        "max": -4.374575
+      },
+      "time_profile_solve_sec": {
+        "n": 3,
+        "mean": 3.986517871,
+        "median": 3.993716865,
+        "min": 3.966474508,
+        "max": 3.99936224
+      }
+    }
+  },
+  "I0": {
+    "attempts": 3,
+    "completed": 0,
+    "metrics": {
+      "matched_wait_sim_s": {
+        "n": 3,
+        "mean": 8.004,
+        "median": 8.004,
+        "min": 8.002,
+        "max": 8.006
+      },
+      "post_lift_to_dispatch_sim_s": {
+        "n": 3,
+        "mean": 8.004666666666667,
+        "median": 8.004,
+        "min": 8.002,
+        "max": 8.008
+      },
+      "transport_event_sim_s": null,
+      "transport_height_net_mm": null,
+      "transport_height_range_mm": null,
+      "release_xy_error_mm": null,
+      "release_yaw_error_deg": null,
+      "truth_interval_max_s": null,
+      "actual_payload_force_max_n": {
+        "n": 3,
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "continuous_jerk_rms_change_pct_vs_same_run": {
+        "n": 3,
+        "mean": -4.405331333333334,
+        "median": -4.086,
+        "min": -5.252307,
+        "max": -3.877687
+      },
+      "time_profile_solve_sec": {
+        "n": 3,
+        "mean": 5.069887651666667,
+        "median": 5.513767459,
+        "min": 4.079630908,
+        "max": 5.616264588
+      }
+    }
+  },
+  "I1": {
+    "attempts": 3,
+    "completed": 0,
+    "metrics": {
+      "matched_wait_sim_s": {
+        "n": 3,
+        "mean": 8.012,
+        "median": 8.012,
+        "min": 8.008,
+        "max": 8.016
+      },
+      "post_lift_to_dispatch_sim_s": {
+        "n": 3,
+        "mean": 8.012666666666666,
+        "median": 8.012,
+        "min": 8.01,
+        "max": 8.016
+      },
+      "transport_event_sim_s": null,
+      "transport_height_net_mm": null,
+      "transport_height_range_mm": null,
+      "release_xy_error_mm": null,
+      "release_yaw_error_deg": null,
+      "truth_interval_max_s": null,
+      "actual_payload_force_max_n": {
+        "n": 3,
+        "mean": 3.1392,
+        "median": 3.1392,
+        "min": 3.1392,
+        "max": 3.1392
+      },
+      "continuous_jerk_rms_change_pct_vs_same_run": {
+        "n": 3,
+        "mean": -4.497977,
+        "median": -4.591327,
+        "min": -5.176201,
+        "max": -3.726403
+      },
+      "time_profile_solve_sec": {
+        "n": 3,
+        "mean": 4.070826589,
+        "median": 4.083882239,
+        "min": 4.040285274,
+        "max": 4.088312254
+      }
+    }
+  }
+}

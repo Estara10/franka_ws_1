@@ -1,0 +1,35 @@
+contact_probe: full fixed initial pose (0.50, 0.00, +10 deg), current default profile
+contact_probe profile: RIGID (internal compliance disabled; CONTACT_PROBE_RIGID=true)
+ABCD group: A; full lift/transport/lower/release/retreat
+MuJoCo: /home/lidio/Libraries/mujoco
+ROS_DOMAIN_ID: 113
+ROS_HOME: <ROS default>
+run id: abcd_n20_20261025_A08
+run data: /home/lidio/franka_ws_1/experiment_results/a1_runs/abcd_n20_20261025_A08
+ROS logs: /home/lidio/franka_ws_1/launch_logs/abcd_n20_20261025_A08
+This invokes one run only; failures are preserved and are not retried.
+==============================================================
+ A1 P1a scene runner
+   run_id            : abcd_n20_20261025_A08
+   candidate index   : 0
+   seed override     : <from config>
+   explicit pose     : x=0.50 y=0.00 yaw_deg=10 (override)
+   dry run           : 0
+   ROS_DOMAIN_ID     : 113
+   ROS_LOCALHOST_ONLY: 1
+   params            : /home/lidio/franka_ws_1/install/dual_arm_carry_task/share/dual_arm_carry_task/config/a1_scene_sampling.yaml
+   output dir        : /home/lidio/franka_ws_1/experiment_results/a1_runs/abcd_n20_20261025_A08
+   task target       : x=0.40 y=0.00 world_yaw_deg=20
+==============================================================
+error: a simulation instance already answers on ROS_DOMAIN_ID=113:
+/get_body_state
+/get_sim_info
+/set_body_state
+       this script will not reuse or clean up an instance it did not start.
+       Stop that instance (or use another --domain-id) and retry.
+[cleanup] simulator reaped
+runner exit=4
+Return these files from /home/lidio/franka_ws_1/experiment_results/a1_runs/abcd_n20_20261025_A08:
+  prepare_status.json task_launch.log sim_dual_moveit.log contact_probe.csv
+  gripper_fingers_mj_left.csv gripper_fingers_mj_right.csv controllers.txt runner.log
+ROS logs: /home/lidio/franka_ws_1/launch_logs/abcd_n20_20261025_A08

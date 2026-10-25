@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "experiment_results/reports/final_tradeoff_20261022"
 RUNS = ROOT / "experiment_results/a1_runs"
 OUT = ROOT / "docs/figures/结题主图"
-SUPPLEMENT = RUNS / "report_B_connectionfix_20261024_01"
+B_REPORT = ROOT / "experiment_results/reports/b_formal_20261025"
+B_RUN_IDS = [f"b_formal_20261025_{i:02d}" for i in range(1, 4)]
 BLUE, GREEN, ORANGE = (NATURE[key] for key in ("blue", "green", "orange"))
 EXPORTS = []
 
@@ -56,7 +57,7 @@ def save(fig, name, sources, metrics):
 
 
 def plot_transport():
-    source = REPORT / "abcd_s0_formal_runs.csv"
+    source = B_REPORT / "abcd_display_runs.csv"
     rows = read_csv(source)
     fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.5), layout="constrained")
     counts, means, yaws = [], [], []
@@ -65,67 +66,78 @@ def plot_transport():
         counts.append(len(completed))
         axes[0].bar(i, len(completed), width=0.56, color=GROUP_COLORS[group])
         error = values(completed, "release_xy_error_mm")
-        means.append(float(np.mean(error)))
-        yaws.append(float(np.mean(values(completed, "release_yaw_error_deg"))))
+        means.append(float(np.mean(error)) if len(error) else None)
+        yaws.append(float(np.mean(values(completed, "release_yaw_error_deg"))) if completed else None)
         axes[1].scatter(i + np.linspace(-0.07, 0.07, len(error)), error,
                         color=GROUP_COLORS[group], s=26, zorder=3)
-        axes[1].hlines(means[-1], i - 0.19, i + 0.19, color=GROUP_COLORS[group], lw=1.6)
-    # A repair validation with a newer optimizer is a separate sample, not a
-    # replacement for historical B1 or part of the original group mean.
-    status = json.loads((SUPPLEMENT / "prepare_status.json").read_text())
-    if status["task_state"] != "DONE":
-        raise ValueError("B supplementary run is not complete")
-    release_line = next(line for line in (SUPPLEMENT / "task_launch.log").read_text().splitlines()
-                        if "[CONTACT_PROBE_RELEASED] xyz=(" in line)
-    xyz = np.array([float(v) for v in release_line.split("xyz=(", 1)[1].split(")", 1)[0].split(",")])
-    supplementary_error = float(np.linalg.norm(xyz[:2] - [0.40, 0.0]) * 1000)
-    axes[0].bar(4, 1, width=0.56, color=GROUP_COLORS["B"], hatch="///", alpha=0.65)
-    axes[1].scatter(4, supplementary_error, marker="D", color=GROUP_COLORS["B"], s=35, zorder=3)
+        if len(error):
+            axes[1].hlines(means[-1], i - 0.19, i + 0.19, color=GROUP_COLORS[group], lw=1.6)
     axes[0].set(ylim=(0, 3.6), yticks=range(4), ylabel="完整完成次数")
-    for i, count in enumerate(counts + [1]):
-        axes[0].text(i, count + 0.10, f"{count}/{3 if i < 4 else 1}", ha="center", fontsize=9)
+    for i, count in enumerate(counts):
+        axes[0].text(i, count + 0.10, f"{count}/3", ha="center", fontsize=9)
     axes[1].set(ylim=(0, 12), ylabel="释放后平面位置误差（mm）")
     for ax in axes:
-        ax.set_xticks(range(5), list("ABCD") + ["B补充"])
-        ax.axvline(3.5, color="#888888", linestyle=":", linewidth=0.8)
+        ax.set_xticks(range(4), list("ABCD"))
         ax.set_xlabel("实验组别")
         ax.grid(axis="x", visible=False)
-    save(fig, "01_完整搬运对照", [str(source.relative_to(ROOT)),
-         str((SUPPLEMENT / "task_launch.log").relative_to(ROOT)),
-         str((SUPPLEMENT / "prepare_status.json").relative_to(ROOT))],
+    save(fig, "01_完整搬运对照", [str(source.relative_to(ROOT))],
          {"groups": list("ABCD"), "completed": counts, "attempts_each": 3,
           "release_xy_mean_mm": means, "release_yaw_mean_deg": yaws,
-          "B_supplement": {"completed": 1, "attempts": 1,
-                           "release_xy_error_mm": supplementary_error,
-                           "included_in_formal_statistics": False}})
+          "batches": {"B": "20261025", "A_C_D": "20261022"}})
 
 
-def plot_b_supplement():
-    source = SUPPLEMENT / "contact_probe.csv"
-    rows = read_csv(source)
-    time = (values(rows, "left_sim_time") + values(rows, "right_sim_time")) / 2
-    time -= time[0]
+def plot_b_formal():
     fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.5), layout="constrained")
-    for key, label, color in (("rod_x", "X", BLUE), ("rod_y", "Y", GREEN),
-                              ("rod_z", "Z", ORANGE)):
-        axes[0].plot(time, values(rows, key) * 1000, label=label, color=color)
-    axes[0].set(xlabel="接触夹稳后的时间（s）", ylabel="铝条世界坐标（mm）")
-    axes[0].legend(frameon=False)
-    axes[1].plot(values(rows, "rod_x") * 1000, values(rows, "rod_z") * 1000, color=BLUE)
-    axes[1].scatter(float(rows[0]["rod_x"]) * 1000, float(rows[0]["rod_z"]) * 1000,
-                    color=GREEN, marker="o", label="记录起点", zorder=3)
-    axes[1].scatter(float(rows[-1]["rod_x"]) * 1000, float(rows[-1]["rod_z"]) * 1000,
-                    color=ORANGE, marker="s", label="记录终点", zorder=3)
+    sources, spans = [], []
+    for i, (run_id, color) in enumerate(zip(B_RUN_IDS, (BLUE, GREEN, ORANGE)), 1):
+        source = RUNS / run_id / "contact_probe.csv"
+        rows = read_csv(source)
+        time = (values(rows, "left_sim_time") + values(rows, "right_sim_time")) / 2
+        time -= time[0]
+        axes[0].plot(time, values(rows, "rod_z") * 1000, label=f"B{i}", color=color)
+        axes[1].plot(values(rows, "rod_x") * 1000, values(rows, "rod_z") * 1000,
+                     label=f"B{i}", color=color)
+        sources.append(str(source.relative_to(ROOT)))
+        spans.append(float(time[-1]))
+    axes[0].set(xlabel="接触夹稳后的时间（s）", ylabel="铝条Z坐标（mm）")
     axes[1].set(xlabel="铝条X坐标（mm）", ylabel="铝条Z坐标（mm）")
-    axes[1].legend(frameon=False)
-    out = ROOT / "docs/figures/辅助图/04_B组补充搬运曲线"
+    for ax in axes:
+        ax.legend(frameon=False)
+    out = ROOT / "docs/figures/辅助图/04_B组完整搬运曲线"
     fig.savefig(out.with_suffix(".png"), dpi=300)
     fig.savefig(out.with_suffix(".svg"))
     plt.close(fig)
     EXPORTS.append({"figure": str(out.relative_to(ROOT)),
-                    "sources": [str(source.relative_to(ROOT))],
-                    "metrics": {"samples": len(rows), "span_sec": float(time[-1]),
-                                "coordinates": "MuJoCo rod world XYZ; feedback-time axis"}})
+                    "sources": sources,
+                    "metrics": {"runs": B_RUN_IDS, "span_sec": spans,
+                                "coordinates": "MuJoCo rod world XZ; feedback-time axis"}})
+    print(out.with_suffix(".png"))
+
+
+def plot_b_jerk():
+    source = B_REPORT / "b_runs.csv"
+    rows = read_csv(source)
+    fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.5), layout="constrained")
+    x = np.arange(len(rows))
+    for ax, suffix, label in (
+        (axes[0], "rms", "连续参考jerk RMS（rad/s³）"),
+        (axes[1], "max", "连续参考jerk峰值（rad/s³）"),
+    ):
+        ax.bar(x - 0.17, values(rows, f"baseline_continuous_jerk_{suffix}"),
+               width=0.32, color=BLUE, label="基础参考")
+        ax.bar(x + 0.17, values(rows, f"candidate_continuous_jerk_{suffix}"),
+               width=0.32, color=GREEN, label="时间优化参考")
+        ax.set_xticks(x, [r["sample"] for r in rows])
+        ax.set(xlabel="B组运行编号", ylabel=label, ylim=(0, None))
+        ax.grid(axis="x", visible=False)
+        ax.legend(frameon=False)
+    out = ROOT / "docs/figures/辅助图/05_B组运输参考平滑度"
+    fig.savefig(out.with_suffix(".png"), dpi=300)
+    fig.savefig(out.with_suffix(".svg"))
+    plt.close(fig)
+    EXPORTS.append({"figure":str(out.relative_to(ROOT)),
+                    "sources":[str(source.relative_to(ROOT))],
+                    "metrics":{"comparison":"same run, same geometry and duration; planned jerk"}})
     print(out.with_suffix(".png"))
 
 
@@ -217,11 +229,12 @@ def plot_directional():
 def main():
     setup()
     plot_transport()
-    plot_b_supplement()
+    plot_b_formal()
+    plot_b_jerk()
     plot_time_tradeoff()
     plot_feedforward()
     plot_directional()
-    path = REPORT / "report_figures_20261024.json"
+    path = B_REPORT / "report_figures_20261025.json"
     path.write_text(json.dumps(EXPORTS, ensure_ascii=False, indent=2) + "\n")
     print(path)
 
