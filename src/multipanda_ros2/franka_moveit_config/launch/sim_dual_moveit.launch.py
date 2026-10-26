@@ -70,6 +70,7 @@ def generate_launch_description():
     use_rviz_param = 'use_rviz'
     headless_param = 'headless'
     no_render_param = 'no_render'
+    render_offscreen_param = 'render_offscreen'
 
     arm_id_1 = LaunchConfiguration(arm_id_1_param)
     arm_id_2 = LaunchConfiguration(arm_id_2_param)
@@ -78,6 +79,7 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration(use_rviz_param)
     headless = LaunchConfiguration(headless_param)
     no_render = LaunchConfiguration(no_render_param)
+    render_offscreen = LaunchConfiguration(render_offscreen_param)
     
 
     # Command-line arguments
@@ -302,6 +304,7 @@ def generate_launch_description():
                 'unpause': "true",  # 自动开始仿真，不暂停
                 'headless': headless,
                 'no_render': no_render,
+                'render_offscreen': render_offscreen,
                 'ns': '',
                 'mujoco_plugin_config': ros2_controllers_path
             }.items()
@@ -393,6 +396,11 @@ def generate_launch_description():
         default_value='false',
         description='Whether to disable MuJoCo rendering entirely.'
     )
+    render_offscreen_arg = DeclareLaunchArgument(
+        render_offscreen_param,
+        default_value='true',
+        description='Whether to enable offscreen MuJoCo rendering.'
+    )
     
     return LaunchDescription(
         [arm_id_1_arg,
@@ -402,6 +410,7 @@ def generate_launch_description():
          use_rviz_arg,
          headless_arg,
          no_render_arg,
+         render_offscreen_arg,
          db_arg,
          rviz_node,
          robot_state_publisher,

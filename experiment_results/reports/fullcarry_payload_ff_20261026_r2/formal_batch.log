@@ -1,0 +1,47 @@
+START phase=formal sequence=1 block=1 condition=M0 run=fullcarry_ff_r2_20261026_formal_B01_M0_a1
+END phase=formal sequence=1 condition=M0 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=2 block=1 condition=M1 run=fullcarry_ff_r2_20261026_formal_B01_M1_a1
+END phase=formal sequence=2 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=3 block=2 condition=M1 run=fullcarry_ff_r2_20261026_formal_B02_M1_a1
+END phase=formal sequence=3 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=4 block=2 condition=M0 run=fullcarry_ff_r2_20261026_formal_B02_M0_a1
+END phase=formal sequence=4 condition=M0 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=5 block=3 condition=M1 run=fullcarry_ff_r2_20261026_formal_B03_M1_a1
+END phase=formal sequence=5 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=6 block=3 condition=M0 run=fullcarry_ff_r2_20261026_formal_B03_M0_a1
+END phase=formal sequence=6 condition=M0 rc=2 action=0 transport=0 complete=0 status=startup_exception
+START phase=formal sequence=6 block=3 condition=M0 run=fullcarry_ff_r2_20261026_formal_B03_M0_a2
+END phase=formal sequence=6 condition=M0 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=7 block=4 condition=M0 run=fullcarry_ff_r2_20261026_formal_B04_M0_a1
+END phase=formal sequence=7 condition=M0 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=8 block=4 condition=M1 run=fullcarry_ff_r2_20261026_formal_B04_M1_a1
+END phase=formal sequence=8 condition=M1 rc=2 action=0 transport=0 complete=0 status=startup_exception
+START phase=formal sequence=8 block=4 condition=M1 run=fullcarry_ff_r2_20261026_formal_B04_M1_a2
+END phase=formal sequence=8 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=9 block=5 condition=M0 run=fullcarry_ff_r2_20261026_formal_B05_M0_a1
+END phase=formal sequence=9 condition=M0 rc=2 action=0 transport=0 complete=0 status=startup_exception
+START phase=formal sequence=9 block=5 condition=M0 run=fullcarry_ff_r2_20261026_formal_B05_M0_a2
+END phase=formal sequence=9 condition=M0 rc=0 action=1 transport=1 complete=1 status=completed
+START phase=formal sequence=10 block=5 condition=M1 run=fullcarry_ff_r2_20261026_formal_B05_M1_a1
+END phase=formal sequence=10 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=11 block=6 condition=M1 run=fullcarry_ff_r2_20261026_formal_B06_M1_a1
+END phase=formal sequence=11 condition=M1 rc=2 action=1 transport=0 complete=0 status=incomplete
+START phase=formal sequence=12 block=6 condition=M0 run=fullcarry_ff_r2_20261026_formal_B06_M0_a1
+END phase=formal sequence=12 condition=M0 rc=2 action=1 transport=0 complete=0 status=incomplete
+START phase=formal sequence=13 block=7 condition=M0 run=fullcarry_ff_r2_20261026_formal_B07_M0_a1
+END phase=formal sequence=13 condition=M0 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=14 block=7 condition=M1 run=fullcarry_ff_r2_20261026_formal_B07_M1_a1
+END phase=formal sequence=14 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=15 block=8 condition=M1 run=fullcarry_ff_r2_20261026_formal_B08_M1_a1
+END phase=formal sequence=15 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=16 block=8 condition=M0 run=fullcarry_ff_r2_20261026_formal_B08_M0_a1
+END phase=formal sequence=16 condition=M0 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=17 block=9 condition=M1 run=fullcarry_ff_r2_20261026_formal_B09_M1_a1
+END phase=formal sequence=17 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=18 block=9 condition=M0 run=fullcarry_ff_r2_20261026_formal_B09_M0_a1
+END phase=formal sequence=18 condition=M0 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=19 block=10 condition=M0 run=fullcarry_ff_r2_20261026_formal_B10_M0_a1
+END phase=formal sequence=19 condition=M0 rc=2 action=1 transport=1 complete=0 status=incomplete
+START phase=formal sequence=20 block=10 condition=M1 run=fullcarry_ff_r2_20261026_formal_B10_M1_a1
+END phase=formal sequence=20 condition=M1 rc=2 action=1 transport=1 complete=0 status=incomplete
+FORMAL_ACTION_ATTEMPTS=20/20; completed=1

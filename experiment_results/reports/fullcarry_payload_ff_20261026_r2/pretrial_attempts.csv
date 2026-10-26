@@ -1,0 +1,10 @@
+phase,condition,run_id,task_state,task_complete,transport_phase_start_s,main_start_s,main_actual_duration_s,e_z_start_mm,delta_e_z_end_mm,release_xy_error_mm,direct_reason
+pretrial,M0,fullcarry_ff_r2_20261026_pretrial_M0_a1,FAILED,0,nan,nan,nan,nan,nan,nan,E_TRANSPORT_COMMON_CONNECTION_INVALID sample=20: E_CONTACT_DUAL_GRASP_RESIDUAL
+pretrial,M1,fullcarry_ff_r2_20261026_pretrial_M1_a1,FAILED,0,nan,nan,nan,nan,nan,nan,E_TRANSPORT_COMMON_CONNECTION_INVALID sample=19: E_CONTACT_DUAL_GRASP_RESIDUAL
+pretrial,M0,fullcarry_ff_r2_20261026_pretrial_M0_a2,FAILED,0,nan,nan,nan,nan,nan,nan,E_TRANSPORT_COMMON_CONNECTION_MAGNITUDE max_joint_delta_rad=0.062041
+pretrial,M1,fullcarry_ff_r2_20261026_pretrial_M1_a3,FAILED,0,52.4,52.91,3.034000000000006,-1.4358220110000097,1.826190947619044,nan,E_CONTACT_RELEASE_POSE_ERROR
+pretrial,M0,fullcarry_ff_r2_20261026_pretrial_M0_a4,FAILED,0,nan,nan,nan,nan,nan,nan,E_TRANSPORT_COMMON_CONNECTION_LIMIT sample=1 joint=mj_right_joint1
+pretrial,M1,fullcarry_ff_r2_20261026_pretrial_M1_a4,FAILED,0,nan,nan,nan,nan,nan,nan,E_TRANSPORT_COMMON_CONNECTION_INVALID sample=1: E_CONTACT_DUAL_GRASP_RESIDUAL
+pretrial,M1,fullcarry_ff_r2_20261026_pretrial_M1_a5,FAILED,0,55.194,55.696,3.0459999999999994,-1.3204045323333968,1.0500763628415455,nan,E_CONTACT_RELEASE_POSE_ERROR
+pretrial,M0,fullcarry_ff_r2_20261026_pretrial_M0_a6,FAILED,0,nan,nan,nan,nan,nan,nan,E_TRANSPORT_COMMON_CONNECTION_INVALID sample=41: E_CONTACT_DUAL_GRASP_RESIDUAL
+pretrial,M0,fullcarry_ff_r2_20261026_pretrial_M0_a7,FAILED,0,54.05,54.55,3.044000000000004,-9.74346909133339,2.4830257810256606,nan,E_CONTACT_SLIP_OR_DROP

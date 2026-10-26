@@ -1,0 +1,20 @@
+WARNING: Metapackage "mujoco_ros_pkgs" should not have other dependencies besides a buildtool_depend on catkin and exec_depends.
+Starting >>> dual_arm_carry_task
+Starting >>> franka_moveit_config
+Finished <<< dual_arm_carry_task [0.29s]
+--- stderr: franka_moveit_config
+CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+
+
+---
+[Processing: franka_moveit_config]
+Finished <<< franka_moveit_config [30.4s]
+
+Summary: 2 packages finished [31.4s]
+  1 package had stderr output: franka_moveit_config

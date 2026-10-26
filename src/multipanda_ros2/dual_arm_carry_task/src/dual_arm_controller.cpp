@@ -5639,7 +5639,8 @@ MujocoRodTruth DualArmController::readMujocoRodTruth(const std::string& service_
     MujocoRodTruth out;
     const std::string& service =
         service_override.empty() ? ctx_->mujoco_get_body_state_service_ : service_override;
-    auto client = ctx_->create_client<mujoco_ros_msgs::srv::GetBodyState>(service);
+    auto client = ctx_->create_client<mujoco_ros_msgs::srv::GetBodyState>(
+        service, rmw_qos_profile_services_default, mujoco_truth_callback_group_);
     const auto budget = std::chrono::duration<double>(ctx_->mujoco_truth_timeout_sec_);
     if (!client->wait_for_service(std::chrono::duration_cast<std::chrono::milliseconds>(budget))) {
         out.detail = "the MuJoCo truth service is unavailable; the physical rod was NOT measured";

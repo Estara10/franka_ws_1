@@ -1,0 +1,14 @@
+WARNING: Metapackage "mujoco_ros_pkgs" should not have other dependencies besides a buildtool_depend on catkin and exec_depends.
+[0.862s] WARNING:colcon.colcon_core.package_selection:Some selected packages are already built in one or more underlay workspaces:
+	'mujoco_ros' is in: /home/lidio/franka_ws_1/install/mujoco_ros
+If a package in a merged underlay workspace is overridden and it installs headers, then all packages in the overlay must sort their include directories by workspace order. Failure to do so may result in build failures or undefined behavior at run time.
+If the overridden package is used by another package in any underlay, then the overriding package in the overlay must be API and ABI compatible or undefined behavior at run time may occur.
+
+If you understand the risks and want to override a package anyways, add the following to the command line:
+	--allow-overriding mujoco_ros
+
+This may be promoted to an error in a future release of colcon-override-check.
+Starting >>> mujoco_ros
+Finished <<< mujoco_ros [19.0s]
+
+Summary: 1 package finished [19.8s]

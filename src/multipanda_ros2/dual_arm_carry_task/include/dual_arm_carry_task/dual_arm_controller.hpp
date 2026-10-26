@@ -59,8 +59,11 @@ class DualArmController {
     DualArmCarryTask* ctx_;
     A1VerifyContext a1_verify_;
     rclcpp::Service<multi_mode_control_msgs::srv::GetRobotStates>::SharedPtr robot_state_service_;
+    rclcpp::CallbackGroup::SharedPtr mujoco_truth_callback_group_;
 public:
-    DualArmController(DualArmCarryTask* ctx) : ctx_(ctx) {}
+    DualArmController(DualArmCarryTask* ctx)
+        : ctx_(ctx),
+          mujoco_truth_callback_group_(ctx->create_callback_group(rclcpp::CallbackGroupType::Reentrant)) {}
     void initialize();
     bool ensureTaskRobotStatesService();
     bool runMmcStartupPreflight(std::string& reason);

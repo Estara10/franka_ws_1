@@ -1,0 +1,80 @@
+contact_probe: full fixed initial pose (0.500, 0.000, +10.0 deg), current default profile
+contact_probe profile: RIGID (internal compliance disabled; CONTACT_PROBE_RIGID=true)
+ABCD group: C; full lift/transport/lower/release/retreat
+MuJoCo: /home/lidio/Libraries/mujoco
+ROS_DOMAIN_ID: 122
+ROS_HOME: <ROS default>
+run id: fullcarry_ff_20261026_pretrial_M0_a2
+run data: /home/lidio/franka_ws_1/experiment_results/a1_runs/fullcarry_ff_20261026_pretrial_M0_a2
+ROS logs: /home/lidio/franka_ws_1/launch_logs/fullcarry_ff_20261026_pretrial_M0_a2
+This invokes one run only; failures are preserved and are not retried.
+==============================================================
+ A1 P1a scene runner
+   run_id            : fullcarry_ff_20261026_pretrial_M0_a2
+   candidate index   : 0
+   seed override     : <from config>
+   explicit pose     : x=0.500 y=0.000 yaw_deg=10.0 (override)
+   dry run           : 0
+   ROS_DOMAIN_ID     : 122
+   ROS_LOCALHOST_ONLY: 1
+   params            : /home/lidio/franka_ws_1/install/dual_arm_carry_task/share/dual_arm_carry_task/config/a1_scene_sampling.yaml
+   output dir        : /home/lidio/franka_ws_1/experiment_results/a1_runs/fullcarry_ff_20261026_pretrial_M0_a2
+   task target       : x=0.400 y=0.000 world_yaw_deg=20.0
+==============================================================
+[contact_probe] rigid validation profile: internal MuJoCo compliance disabled
+[contact_probe] single-primary-pad contact profile enabled
+[contact_probe] per-contact geom/force/actuator trace: /home/lidio/franka_ws_1/experiment_results/a1_runs/fullcarry_ff_20261026_pretrial_M0_a2/contact_probe_contacts.csv
+[contact_probe] adaptive normal-force hold: false
+[contact_probe] ABCD MMC payload feedforward: enabled, 0.64 kg split per arm, 0.5 s ramp
+[gripper] raw finger command/feedback trace enabled: /home/lidio/franka_ws_1/experiment_results/a1_runs/fullcarry_ff_20261026_pretrial_M0_a2/gripper_fingers_<robot>.csv
+[sim] starting one simulation instance (MoveIt launch includes MuJoCo)
+[sim] pid=2916 pgid=2916 log=/home/lidio/franka_ws_1/experiment_results/a1_runs/fullcarry_ff_20261026_pretrial_M0_a2/sim_dual_moveit.log
+[sim] waiting up to 120s for /set_body_state, /get_body_state, /get_sim_info
+error: services were not available within 120s
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] getifaddrs: Operation not permitted
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] getifaddrs: Operation not permitted
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] getifaddrs: Operation not permitted
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] getifaddrs: Operation not permitted
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] [37;1m2026-10-26 16:06:05.871 [31;1m[[37;1mTRANSPORT[31;1m Error] [37mAll whitelist interfaces were filtered out[34;1m -> Function [36mUDPv4Transport[m
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] [37;1m2026-10-26 16:06:05.871 [31;1m[[37;1mTRANSPORT_UDP[31;1m Error] [37mError creating socket: Operation not permitted[34;1m -> Function [36minit[m
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] [37;1m2026-10-26 16:06:05.871 [31;1m[[37;1mRTPS_PARTICIPANT[31;1m Error] [37mUser transport failed to register.[34;1m -> Function [36mRTPSParticipantImpl[m
+[mujoco_node-3] [0m[INFO] [1793001965.980213187] [controller_manager] [load_controller]: Loading controller 'joint_state_broadcaster'[0m
+[mujoco_node-3] [0m[INFO] [1793001966.006445762] [controller_manager] [load_controller]: Loading controller 'force_torque_sensor_broadcaster_left'[0m
+[ros2 run controller_manager spawner joint_state_broadcaster --controller-manager-timeout 60 --service-call-timeout 60-6] [0m[INFO] [1793001966.021634088] [spawner_joint_state_broadcaster] [main]: [94mLoaded [1mjoint_state_broadcaster[0m[0m
+[mujoco_node-3] [0m[INFO] [1793001966.033987534] [controller_manager] [load_controller]: Loading controller 'dual_panda_arm_controller'[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_left --controller-manager-timeout 60 --service-call-timeout 60-7] [0m[INFO] [1793001966.043624899] [spawner_force_torque_sensor_broadcaster_left] [main]: [94mLoaded [1mforce_torque_sensor_broadcaster_left[0m[0m
+[mujoco_node-3] [33m[WARN] [1793001966.053566693] [dual_panda_arm_controller] [on_init]: [Deprecated]: "allow_nonzero_velocity_at_trajectory_end" is set to true. The default behavior will change to false.[0m
+[mujoco_node-3] [0m[INFO] [1793001966.054954053] [controller_manager] [configure_controller]: Configuring controller 'joint_state_broadcaster'[0m
+[mujoco_node-3] [0m[INFO] [1793001966.055015975] [joint_state_broadcaster] [on_configure]: 'joints' or 'interfaces' parameter is empty. All available state interfaces will be published[0m
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] [0m[INFO] [1793001966.069453646] [spawner_dual_panda_arm_controller] [main]: [94mLoaded [1mdual_panda_arm_controller[0m[0m
+[mujoco_node-3] [0m[INFO] [1793001966.070812061] [controller_manager] [configure_controller]: Configuring controller 'force_torque_sensor_broadcaster_left'[0m
+[ros2 run controller_manager spawner joint_state_broadcaster --controller-manager-timeout 60 --service-call-timeout 60-6] [0m[INFO] [1793001966.078379383] [spawner_joint_state_broadcaster] [main]: [92mConfigured and activated [1mjoint_state_broadcaster[0m[0m
+[mujoco_node-3] [0m[INFO] [1793001966.088121058] [controller_manager] [configure_controller]: Configuring controller 'dual_panda_arm_controller'[0m
+[mujoco_node-3] [0m[INFO] [1793001966.088394657] [dual_panda_arm_controller] [on_configure]: No specific joint names are used for command interfaces. Using 'joints' parameter.[0m
+[mujoco_node-3] [0m[INFO] [1793001966.088414718] [dual_panda_arm_controller] [on_configure]: Command interfaces are [position] and state interfaces are [position velocity].[0m
+[mujoco_node-3] [0m[INFO] [1793001966.088438244] [dual_panda_arm_controller] [on_configure]: Using 'splines' interpolation method.[0m
+[mujoco_node-3] [0m[INFO] [1793001966.089236451] [dual_panda_arm_controller] [on_configure]: Controller state will be published at 100.00 Hz.[0m
+[mujoco_node-3] [0m[INFO] [1793001966.090493545] [dual_panda_arm_controller] [on_configure]: Action status changes will be monitored at 20.00 Hz.[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_left --controller-manager-timeout 60 --service-call-timeout 60-7] [0m[INFO] [1793001966.099069201] [spawner_force_torque_sensor_broadcaster_left] [main]: [92mConfigured and activated [1mforce_torque_sensor_broadcaster_left[0m[0m
+[mujoco_node-3] [0m[INFO] [1793001966.109017992] [FrankaMjHardwareSystem] [prepare_command_mode_switch]: Preparing command mode switch[0m
+[mujoco_node-3] [0m[INFO] [1793001966.114697865] [FrankaMjHardwareSystem] [perform_command_mode_switch]: Performing command mode switch[0m
+[mujoco_node-3] [0m[INFO] [1793001966.114744743] [FrankaMjHardwareSystem] [perform_command_mode_switch]: Arm mj_left current mode: joint_position[0m
+[mujoco_node-3] [0m[INFO] [1793001966.114754628] [FrankaMjHardwareSystem] [perform_command_mode_switch]: PD controller activated for mj_left: J1-2 kp=300/kv=40, J3-4 kp=200/kv=25, J5-7 kp=80/kv=10[0m
+[mujoco_node-3] [0m[INFO] [1793001966.114761003] [FrankaMjHardwareSystem] [perform_command_mode_switch]: Arm mj_right current mode: joint_position[0m
+[mujoco_node-3] [0m[INFO] [1793001966.114765406] [FrankaMjHardwareSystem] [perform_command_mode_switch]: PD controller activated for mj_right: J1-2 kp=300/kv=40, J3-4 kp=200/kv=25, J5-7 kp=80/kv=10[0m
+[ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5] [0m[INFO] [1793001966.116239968] [spawner_dual_panda_arm_controller] [main]: [92mConfigured and activated [1mdual_panda_arm_controller[0m[0m
+[mujoco_node-3] [0m[INFO] [1793001966.125699703] [controller_manager] [load_controller]: Loading controller 'force_torque_sensor_broadcaster_right'[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_right --controller-manager-timeout 60 --service-call-timeout 60-8] [0m[INFO] [1793001966.141131747] [spawner_force_torque_sensor_broadcaster_right] [main]: [94mLoaded [1mforce_torque_sensor_broadcaster_right[0m[0m
+[mujoco_node-3] [0m[INFO] [1793001966.150529242] [controller_manager] [configure_controller]: Configuring controller 'force_torque_sensor_broadcaster_right'[0m
+[ros2 run controller_manager spawner force_torque_sensor_broadcaster_right --controller-manager-timeout 60 --service-call-timeout 60-8] [0m[INFO] [1793001966.166691259] [spawner_force_torque_sensor_broadcaster_right] [main]: [92mConfigured and activated [1mforce_torque_sensor_broadcaster_right[0m[0m
+[INFO] [ros2 run controller_manager spawner joint_state_broadcaster --controller-manager-timeout 60 --service-call-timeout 60-6]: process has finished cleanly [pid 2930]
+[INFO] [ros2 run controller_manager spawner force_torque_sensor_broadcaster_left --controller-manager-timeout 60 --service-call-timeout 60-7]: process has finished cleanly [pid 2933]
+[INFO] [ros2 run controller_manager spawner dual_panda_arm_controller --controller-manager-timeout 60 --service-call-timeout 60-5]: process has finished cleanly [pid 2928]
+[INFO] [ros2 run controller_manager spawner force_torque_sensor_broadcaster_right --controller-manager-timeout 60 --service-call-timeout 60-8]: process has finished cleanly [pid 2936]
+[cleanup] SIGTERM to sim (-2916)
+[cleanup] simulator reaped
+runner exit=2
+Return these files from /home/lidio/franka_ws_1/experiment_results/a1_runs/fullcarry_ff_20261026_pretrial_M0_a2:
+  prepare_status.json task_launch.log sim_dual_moveit.log contact_probe.csv
+  gripper_fingers_mj_left.csv gripper_fingers_mj_right.csv controllers.txt runner.log
+ROS logs: /home/lidio/franka_ws_1/launch_logs/fullcarry_ff_20261026_pretrial_M0_a2

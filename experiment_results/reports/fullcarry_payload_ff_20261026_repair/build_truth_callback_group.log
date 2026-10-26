@@ -1,0 +1,6 @@
+WARNING: Metapackage "mujoco_ros_pkgs" should not have other dependencies besides a buildtool_depend on catkin and exec_depends.
+Starting >>> dual_arm_carry_task
+[Processing: dual_arm_carry_task]
+Finished <<< dual_arm_carry_task [30.0s]
+
+Summary: 1 package finished [30.9s]

@@ -493,7 +493,7 @@ bool FrankaMjHardwareSystem::initSim(
         rod_force_events_ << "sim_time,event,force_x_n,force_y_n,force_z_n,torque_x_nm,torque_y_nm,torque_z_nm\n";
       }
       RCLCPP_INFO(getLogger(), "[rod_force] one-shot pulse enabled for obj_rod_01: world +X 2 N, "
-                  "1.0 s after MMC HOLD arm request, %.3f s simulation time; off by default",
+                  "1.0 s simulation delay after task arm request, %.3f s duration; off by default",
                   rod_force_duration_sec_);
     }
     if (weld_eq_id_ >= 0) {

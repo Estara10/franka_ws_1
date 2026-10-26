@@ -124,8 +124,8 @@ esac
 if [[ "${CONTACT_PROBE_ROD_DISTURBANCE}" != "0" && "${CONTACT_PROBE_ROD_DISTURBANCE}" != "1" ]]; then
   echo "error: CONTACT_PROBE_ROD_DISTURBANCE must be 0 or 1" >&2; exit 2
 fi
-if [[ "${CONTACT_PROBE_ROD_DISTURBANCE}" == "1" && "${CONTACT_HOVER_CONTROL_MODE}" != "mmc_hold" ]]; then
-  echo "error: rod disturbance requires CONTACT_HOVER_CONTROL_MODE=mmc_hold" >&2; exit 2
+if [[ "${CONTACT_PROBE_ROD_DISTURBANCE}" == "1" && "${CONTACT_HOVER_CONTROL_MODE}" != "mmc_hold" && "${CONTACT_PROBE_ABCD_GROUP}" != "A" && "${CONTACT_PROBE_ABCD_GROUP}" != "C" ]]; then
+  echo "error: rod disturbance requires MMC hover or full-carry group A/C" >&2; exit 2
 fi
 if [[ "${CONTACT_PROBE_PAYLOAD_FEEDFORWARD}" != "0" && "${CONTACT_PROBE_PAYLOAD_FEEDFORWARD}" != "1" ]]; then
   echo "error: CONTACT_PROBE_PAYLOAD_FEEDFORWARD must be 0 or 1" >&2; exit 2

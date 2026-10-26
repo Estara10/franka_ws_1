@@ -39,6 +39,7 @@ SEED=""
 DOMAIN_ID="${A1_ROS_DOMAIN_ID:-77}"
 USE_RVIZ="false"
 HEADLESS="false"
+RENDER_OFFSCREEN="true"
 OBSERVE_ON_ERROR=0
 READY_TIMEOUT=120
 NODE_TIMEOUT=180
@@ -203,6 +204,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown argument: $1" >&2; usage; exit 3 ;;
   esac
 done
+
+if [[ "${HEADLESS}" == "true" ]]; then
+  RENDER_OFFSCREEN="false"
+fi
 
 if [[ "${GRASP_MODEL}" != "none" && "${GRASP_MODEL}" != "ideal_weld" && "${GRASP_MODEL}" != "contact_probe" ]]; then
   echo "error: --grasp-model must be none, ideal_weld or contact_probe" >&2; exit 3
@@ -615,7 +620,7 @@ if [[ "${GRASP_MODEL}" == "contact_probe" ]]; then
   if [[ "${CONTACT_PROBE_ROD_DISTURBANCE:-0}" == "1" ]]; then
     export CONTACT_PROBE_ROD_FORCE_ENABLED=true
     export CONTACT_PROBE_ROD_FORCE_EVENTS_CSV="${RUN_DIR}/rod_force_events.csv"
-    echo "[contact_probe] rod force pulse enabled: world +X 2 N, 1 s after MMC HOLD arm, ${CONTACT_PROBE_ROD_FORCE_DURATION_SEC} sim s"
+    echo "[contact_probe] rod force pulse enabled: world +X 2 N, 1 s after transport-main arm, ${CONTACT_PROBE_ROD_FORCE_DURATION_SEC} sim s"
   else
     unset CONTACT_PROBE_ROD_FORCE_ENABLED CONTACT_PROBE_ROD_FORCE_EVENTS_CSV
   fi
@@ -637,7 +642,8 @@ if [[ "${GRIPPER_SELFTEST}" -eq 1 || "${GRASP_CONTACT_CLOSE}" -eq 1 || "${GRASP_
 fi
 echo "[sim] starting one simulation instance (MoveIt launch includes MuJoCo)"
 setsid ros2 launch franka_moveit_config sim_dual_moveit.launch.py \
-  "use_rviz:=${USE_RVIZ}" "headless:=${HEADLESS}" \
+  "use_rviz:=${USE_RVIZ}" "headless:=${HEADLESS}" "no_render:=${HEADLESS}" \
+  "render_offscreen:=${RENDER_OFFSCREEN}" \
   > "${SIM_LOG}" 2>&1 &
 SIM_PID=$!
 sleep 1

@@ -1,0 +1,11 @@
+phase,run_id,flow_completed,release_position_error_mm,release_target_yaw_abs_error_deg,task_wall_time
+formal,fullcarry_perturb_ab_20261026_formal_B03_i1,1,9.011035,1.3823717199738075,34.902793645858765
+formal,fullcarry_perturb_ab_20261026_formal_B06_i1,1,9.185977,0.9442555885182371,34.63040328025818
+formal,fullcarry_perturb_ab_20261026_formal_B10_i1,1,8.72104,1.1486454476765473,34.260008573532104
+formal,fullcarry_perturb_ab_20261026_formal_B11_i1,1,9.045059,0.9455388420919915,35.22792410850525
+formal,fullcarry_perturb_ab_20261026_formal_B14_i1,1,9.212941,1.1496354614507538,34.97849130630493
+formal,fullcarry_perturb_ab_20261026_formal_B15_i1,1,9.028953,1.0188065649894793,35.64011549949646
+formal,fullcarry_perturb_ab_20261026_formal_B18_i1,1,8.738522,1.120161710328311,35.74317717552185
+formal,fullcarry_perturb_ab_20261026_formal_B19_i1,1,8.749661,1.0480868855602856,34.77894568443298
+validation,fullcarry_perturb_ab_20261026_release_repair_validated_validation_B02_i1,1,9.141669,1.068646215531406,35.00904393196106
+validation,fullcarry_perturb_ab_20261026_release_repair_validated_validation_B07_i1,1,9.158872,1.0307102788453377,36.935593366622925

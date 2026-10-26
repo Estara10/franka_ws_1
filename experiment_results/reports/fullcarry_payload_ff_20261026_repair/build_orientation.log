@@ -1,0 +1,9 @@
+[rtk] WARNING: untrusted project filters (.rtk/filters.toml)
+[rtk] Filters NOT applied. Run `rtk trust` to review and enable.
+WARNING: Metapackage "mujoco_ros_pkgs" should not have other dependencies besides a buildtool_depend on catkin and exec_depends.
+Starting >>> dual_arm_carry_task
+[Processing: dual_arm_carry_task]
+[Processing: dual_arm_carry_task]
+Finished <<< dual_arm_carry_task [1min 0s]
+
+Summary: 1 package finished [1min 1s]

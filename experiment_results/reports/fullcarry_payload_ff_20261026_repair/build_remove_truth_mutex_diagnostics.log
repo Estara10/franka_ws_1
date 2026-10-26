@@ -1,0 +1,95 @@
+WARNING: Metapackage "mujoco_ros_pkgs" should not have other dependencies besides a buildtool_depend on catkin and exec_depends.
+[1.030s] WARNING:colcon.colcon_core.package_selection:Some selected packages are already built in one or more underlay workspaces:
+	'mujoco_ros' is in: /home/lidio/franka_ws_1/install/mujoco_ros
+If a package in a merged underlay workspace is overridden and it installs headers, then all packages in the overlay must sort their include directories by workspace order. Failure to do so may result in build failures or undefined behavior at run time.
+If the overridden package is used by another package in any underlay, then the overriding package in the overlay must be API and ABI compatible or undefined behavior at run time may occur.
+
+If you understand the risks and want to override a package anyways, add the following to the command line:
+	--allow-overriding mujoco_ros
+
+This may be promoted to an error in a future release of colcon-override-check.
+Starting >>> mujoco_ros
+[  4%] Generating include/mujoco_ros/ros_version.hpp, always_rebuild_ros
+[  8%] Generating include/mujoco_ros/render_backend.hpp, always_rebuild_backend
+[ 13%] Built target lodepng
+[ 21%] Generating ROS version header
+[ 21%] Generating render backend header
+[ 34%] Built target platform_ui_adapter
+[ 34%] Built target ros_version_h
+[ 34%] Built target render_backend_h
+Consolidate compiler generated dependencies of target mujoco_ros
+[ 39%] Building CXX object src/CMakeFiles/mujoco_ros.dir/ros_two/plugin_utils.cpp.o
+[ 43%] Building CXX object src/CMakeFiles/mujoco_ros.dir/physics.cpp.o
+[ 47%] Building CXX object src/CMakeFiles/mujoco_ros.dir/main.cpp.o
+[ 52%] Building CXX object src/CMakeFiles/mujoco_ros.dir/interface.cpp.o
+[ 56%] Building CXX object src/CMakeFiles/mujoco_ros.dir/mujoco_env.cpp.o
+[ 60%] Building CXX object src/CMakeFiles/mujoco_ros.dir/loading.cpp.o
+[ 65%] Building CXX object src/CMakeFiles/mujoco_ros.dir/ros_two/ros_api.cpp.o
+[ 69%] Building CXX object src/CMakeFiles/mujoco_ros.dir/ros_two/parameter_interface.cpp.o
+[ 73%] Building CXX object src/CMakeFiles/mujoco_ros.dir/offscreen_rendering.cpp.o
+[ 78%] Building CXX object src/CMakeFiles/mujoco_ros.dir/viewer.cpp.o
+[ 82%] Building CXX object src/CMakeFiles/mujoco_ros.dir/threading.cpp.o
+[ 86%] Building CXX object src/CMakeFiles/mujoco_ros.dir/offscreen_camera.cpp.o
+[ 91%] Linking CXX shared library libmujoco_ros.so
+[ 91%] Built target mujoco_ros
+Consolidate compiler generated dependencies of target mujoco_node
+[ 95%] Building CXX object src/CMakeFiles/mujoco_node.dir/main.cpp.o
+[100%] Linking CXX executable mujoco_node
+[100%] Built target mujoco_node
+-- Install configuration: "Release"
+[Processing: mujoco_ros]
+-- Installing: /home/lidio/franka_ws_1/install/mujoco_ros/include/mujoco_ros/render_backend.hpp
+-- Installing: /home/lidio/franka_ws_1/install/mujoco_ros/include/mujoco_ros/ros_version.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include/
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/mujoco_env.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/viewer.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/glfw_adapter.h
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/util.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/lodepng.h
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/ros_two
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/ros_two/plugin_utils.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/ros_two/ros_api.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/offscreen_camera.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/glfw_dispatch.h
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/array_safety.h
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/logging.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/common_types.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/platform_ui_adapter.h
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/ros_one
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/ros_one/plugin_utils.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include//mujoco_ros/ros_one/ros_api.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include/mujoco_ros/ros_version.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/include/mujoco_ros/render_backend.hpp
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/launch
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/launch/launch_server.launch
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/config
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/config/rosconsole.config
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/config/initial_joint_states.yaml
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/assets
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/assets/pendulum_world.xml
+-- Installing: /home/lidio/franka_ws_1/install/mujoco_ros/lib/libmujoco_ros.so
+-- Set non-toolchain portion of runtime path of "/home/lidio/franka_ws_1/install/mujoco_ros/lib/libmujoco_ros.so" to ""
+-- Installing: /home/lidio/franka_ws_1/install/mujoco_ros/lib/mujoco_ros/mujoco_node
+-- Set non-toolchain portion of runtime path of "/home/lidio/franka_ws_1/install/mujoco_ros/lib/mujoco_ros/mujoco_node" to ""
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/ament_index/resource_index/package_run_dependencies/mujoco_ros
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/ament_index/resource_index/parent_prefix_path/mujoco_ros
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/environment/ament_prefix_path.sh
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/environment/ament_prefix_path.dsv
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/environment/path.sh
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/environment/path.dsv
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/local_setup.bash
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/local_setup.sh
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/local_setup.zsh
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/local_setup.dsv
+-- Installing: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/package.dsv
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/ament_index/resource_index/packages/mujoco_ros
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/cmake/ament_cmake_export_include_directories-extras.cmake
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/cmake/ament_cmake_export_dependencies-extras.cmake
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/cmake/mujoco_rosConfig.cmake
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/cmake/mujoco_rosConfig-version.cmake
+-- Up-to-date: /home/lidio/franka_ws_1/install/mujoco_ros/share/mujoco_ros/package.xml
+[Processing: mujoco_ros]
+Finished <<< mujoco_ros [1min 0s]
+
+Summary: 1 package finished [1min 1s]
