@@ -1,137 +1,59 @@
-# 双臂 Franka 协作搬运
+# 双 Franka 协作搬运仿真项目
 
-两台 Franka Panda 在 MuJoCo 中协同夹持并搬运铝杆，重点研究双臂协调轨迹规划、轨迹优化
-和柔顺控制。技术栈为 ROS 2 Humble、MoveIt 2、ros2_control 和 MuJoCo。
+本项目基于 ROS 2、MoveIt 2、ros2_control 和 MuJoCo，搭建双 Franka Panda 夹取并搬运铝杆的仿真系统。研究围绕三项内容展开：真实接触下的双臂搬运、运输轨迹的时间分配优化，以及笛卡尔阻抗与载荷补偿。
 
-本项目是大学生创新创业训练项目，优先推进学习研究、核心算法、功能验证与成果展示。
-所有 AI Agent 的长期开发准则以 [`项目指南`](docs/PROJECT_GUIDE.md) 为准，采用与任务
-风险相称的测试和审阅，避免过度工程化。
+项目结题工作仅在 MuJoCo 中完成。这里的结果用于说明指定模型、场景和参数下的仿真表现，不代表真机实验或对其他场景的普遍保证。
 
-本次结题仅进行 MuJoCo 仿真验证，不开展实际机器测试。修订后的结题目标与实验评价方案见
-[`结题目标修订说明`](docs/deliverables/结题目标修订说明.md)。
+## 研究内容与主要结果
 
-当前唯一开发主线位于 `src/multipanda_ros2`。早期 `src/dual_arm_*` 四包已移动到
-[`archive/`](archive/README.md)，不再参与构建。
+### 1. 双臂搬运系统
 
-## 当前状态
+系统将 MoveIt 2 用于运动规划与碰撞检查，ros2_control 负责控制器管理，MuJoCo 提供刚体动力学和指垫接触。任务由接近、夹取、抬升、运输、下降、释放和撤退组成；双臂围绕同一杆件参考生成末端目标，并通过协调逆运动学形成双臂运动。真实接触搬运实验关闭了手与杆之间的 weld 或杆固定约束，杆由夹爪接触承载。
 
-**2026-10-27归档说明：新增的10次阻抗搬运重复及后加1次补充未采用，仅保存研究记录。**
-详见[归档交接](docs/HANDOFF_20261027.md)；当前报告数据继续使用下方10月26日选用结果，
-不混入今天这批的图表或均值。
+固定场景的 80 次 A/B/C/D 对照中，A、B、D 各完成 20/20，C 完成 19/20。释放位置误差均值为 A 5.63 mm、B 6.25 mm、C 10.03 mm、D 10.53 mm。C、D 同时采用阻抗控制和载荷前馈，不能将其组间差异单独归因于某一种控制方法。逐次结果和指标定义见[80 次完整搬运对照](experiment_results/reports/abcd_n20_20261025/results.md)。
 
-**2026-10-26收工：完整搬运柔顺受力对照、释放测量修复及新图已完成，明天先更新报告。**
-接续入口为[今日交接](docs/HANDOFF_20261026.md)，当前图表及数据见
-[每组10次有效完整运行分析](experiment_results/reports/fullcarry_perturb_ab_20261026_release_repair/valid_runs_analysis/results.md)。
-本轮A是位置控制，B是阻抗＋载荷前馈；有效运行的运输竖向误差RMS均值为6.71/0.86 mm，
-释放水平误差5.51/9.00 mm，任务墙钟31.46/35.21 s，体现收益与代价。
-原20次尝试、技术中断及后补关系分别保留，不能把10份有效测量直接当作全部尝试成功率。
-原80次ABCD与60次悬空专项继续独立使用。Word报告今天未改，`report/`只保存在本机，禁止上传。
+另有一组位置控制与“阻抗＋载荷前馈”的完整搬运性能分析，各分析 10 次有效完整运行。阻抗与载荷前馈组合将运输竖向误差 RMS 均值从 6.71 mm 降至 0.86 mm；释放水平误差从 5.51 mm 增至 9.00 mm，任务墙钟时长从 31.46 s 增至 35.21 s。这体现了承载跟踪与放置精度、运行时间之间的取舍。B 组另有两次释放后真值测量中断，未纳入这组有效性能统计，因此这些数据不表示全部任务尝试的成功率。详见[完整搬运性能分析](experiment_results/reports/fullcarry_perturb_ab_20261026_release_repair/valid_runs_analysis/results.md)。
 
-## 历史结果入口
+### 2. 轨迹优化
 
-以下为早期阶段摘要，当前接续以10月26日交接和项目指南顶部为准。
+时间分配优化在固定空间路径和固定总时长下，对单调时间映射进行参数搜索，以连续参考轨迹的 jerk 为优化指标。优化器使用 Bernstein 参数化时间映射和 Nelder–Mead 搜索。80 次对照中，B、D 组的连续参考 jerk RMS 相对各自基础参考平均下降 5.64% 和 4.58%；优化计算平均耗时约 4.23 s 和 4.78 s。实验没有显示运输时间或放置误差同步改善。这里的 jerk 是规划参考曲线指标，不是机械臂实测 jerk。方法与逐次统计见[主实验结果](experiment_results/reports/abcd_n20_20261025/results.md)及[补充对照](experiment_results/reports/explanatory_20261025/results.md)。
 
-- **结题选图入口：[图片说明与分类](docs/figures/README.md)。** 4张主图统一在 `docs/figures/结题主图/`，细分结果放 `辅助图/`，旧版与探索图保留在 `历史归档/`。
-2026-10-25当前结果：A/B/C/D四组有效搬运均为3/3。D3初始化时的状态查询预算不一致已修复，新增运行`final_abcd_20261025_D3_repaired1`实际完成抬升、运输、下降、释放及撤退。原D3在闭爪后、承载运动前中止的记录保持FAILED，单列于`excluded_initializations.csv`；全流程尝试与有效搬运样本分别统计，不将其解释为所有系统尝试均成功。运动、夹持、阻抗增益和承载保护参数未改。 B组连续参考jerk RMS/峰值平均下降6.63%/23.83%，D组三次平均下降4.07%/4.83%；释放平面误差均值A/B/C/D为5.43/5.88/10.11/10.48 mm。各组释放后统一等待约2 s仿真时间测量。这些jerk指标来自参考曲线，不是实测关节jerk。 见`docs/HANDOFF_20261025.md`及统一实验记录。本机报告第十二版已更新，`report/`不提交、不上传。
-- 队友离线接续所需原始轨迹和记录已打包；拉取后按交接文档解压，无需为获取样本重新跑仿真。现有ABCD图表的统计修订项见交接开头，勿直接当作最终结题数值。
-- **结题研究状态与边界见：[项目指南](docs/PROJECT_GUIDE.md)。**
-- 固定场景无 weld 接触抓取已完成抬升、保持、运输/小角度旋转、释放和退回，仍有滑移。
-- S2 几何投影目标下降约 1.47%；旧时间剖面实现的 3.15% 连续 jerk 数字只保留为修正前历史记录。
-  新实现直接优化连续 jerk，并增加峰值、忠实导出和最终轨迹检查；正式12路径离线验收为12/12候选接受，逐次连续RMS变化约−6.57%至−3.42%，但新候选尚未执行。
-- R/S/O 离线比较已完成：O/S RMS 中位改善约 `−4.86%`，未达到 `−5%` gate；因此不执行 O，后续按 R/S 结果整理图表和正文。
-- R/S 四次完整搬运已完成（R1→S1→S2→R2）：四次 `DONE`，weld/约束关闭；计划运输时长均值 R/S 为
-  `2.2366/2.6787 s`，动作墙钟均值为 `2.5412/3.2571 s`。O 因离线 gate 为 0 未执行。
-- 最终时间—平滑度主图：[02_运输时间与平滑度.png](docs/figures/结题主图/02_运输时间与平滑度.png)；
-  统一结论见 [20261022_结题收口_结果.md](docs/deliverables/20261022_结题收口_结果.md)。
-- S3 无 weld 接触下的 JTC/MMC 悬空保持 A/B 各完成 3 次；每次均完成保持、切回和释放，
-  MMC 杆世界 Z 位移中位数为 −8.48 mm。固定/方向性 MMC 的 +X 短脉冲对照各 3 次，未显示明确优势。
-  该项是历史悬空保持结果；随后已完成固定场景MMC完整搬运，最新记录见10月22日交接，尚不支持性能全面优于JTC。
-- A1 真值准备、静态与预抓取路径检查已具备；随机场景全过程统计尚未完成。
+### 3. 柔顺控制
 
-当前结题主图为完整搬运对照、运输时间与平滑度、载荷补偿减少下沉、方向性柔顺与受力让步，
-文件与使用说明见[图片目录](docs/figures/README.md)。早期单样本优化、未补偿悬空保持及旧版统计图均已归档。
-指标口径、逐次结果和限制见 [本机 S2/S3 对照记录](docs/CONTACT_HOVER_AB_COMPARISON_20261020.md)
-及 [S2 几何投影结果](docs/deliverables/P6_S2_projection_optimizer_result_20261017.md)、
-[S2 时间剖面结果](docs/deliverables/P6_S2_time_profile_result_20261017.md)。
+柔顺控制采用双臂独立笛卡尔阻抗，并可叠加沿世界竖直方向的杆载荷前馈。悬空保持专项中，前馈关闭与开启各有 10 次有效样本；3.5 s 时杆的平均竖向位移由 −9.084 mm 改善为 −2.997 mm，平均少下沉约 6.09 mm。方向性刚度专项在 2 N 水平脉冲下，将 X 向刚度从 400 N/m 降至 200 N/m 后，杆的脉冲末端让步增加约 0.515 mm；撤力后的残余也较大，体现出让步能力与恢复之间的取舍。
 
-详细架构、阶段顺序和已知风险见 [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md)。
+这些专项研究针对悬空保持工况。它们支持在该仿真条件下讨论载荷补偿和方向性刚度的作用，不单独证明完整搬运性能提升。样本数、统计方法及逐次数据见[柔顺控制专项结果](experiment_results/reports/compliance_hover_20261025_r1/results.md)。
 
-## 环境与构建
+## 构建与启动
 
-目标环境为 Ubuntu 22.04、ROS 2 Humble、MoveIt 2 和 MuJoCo。已有工作区可按需构建：
+目标环境为 Ubuntu 22.04、ROS 2 Humble、MoveIt 2 和 MuJoCo，并需满足仓库中各 ROS 包声明的依赖。
 
 ```bash
-cd /home/lidio/franka_ws_1
+source /opt/ros/humble/setup.bash
+cd /path/to/franka_ws_1
 colcon build --packages-select dual_arm_carry_task franka_hardware franka_moveit_config
 source install/setup.bash
-```
-
-全量构建可使用 `colcon build`。构建会写入 `build/`、`install/` 和 `log/`。
-
-本次 Ubuntu 22.04 迁移的 MuJoCo/DQ Robotics 版本选择和便捷构建命令见
-[`docs/LOCAL_BUILD.md`](docs/LOCAL_BUILD.md)。当前本机建议运行 `bash scripts/build_local.sh`。
-最新代码状态、实验结论和明日入口见
-[`docs/HANDOFF_20261026.md`](docs/HANDOFF_20261026.md)。需要运行时按交接文档构建；仅阅读数据和编辑报告无需构建。
-[`10月21日记录`](docs/HANDOFF_20261019.md)作为历史交接保留。
-
-## 启动
-
-推荐从仓库根目录执行：
-
-```bash
 ./start_dual_arm_task.sh
 ```
 
-脚本提供：
+`sim_dual_moveit.launch.py` 已包含 MuJoCo，不要再启动第二个仿真实例。启动模式、参数及分步运行方法见[手动启动说明](MANUAL_STARTUP.md)和[任务包说明](src/multipanda_ros2/dual_arm_carry_task/README.md)。首次在另一台电脑运行时，应按该电脑的 ROS、MoveIt、MuJoCo 安装情况完成依赖配置和构建。
 
-- 模式 A：固定场景，以及 `rigid`、`compliant`、`chomp_only`、`compliant_chomp` 旧模式名。
+## 目录说明
 
-一键脚本当前会检查源码时间并可能自动构建，也会创建日志。
-这些行为属于已记录技术债。运行前建议先确认 `git status`，不要把它当作纯只读启动器。
+- `src/multipanda_ros2/`：当前 ROS 2 主代码。
+- `docs/`：架构说明、研究记录、交接和图表索引；建议从[项目指南](docs/PROJECT_GUIDE.md)开始阅读。
+- `scripts/`：构建、实验数据分析及绘图脚本，具体用途见[scripts 说明](scripts/README.md)。
+- `experiment_results/reports/`：汇总数据、统计结果和图表。10 月 27 日的重复批次仅作存档，未纳入当前选用结论，详见对应的归档说明。
+- `experiment_results/a1_runs/`：本机 MuJoCo 逐次运行目录，体积较大，未上传 GitHub。
+- `archive/`：旧版代码及历史资料，不参与当前工作区构建。
+- `report/`：本机结题 Word 文件，含个人信息，已排除在 GitHub 仓库之外。
 
-MoveIt 启动文件已经自动包含 MuJoCo。不要再单独启动第二个 MuJoCo 实例。需要分步调试时见
-[`MANUAL_STARTUP.md`](MANUAL_STARTUP.md)。
+汇总报告中的逐次 CSV、统计表和图表随仓库保存；原始 MuJoCo 运行文件保留在本机或项目备份中。若需要复核某次运行，请使用对应批次的索引文件定位本地原始目录。
 
-## 状态机
+## 数据解释边界
 
-```text
-INIT → APPROACH → GRASP → WAITING_PHYSICS → LIFT → TRANSPORT
-     → ROTATE → DESCEND → PLACE → RETREAT → DONE
-```
-
-任务节点、参数和报告说明见
-[`src/multipanda_ros2/dual_arm_carry_task/README.md`](src/multipanda_ros2/dual_arm_carry_task/README.md)。
-
-## 常用只读检查
-
-加载环境后可检查：
-
-```bash
-ros2 node list
-ros2 control list_controllers
-ros2 topic echo /joint_states --once
-```
-
-正常停止请优先在启动终端按 `Ctrl+C`。仓库现有启动脚本仍包含较宽泛的强制进程清理，
-在共享 ROS 环境中使用前需要确认不会影响其他会话。
-
-## 数据、文档与工具状态
-
-- `experiment_results/`：本阶段原样保留，包括原始数据、图表和既有报告。
-- `docs/deliverables/`：项目交付物，例如中期检查报告。
-- `archive/`：旧包、历史修补代码、旧文档和运行产物；有 `COLCON_IGNORE` 隔离。
-- `check_environment.sh`、`diagnose.sh`：遗留脚本，含旧工作区路径和失效入口；不被当前流程调用，
-  可由用户确认后删除。
-- `scripts/`：实验记录、离线绘图、指标比较和实时面板。完整用途和稳定命令见
-  [`scripts/README.md`](scripts/README.md)。
-- `run_latency_benchmark.sh`、`run_task_metrics_benchmark.sh`：会连续启动完整仿真实验的基准脚本，
-  不是普通只读分析命令。
-
-## 铝杆参数说明
-
-项目目标质量为 0.5 kg，尺寸为 40 cm × 4 cm × 4 cm。当前 MuJoCo 模型按尺寸和密度计算
-约为 0.64 kg；本阶段没有修改物理模型，后续仿真阶段将统一为 0.5 kg 并重新验证实验。
-
-## 许可证
-
-各 ROS 包沿用其包内声明的许可证；第三方上游组件以各自许可证为准。
+- 本项目结果来自仿真，不是实体机器人测试。
+- jerk 结果描述规划参考曲线；不能等同于机械臂实测 jerk。
+- 阻抗与载荷前馈组合实验不能把组合效果单独归因于阻抗或前馈。
+- 悬空保持专项和完整搬运实验是不同工况，应分别解释。
+- 10 月 27 日的重复阻抗批次按项目决定仅存档，不纳入当前选用统计。
